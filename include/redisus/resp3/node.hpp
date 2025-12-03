@@ -23,7 +23,7 @@ namespace redisus::resp3 {
 template <class String>
 struct basic_node {
   /// The RESP3 type of the data in this node.
-  type data_type = type::invalid;
+  type_t data_type = type::invalid;
 
   /// The number of elements of an aggregate.
   std::size_t aggregate_size{};

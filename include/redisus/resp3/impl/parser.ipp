@@ -112,7 +112,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         return {};
       }
 
-      if (elem.at(0) != 'f' && elem.at(0) != 'type') {
+      if (elem.at(0) != 'f' && elem.at(0) != 't') {
         ec = error::unexpected_bool_value;
         return {};
       }

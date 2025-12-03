@@ -7,7 +7,7 @@
 #include <redisus/assert.hpp>
 #include <redisus/error.hpp>
 
-namespace redisus::redis {
+namespace redisus {
 namespace detail {
 
 struct error_category_impl : std::error_category {

@@ -101,7 +101,7 @@ enum class error {
  */
 auto make_error_code(error e) -> std::error_code;
 
-}  // namespace boost::redis
+}  // namespace redisus
 
 namespace std {
 
