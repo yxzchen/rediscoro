@@ -58,7 +58,7 @@ struct error_category_impl : std::error_category {
                "buffer.";
       case error::write_timeout:
         return "Timeout while writing data to the server.";
-      default: REDISUS_ASSERT(false); return "Boost.Redis error.";
+      default: REDISUS_ASSERT(false); return "Redisus error.";
     }
     // clang-format on
   }
@@ -75,4 +75,4 @@ auto make_error_code(error e) -> std::error_code {
   return std::error_code{static_cast<int>(e), detail::category()};
 }
 
-}  // namespace redisus::redis
+}  // namespace redisus

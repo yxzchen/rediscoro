@@ -28,7 +28,7 @@ class parser {
   // Contains the length expected in the next bulk read.
   std::size_t next_length_ = std::numeric_limits<std::size_t>::max();
 
-  // The type of the next bulk. Contains type::invalid if no bulk is
+  // The type of the next bulk. Contains type_t::invalid if no bulk is
   // expected.
   type_t next_type_ = type_t::invalid;
 
