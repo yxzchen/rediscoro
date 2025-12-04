@@ -92,6 +92,10 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
     case type_t::blob_error:
     case type_t::verbatim_string:
     case type_t::blob_string: {
+      if (std::empty(elem)) {
+        ec = error::empty_field;
+        return std::nullopt;
+      }
       if (elem.at(0) == '?') {
         // NOTE: This can only be triggered with blob_string.
         // Trick: A streamed string is read as an aggregate of

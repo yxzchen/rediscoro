@@ -19,41 +19,28 @@ namespace redisus::resp3 {
     The RESP3 specification can be found at
     <a href="https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md"></a>
  */
-enum class type_t {  /// Aggregate
+enum class type_t {
+  // Aggregate
   array,
-  /// Aaggregate
   push,
-  /// Aggregate
   set,
-  /// Aggregate
   map,
-  /// Aggregate
   attribute,
+
   /// Simple
   simple_string,
-  /// Simple
   simple_error,
-  /// Simple
   number,
-  /// Simple
   doublean,
-  /// Simple
   boolean,
-  /// Simple
   big_number,
-  /// Simple
   null,
-  /// Simple
   blob_error,
-  /// Simple
   verbatim_string,
-  /// Simple
   blob_string,
-  /// Simple
   streamed_string,
-  /// Simple
   streamed_string_part,
-  /// Invalid
+
   invalid
 };
 
