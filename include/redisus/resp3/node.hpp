@@ -7,6 +7,8 @@
 #pragma once
 
 #include <redisus/resp3/type.hpp>
+#include <variant>
+#include <cstddef>
 
 namespace redisus::resp3 {
 
@@ -18,6 +20,10 @@ namespace redisus::resp3 {
  *  is a template so that users can use it with any string type, like
  *  `std::string` or `boost::static_string`.
  *
+ *  The node uses std::variant to store either an aggregate size (for
+ *  aggregate types like arrays, maps, sets) or a value (for simple types
+ *  like strings, numbers, etc.), providing memory efficiency.
+ *
  *  @tparam String A `std::string`-like type.
  */
 template <class String>
@@ -25,11 +31,31 @@ struct basic_node {
   /// The RESP3 type of the data in this node.
   type_t data_type = type_t::invalid;
 
-  /// The number of elements of an aggregate.
-  std::size_t aggregate_size{};
+  /// The data: either aggregate size or value.
+  std::variant<std::size_t, String> data{std::size_t{0}};
 
-  /// The actual data. For aggregate types this is usually empty.
-  String value{};
+  /** @brief Returns the aggregate size.
+   *  @note Only valid when data_type is an aggregate type.
+   *  @return The number of elements in the aggregate.
+   */
+  auto aggregate_size() const -> std::size_t {
+    return std::get<std::size_t>(data);
+  }
+
+  /** @brief Returns the value.
+   *  @note Only valid when data_type is a simple type.
+   *  @return Reference to the value string.
+   */
+  auto value() const -> String const& {
+    return std::get<String>(data);
+  }
+
+  /** @brief Checks if this node holds an aggregate.
+   *  @return True if the node contains an aggregate size, false if it contains a value.
+   */
+  auto is_aggregate_node() const -> bool {
+    return std::holds_alternative<std::size_t>(data);
+  }
 };
 
 /** @brief Compares a node for equality.
@@ -40,7 +66,7 @@ struct basic_node {
  */
 template <class String>
 auto operator==(basic_node<String> const& a, basic_node<String> const& b) {
-  return a.aggregate_size == b.aggregate_size && a.data_type == b.data_type && a.value == b.value;
+  return a.data_type == b.data_type && a.data == b.data;
 };
 
 /// A node in the response tree that owns its data.

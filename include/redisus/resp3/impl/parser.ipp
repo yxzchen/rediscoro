@@ -59,7 +59,7 @@ auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> par
       if (view.length() - consumed_ < span) return std::nullopt;  // Needs more data to proceeed.
 
       auto const bulk_view = view.substr(consumed_, bulk_length_);
-      node_view const ret = {bulk_type_, 1, bulk_view};
+      node_view const ret = {bulk_type_, bulk_view};
       bulk_type_ = type_t::invalid;
       commit_elem();
 
@@ -81,7 +81,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
       if (ec) return std::nullopt;
 
       if (bulk_length_ == 0) {
-        ret = {type_t::streamed_string_part, 1, {}};
+        ret = {type_t::streamed_string_part, std::string_view{}};
         remaining_.top() = 1;
         commit_elem();
       } else {
@@ -102,7 +102,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         // infinite length. When the streaming is done the server
         // is supposed to send a part with length 0.
         remaining_.push(std::numeric_limits<std::size_t>::max());
-        ret = {type_t::streamed_string, 0, {}};
+        ret = {type_t::streamed_string, std::size_t{0}};
       } else {
         to_int(bulk_length_, elem, ec);
         if (ec) return std::nullopt;
@@ -124,7 +124,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         return std::nullopt;
       }
 
-      ret = {type, 1, elem};
+      ret = {type, elem};
       commit_elem();
       break;
     }
@@ -140,7 +140,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
     case type_t::simple_error:
     case type_t::simple_string:
     case type_t::null: {
-      ret = {type, 1, elem};
+      ret = {type, elem};
       commit_elem();
       break;
     }
@@ -153,7 +153,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
       to_int(size, elem, ec);
       if (ec) return std::nullopt;
 
-      ret = {type, size, {}};
+      ret = {type, size};
       if (size == 0) {
         commit_elem();
       } else {
