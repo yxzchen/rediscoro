@@ -24,16 +24,16 @@ std::size_t parser::consumed() const noexcept {
 }
 
 bool parser::done() const noexcept {
-  return remaining_.empty();
+  return pending_.empty();
 }
 
 void parser::commit_elem() noexcept {
-  remaining_.top()--;
-  while (remaining_.top() == 0) {
-    remaining_.pop();
+  pending_.top()--;
+  while (pending_.top() == 0) {
+    pending_.pop();
 
-    if (remaining_.empty()) break;
-    remaining_.top()--;
+    if (pending_.empty()) break;
+    pending_.top()--;
   }
 }
 
@@ -75,14 +75,14 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
   node_view ret;
   switch (type) {
     case type_t::streamed_string_part: {
-      REDISUS_ASSERT(!remaining_.empty());
+      REDISUS_ASSERT(!pending_.empty());
 
       to_int(bulk_length_, elem, ec);
       if (ec) return std::nullopt;
 
       if (bulk_length_ == 0) {
         ret = {type_t::streamed_string_part, std::string_view{}};
-        remaining_.top() = 1;
+        pending_.top() = 1;
         commit_elem();
       } else {
         bulk_type_ = type_t::streamed_string_part;
@@ -102,7 +102,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         // Trick: A streamed string is read as an aggregate of
         // infinite length. When the streaming is done the server
         // is supposed to send a part with length 0.
-        remaining_.push(std::numeric_limits<std::size_t>::max());
+        pending_.push(std::numeric_limits<std::size_t>::max());
         ret = {type_t::streamed_string, std::size_t{0}};
       } else {
         to_int(bulk_length_, elem, ec);
@@ -158,7 +158,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
       if (size == 0) {
         commit_elem();
       } else {
-        remaining_.push(size * element_multiplicity(type));
+        pending_.push(size * element_multiplicity(type));
       }
       break;
     }

@@ -25,20 +25,28 @@ class parser {
 
  private:
   type_t bulk_type_ = type_t::invalid;
-  std::size_t bulk_length_ = std::numeric_limits<std::size_t>::max();
+  std::size_t bulk_length_;
 
   // Remaining number of aggregates.
-  std::stack<size_t> remaining_;
+  std::stack<size_t> pending_;
 
-  std::size_t consumed_ = 0;
+  std::size_t consumed_;
 
   auto consume_impl(type_t t, std::string_view elem, std::error_code& ec) -> result;
 
   void commit_elem() noexcept;
 
+  void reset() {
+    bulk_type_ = type_t::invalid;
+    consumed_ = 0;
+
+    pending_ = std::stack<size_t>();
+    pending_.push(1);
+  }
+
  public:
   parser() {
-    remaining_.push(1);
+    reset();
   }
 
   // Returns true when the parser is done with the current message.
