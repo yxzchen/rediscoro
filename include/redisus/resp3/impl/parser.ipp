@@ -86,6 +86,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         commit_elem();
       } else {
         bulk_type_ = type_t::streamed_string_part;
+        return std::nullopt;
       }
       break;
     }

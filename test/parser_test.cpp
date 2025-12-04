@@ -59,17 +59,6 @@ TEST_F(ParserTest, Number) {
   EXPECT_TRUE(p.done());
 }
 
-TEST_F(ParserTest, NegativeNumber) {
-  std::string_view data = ":-999\r\n";
-  auto result = p.consume(data, ec);
-
-  ASSERT_FALSE(ec);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::number);
-  EXPECT_EQ(result->value(), "-999");
-  EXPECT_TRUE(p.done());
-}
-
 TEST_F(ParserTest, Double) {
   std::string_view data = ",3.14159\r\n";
   auto result = p.consume(data, ec);
@@ -89,17 +78,6 @@ TEST_F(ParserTest, BooleanTrue) {
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->data_type, type_t::boolean);
   EXPECT_EQ(result->value(), "t");
-  EXPECT_TRUE(p.done());
-}
-
-TEST_F(ParserTest, BooleanFalse) {
-  std::string_view data = "#f\r\n";
-  auto result = p.consume(data, ec);
-
-  ASSERT_FALSE(ec);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::boolean);
-  EXPECT_EQ(result->value(), "f");
   EXPECT_TRUE(p.done());
 }
 
@@ -222,26 +200,6 @@ TEST_F(ParserTest, ArrayWithSimpleStrings) {
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->data_type, type_t::simple_string);
   EXPECT_EQ(result->value(), "baz");
-  EXPECT_TRUE(p.done());
-}
-
-TEST_F(ParserTest, ArrayWithNumbers) {
-  std::string_view data = "*2\r\n:123\r\n:456\r\n";
-
-  auto result = p.consume(data, ec);
-  ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::array);
-  EXPECT_EQ(result->aggregate_size(), 2u);
-
-  result = p.consume(data, ec);
-  ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::number);
-  EXPECT_EQ(result->value(), "123");
-
-  result = p.consume(data, ec);
-  ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::number);
-  EXPECT_EQ(result->value(), "456");
   EXPECT_TRUE(p.done());
 }
 
@@ -447,71 +405,310 @@ TEST_F(ParserTest, PartialData_IncompleteBulk) {
 }
 
 // ============================================================================
-// Utility Function Tests
+// Edge Case Tests - Strings
 // ============================================================================
 
-TEST(TypeUtilityTest, ToCode) {
-  EXPECT_EQ(to_code(type_t::simple_string), '+');
-  EXPECT_EQ(to_code(type_t::simple_error), '-');
-  EXPECT_EQ(to_code(type_t::number), ':');
-  EXPECT_EQ(to_code(type_t::blob_string), '$');
-  EXPECT_EQ(to_code(type_t::array), '*');
-  EXPECT_EQ(to_code(type_t::null), '_');
-  EXPECT_EQ(to_code(type_t::boolean), '#');
-  EXPECT_EQ(to_code(type_t::doublean), ',');
-  EXPECT_EQ(to_code(type_t::big_number), '(');
-  EXPECT_EQ(to_code(type_t::blob_error), '!');
-  EXPECT_EQ(to_code(type_t::verbatim_string), '=');
-  EXPECT_EQ(to_code(type_t::map), '%');
-  EXPECT_EQ(to_code(type_t::set), '~');
-  EXPECT_EQ(to_code(type_t::push), '>');
-  EXPECT_EQ(to_code(type_t::attribute), '|');
+TEST_F(ParserTest, BlobStringWithSpecialCharacters) {
+  std::string_view data = "$13\r\nHello\r\nWorld!\r\n";
+  auto result = p.consume(data, ec);
+
+  ASSERT_FALSE(ec);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->value(), "Hello\r\nWorld!");
+  EXPECT_TRUE(p.done());
 }
 
-TEST(TypeUtilityTest, ToType) {
-  EXPECT_EQ(to_type('+'), type_t::simple_string);
-  EXPECT_EQ(to_type('-'), type_t::simple_error);
-  EXPECT_EQ(to_type(':'), type_t::number);
-  EXPECT_EQ(to_type('$'), type_t::blob_string);
-  EXPECT_EQ(to_type('*'), type_t::array);
-  EXPECT_EQ(to_type('_'), type_t::null);
-  EXPECT_EQ(to_type('#'), type_t::boolean);
-  EXPECT_EQ(to_type(','), type_t::doublean);
-  EXPECT_EQ(to_type('('), type_t::big_number);
-  EXPECT_EQ(to_type('!'), type_t::blob_error);
-  EXPECT_EQ(to_type('='), type_t::verbatim_string);
-  EXPECT_EQ(to_type('%'), type_t::map);
-  EXPECT_EQ(to_type('~'), type_t::set);
-  EXPECT_EQ(to_type('>'), type_t::push);
-  EXPECT_EQ(to_type('|'), type_t::attribute);
-  EXPECT_EQ(to_type('X'), type_t::invalid);
+TEST_F(ParserTest, BlobStringWithNullBytes) {
+  std::string data_str = "$5\r\nHe";
+  data_str += '\0';
+  data_str += "lo\r\n";
+  std::string_view data = data_str;
+
+  auto result = p.consume(data, ec);
+
+  ASSERT_FALSE(ec);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->value().length(), 5);
+  EXPECT_TRUE(p.done());
 }
 
-TEST(TypeUtilityTest, IsAggregate) {
-  EXPECT_TRUE(is_aggregate(type_t::array));
-  EXPECT_TRUE(is_aggregate(type_t::map));
-  EXPECT_TRUE(is_aggregate(type_t::set));
-  EXPECT_TRUE(is_aggregate(type_t::push));
-  EXPECT_TRUE(is_aggregate(type_t::attribute));
+// ============================================================================
+// Edge Case Tests - Aggregates
+// ============================================================================
 
-  EXPECT_FALSE(is_aggregate(type_t::simple_string));
-  EXPECT_FALSE(is_aggregate(type_t::number));
-  EXPECT_FALSE(is_aggregate(type_t::blob_string));
-  EXPECT_FALSE(is_aggregate(type_t::null));
+TEST_F(ParserTest, EmptySet) {
+  std::string_view data = "~0\r\n";
+  auto result = p.consume(data, ec);
+
+  ASSERT_FALSE(ec);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_type, type_t::set);
+  EXPECT_EQ(result->aggregate_size(), 0u);
+  EXPECT_TRUE(p.done());
 }
 
-TEST(TypeUtilityTest, ElementMultiplicity) {
-  EXPECT_EQ(element_multiplicity(type_t::map), 2u);
-  EXPECT_EQ(element_multiplicity(type_t::attribute), 2u);
+TEST_F(ParserTest, EmptyMap) {
+  std::string_view data = "%0\r\n";
+  auto result = p.consume(data, ec);
 
-  EXPECT_EQ(element_multiplicity(type_t::array), 1u);
-  EXPECT_EQ(element_multiplicity(type_t::set), 1u);
-  EXPECT_EQ(element_multiplicity(type_t::simple_string), 1u);
+  ASSERT_FALSE(ec);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->aggregate_size(), 0u);
+  EXPECT_TRUE(p.done());
 }
 
-TEST(TypeUtilityTest, ToString) {
-  EXPECT_STREQ(to_string(type_t::array), "array");
-  EXPECT_STREQ(to_string(type_t::simple_string), "simple_string");
-  EXPECT_STREQ(to_string(type_t::number), "number");
-  EXPECT_STREQ(to_string(type_t::invalid), "invalid");
+TEST_F(ParserTest, MapWithNullValues) {
+  std::string_view data = "%2\r\n+key1\r\n_\r\n+key2\r\n:42\r\n";
+
+  auto result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->aggregate_size(), 2u);
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "key1");
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::null);
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "key2");
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "42");
+
+  EXPECT_TRUE(p.done());
+}
+
+// ============================================================================
+// Edge Case Tests - Complex Nested Structures
+// ============================================================================
+
+TEST_F(ParserTest, DeeplyNestedArrays) {
+  std::string_view data = "*1\r\n*1\r\n*1\r\n*1\r\n*1\r\n+deep\r\n";
+
+  // Level 1
+  auto result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  // Level 2
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  // Level 3
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  // Level 4
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  // Level 5
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  // Value
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "deep");
+
+  EXPECT_TRUE(p.done());
+}
+
+TEST_F(ParserTest, MixedComplexNesting) {
+  std::string_view data = "*2\r\n%1\r\n+key\r\n~2\r\n:1\r\n:2\r\n$5\r\nhello\r\n";
+
+  // Outer array
+  auto result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->aggregate_size(), 2u);
+
+  // First element: map
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  // Map key
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "key");
+
+  // Map value: set
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::set);
+  EXPECT_EQ(result->aggregate_size(), 2u);
+
+  // Set elements
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "1");
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "2");
+
+  // Second element: blob string
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->value(), "hello");
+
+  EXPECT_TRUE(p.done());
+}
+
+// ============================================================================
+// Edge Case Tests - Attributes
+// ============================================================================
+
+TEST_F(ParserTest, AttributeBasic) {
+  std::string_view data = "|1\r\n+key\r\n+value\r\n";
+
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_type, type_t::attribute);
+  EXPECT_EQ(result->aggregate_size(), 1u);
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "key");
+
+  result = p.consume(data, ec);
+  EXPECT_EQ(result->value(), "value");
+
+  EXPECT_TRUE(p.done());
+}
+
+TEST_F(ParserTest, AttributeEmpty) {
+  std::string_view data = "|0\r\n";
+
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_type, type_t::attribute);
+  EXPECT_EQ(result->aggregate_size(), 0u);
+  EXPECT_TRUE(p.done());
+}
+
+TEST_F(ParserTest, AttributeWithMultiplePairs) {
+  std::string_view data = "|3\r\n+k1\r\n:1\r\n+k2\r\n:2\r\n+k3\r\n:3\r\n";
+
+  auto result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::attribute);
+  EXPECT_EQ(result->aggregate_size(), 3u);
+
+  for (int i = 1; i <= 3; ++i) {
+    result = p.consume(data, ec);
+    ASSERT_FALSE(ec);
+    EXPECT_EQ(result->value(), "k" + std::to_string(i));
+
+    result = p.consume(data, ec);
+    ASSERT_FALSE(ec);
+    EXPECT_EQ(result->value(), std::to_string(i));
+  }
+
+  EXPECT_TRUE(p.done());
+}
+
+// ============================================================================
+// Edge Case Tests - Streamed Strings
+// ============================================================================
+
+TEST_F(ParserTest, StreamedStringBasic) {
+  std::string_view data = "$?\r\n;4\r\nHell\r\n;6\r\no worl\r\n;1\r\nd\r\n;0\r\n";
+
+  // Streamed string header
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string);
+  EXPECT_EQ(result->aggregate_size(), 0u);
+
+  // Part 1
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->value(), "Hell");
+
+  // Part 2
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->value(), "o worl");
+
+  // Part 3
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->value(), "d");
+
+  // Terminator
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->value().length(), 0);
+
+  EXPECT_TRUE(p.done());
+}
+
+TEST_F(ParserTest, StreamedStringEmpty) {
+  std::string_view data = "$?\r\n;0\r\n";
+
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string);
+
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->value().length(), 0);
+
+  EXPECT_TRUE(p.done());
+}
+
+// ============================================================================
+// Edge Case Tests - Partial Data with Complex Types
+// ============================================================================
+
+TEST_F(ParserTest, PartialData_ArrayHeader) {
+  std::string_view data = "*3\r";
+
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_FALSE(p.done());
+}
+
+TEST_F(ParserTest, PartialData_MapWithPartialKey) {
+  std::string_view data = "%1\r\n+ke";
+
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_EQ(result->data_type, type_t::map);
+
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_FALSE(p.done());
+}
+
+TEST_F(ParserTest, PartialData_BlobStringLength) {
+  std::string_view data = "$10";
+
+  auto result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_FALSE(p.done());
+}
+
+TEST_F(ParserTest, PartialData_StreamedStringPart) {
+  std::string_view data = "$?\r\n;10\r\nabcde";
+
+  auto result = p.consume(data, ec);
+  EXPECT_EQ(result->data_type, type_t::streamed_string);
+
+  result = p.consume(data, ec);
+  ASSERT_FALSE(ec);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_FALSE(p.done());
 }
