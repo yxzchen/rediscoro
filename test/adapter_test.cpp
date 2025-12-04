@@ -8,7 +8,6 @@
 
 #include <redisus/adapter/adapt.hpp>
 #include <redisus/adapter/adapter.hpp>
-#include <redisus/adapter/adapters.hpp>
 #include <redisus/resp3/parser.hpp>
 
 // Include implementations

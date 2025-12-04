@@ -7,7 +7,6 @@
 #pragma once
 
 #include <redisus/adapter/adapter.hpp>
-#include <redisus/adapter/adapters.hpp>
 #include <redisus/resp3/parser.hpp>
 
 namespace redisus::adapter {
