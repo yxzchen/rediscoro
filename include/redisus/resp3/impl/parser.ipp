@@ -24,29 +24,29 @@ std::size_t parser::consumed() const noexcept {
 }
 
 bool parser::done() const noexcept {
-  return remaining_.empty() && next_type_ == type_t::invalid && consumed_ != 0;
+  return remaining_.empty();
 }
 
 void parser::commit_elem() noexcept {
   remaining_.top()--;
   while (remaining_.top() == 0) {
     remaining_.pop();
+
+    if (remaining_.empty()) break;
     remaining_.top()--;
   }
 }
 
 auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> parser::result {
-  switch (next_type_) {
+  switch (bulk_type_) {
     case type_t::invalid: {
-      remaining_.push(1);
-
       auto const pos = view.find(sep, consumed_);
-      if (pos == std::string::npos) return {};  // Needs more data to proceeed.
+      if (pos == std::string::npos) return std::nullopt;  // Needs more data to proceeed.
 
       auto const type = to_type(view.at(consumed_));
       auto const elem = view.substr(consumed_ + 1, pos - 1 - consumed_);
       auto const ret = consume_impl(type, elem, ec);
-      if (ec) return {};
+      if (ec) return std::nullopt;
 
       consumed_ = pos + 2;
 
@@ -55,12 +55,12 @@ auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> par
       [[fallthrough]];
 
     default: {
-      auto const span = next_length_ + 2;
-      if ((std::size(view) - consumed_) < span) return {};  // Needs more data to proceeed.
+      auto const span = bulk_length_ + 2;
+      if (view.length() - consumed_ < span) return std::nullopt;  // Needs more data to proceeed.
 
-      auto const bulk_view = view.substr(consumed_, next_length_);
-      node_type const ret = {next_type_, 1, bulk_view};
-      next_type_ = type_t::invalid;
+      auto const bulk_view = view.substr(consumed_, bulk_length_);
+      node_view const ret = {bulk_type_, 1, bulk_view};
+      bulk_type_ = type_t::invalid;
       commit_elem();
 
       consumed_ += span;
@@ -70,19 +70,22 @@ auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> par
 }
 
 auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& ec) -> parser::result {
-  node_type ret;
+  REDISUS_ASSERT(bulk_type_ == type_t::invalid);
+
+  node_view ret;
   switch (type) {
     case type_t::streamed_string_part: {
-      REDISUS_ASSERT(next_type_ == type_t::streamed_string_part);
+      REDISUS_ASSERT(!remaining_.empty());
 
-      to_int(next_length_, elem, ec);
-      if (ec) return {};
+      to_int(bulk_length_, elem, ec);
+      if (ec) return std::nullopt;
 
-      if (next_length_ == 0) {
+      if (bulk_length_ == 0) {
         ret = {type_t::streamed_string_part, 1, {}};
         remaining_.top() = 1;
         commit_elem();
-        next_type_ = type_t::invalid;
+      } else {
+        bulk_type_ = type_t::streamed_string_part;
       }
       break;
     }
@@ -96,12 +99,12 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         // is supposed to send a part with length 0.
         remaining_.push(std::numeric_limits<std::size_t>::max());
         ret = {type_t::streamed_string, 0, {}};
-        next_type_ = type_t::streamed_string_part;
       } else {
-        to_int(next_length_, elem, ec);
-        if (ec) return {};
+        to_int(bulk_length_, elem, ec);
+        if (ec) return std::nullopt;
 
-        next_type_ = type;
+        bulk_type_ = type;
+        return std::nullopt;
       }
       break;
     }
@@ -109,12 +112,12 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
     case type_t::boolean: {
       if (std::empty(elem)) {
         ec = error::empty_field;
-        return {};
+        return std::nullopt;
       }
 
       if (elem.at(0) != 'f' && elem.at(0) != 't') {
         ec = error::unexpected_bool_value;
-        return {};
+        return std::nullopt;
       }
 
       ret = {type, 1, elem};
@@ -126,7 +129,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
     case type_t::number: {
       if (std::empty(elem)) {
         ec = error::empty_field;
-        return {};
+        return std::nullopt;
       }
     }
       [[fallthrough]];
@@ -142,22 +145,21 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
     case type_t::array:
     case type_t::attribute:
     case type_t::map: {
-      std::size_t l = static_cast<std::size_t>(-1);
-      to_int(l, elem, ec);
-      if (ec) return {};
+      std::size_t size;
+      to_int(size, elem, ec);
+      if (ec) return std::nullopt;
 
-      ret = {type, l, {}};
-      if (l == 0) {
+      ret = {type, size, {}};
+      if (size == 0) {
         commit_elem();
       } else {
-        remaining_.push(l * element_multiplicity(type));
-        next_type_ = type;
+        remaining_.push(size * element_multiplicity(type));
       }
       break;
     }
     default: {
       ec = error::invalid_data_type;
-      return {};
+      return std::nullopt;
     }
   }
 

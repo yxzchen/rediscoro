@@ -19,29 +19,28 @@ namespace redisus::resp3 {
 
 class parser {
  public:
-  using node_type = basic_node<std::string_view>;
-  using result = std::optional<node_type>;
+  using result = std::optional<node_view>;
 
   static constexpr std::string_view sep = "\r\n";
 
  private:
-  // Contains the length expected in the next bulk read.
-  std::size_t next_length_ = std::numeric_limits<std::size_t>::max();
-
-  // The type of the next bulk. Contains type_t::invalid if no bulk is
-  // expected.
-  type_t next_type_ = type_t::invalid;
+  type_t bulk_type_ = type_t::invalid;
+  std::size_t bulk_length_ = std::numeric_limits<std::size_t>::max();
 
   // Remaining number of aggregates.
   std::stack<size_t> remaining_;
 
-  std::size_t consumed_;
+  std::size_t consumed_ = 0;
 
   auto consume_impl(type_t t, std::string_view elem, std::error_code& ec) -> result;
 
   void commit_elem() noexcept;
 
  public:
+  parser() {
+    remaining_.push(1);
+  }
+
   // Returns true when the parser is done with the current message.
   [[nodiscard]]
   auto done() const noexcept -> bool;

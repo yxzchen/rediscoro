@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(redisus VERSION 1.0.0 LANGUAGES CXX)
 
-# Option to enable assertions (disabled by default)
+# Options
 option(REDISUS_ENABLE_ASSERTS "Enable assertions in redisus library" OFF)
+option(REDISUS_BUILD_TESTS "Build tests" ON)
 
 # Create interface library (header-only)
 add_library(redisus INTERFACE)
@@ -39,3 +40,8 @@ install(EXPORT redisus-targets
     NAMESPACE redisus::
     DESTINATION lib/cmake/redisus
 )
+
+# Add tests
+if(REDISUS_BUILD_TESTS)
+    add_subdirectory(test)
+endif()
