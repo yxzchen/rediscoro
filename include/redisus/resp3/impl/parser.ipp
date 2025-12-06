@@ -23,10 +23,6 @@ void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
 
 }  // namespace
 
-std::size_t parser::consumed() const noexcept {
-  return consumed_;
-}
-
 bool parser::done() const noexcept {
   return pending_.empty();
 }
@@ -42,31 +38,37 @@ void parser::commit_elem() noexcept {
 }
 
 auto parser::read_until_separator() -> std::optional<std::string_view> {
-  auto const pos = view_.find(sep, consumed_);
+  auto view = buffer_.view();
+  auto const pos = view.find(sep);
   if (pos == std::string::npos) {
     return std::nullopt;  // Need more data
   }
 
-  auto const result = view_.substr(consumed_, pos - consumed_);
-  consumed_ = pos + 2;  // Skip \r\n
+  auto const result = view.substr(0, pos);
+  buffer_.consume(pos + 2);  // Consume including \r\n
   return result;
 }
 
 auto parser::read_bulk_data(std::size_t length) -> std::optional<std::string_view> {
+  auto view = buffer_.view();
   auto const span = length + 2;  // Include \r\n
-  if (view_.length() - consumed_ < span) {
+  if (view.length() < span) {
     return std::nullopt;  // Need more data
   }
 
-  auto const result = view_.substr(consumed_, length);
-  consumed_ += span;
+  auto const result = view.substr(0, length);
+  buffer_.consume(span);  // Consume including \r\n
   return result;
 }
 
-auto parser::parse(std::string_view view, std::error_code& ec) -> generator<node_view> {
-  view_ = view;
+auto parser::parse(std::error_code& ec) -> generator<node_view> {
+  // Parse forever until error
+  while (!ec) {
+    // Wait for data if buffer is empty
+    if (buffer_.empty()) {
+      co_return;  // Suspend until more data is fed
+    }
 
-  while (!ec && consumed_ < view_.size()) {
     // Read line until \r\n
     auto line = read_until_separator();
     if (!line) co_return;  // Need more data

@@ -6,12 +6,14 @@
 
 #pragma once
 
+#include <redisus/buffer.hpp>
 #include <redisus/resp3/node.hpp>
 
 #include <coroutine>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <stack>
 #include <string_view>
 
@@ -95,22 +97,34 @@ class parser {
  public:
   static constexpr std::string_view sep = "\r\n";
 
-  parser() { reset(); }
+  explicit parser(std::size_t buffer_capacity = 8192) : buffer_(buffer_capacity) { reset(); }
 
-  // Returns true when the parser is done with the current message.
+  // Feed data to the parser buffer
+  void feed(std::string_view data) {
+    buffer_.feed(data);
+  }
+
+  // Get writable buffer for direct I/O
+  std::span<char> prepare(std::size_t n) {
+    return buffer_.prepare(n);
+  }
+
+  // Commit bytes written to buffer
+  void commit(std::size_t n) {
+    buffer_.commit(n);
+  }
+
+  // Returns true when the parser is done with the current message
   [[nodiscard]] auto done() const noexcept -> bool;
 
-  auto consumed() const noexcept -> std::size_t;
-
-  // Coroutine that yields parsed nodes
-  auto parse(std::string_view view, std::error_code& ec) -> generator<node_view>;
+  // Coroutine that yields parsed nodes (runs forever until error)
+  auto parse(std::error_code& ec) -> generator<node_view>;
 
  private:
-  std::string_view view_;
-  std::size_t consumed_;
+  buffer buffer_;
   std::stack<size_t> pending_;
 
-  // Helper functions for parsing
+  // Helper functions for parsing (consume buffer on successful read)
   auto read_until_separator() -> std::optional<std::string_view>;
   auto read_bulk_data(std::size_t length) -> std::optional<std::string_view>;
 
