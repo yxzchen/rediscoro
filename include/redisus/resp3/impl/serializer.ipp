@@ -9,7 +9,7 @@
 
 namespace redisus::resp3 {
 
-void add_header(std::string& payload, type_t type, std::size_t size) {
+void add_header(std::string& payload, type3 type, std::size_t size) {
   auto const str = std::to_string(size);
 
   payload += to_code(type);

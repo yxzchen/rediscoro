@@ -24,7 +24,7 @@ class parser {
   static constexpr std::string_view sep = "\r\n";
 
  private:
-  type_t bulk_type_ = type_t::invalid;
+  type3 bulk_type_ = type3::invalid;
   std::size_t bulk_length_;
 
   // Remaining number of aggregates.
@@ -32,12 +32,12 @@ class parser {
 
   std::size_t consumed_;
 
-  auto consume_impl(type_t t, std::string_view elem, std::error_code& ec) -> result;
+  auto consume_impl(type3 t, std::string_view elem, std::error_code& ec) -> result;
 
   void commit_elem() noexcept;
 
   void reset() {
-    bulk_type_ = type_t::invalid;
+    bulk_type_ = type3::invalid;
     consumed_ = 0;
 
     pending_ = std::stack<size_t>();

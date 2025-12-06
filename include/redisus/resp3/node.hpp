@@ -29,7 +29,7 @@ namespace redisus::resp3 {
 template <class String>
 struct basic_node {
   /// The RESP3 type of the data in this node.
-  type_t data_type = type_t::invalid;
+  type3 data_type = type3::invalid;
 
   /// The data: either aggregate size or value.
   std::variant<std::size_t, String> data{std::size_t{0}};

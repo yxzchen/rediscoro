@@ -26,7 +26,7 @@ inline void from_node(std::string& result, resp3::node_view const& node, std::er
     return;
   }
 
-  if (node.data_type == resp3::type_t::null) {
+  if (node.data_type == resp3::type3::null) {
     result.clear();
     return;
   }
@@ -41,7 +41,7 @@ inline void from_node(std::string_view& result, resp3::node_view const& node, st
     return;
   }
 
-  if (node.data_type == resp3::type_t::null) {
+  if (node.data_type == resp3::type3::null) {
     result = std::string_view{};
     return;
   }
@@ -179,7 +179,7 @@ class optional_adapter {
   }
 
   void on_node(resp3::node_view const& node, std::error_code& ec) {
-    if (node.data_type == resp3::type_t::null) {
+    if (node.data_type == resp3::type3::null) {
       result_->reset();
       return;
     }

@@ -32,7 +32,7 @@ TEST_F(ParserTest, SimpleString) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::simple_string);
+  EXPECT_EQ(result->data_type, type3::simple_string);
   EXPECT_EQ(result->value(), "OK");
   EXPECT_TRUE(p.done());
 }
@@ -43,7 +43,7 @@ TEST_F(ParserTest, SimpleError) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::simple_error);
+  EXPECT_EQ(result->data_type, type3::simple_error);
   EXPECT_EQ(result->value(), "ERR unknown command");
   EXPECT_TRUE(p.done());
 }
@@ -54,7 +54,7 @@ TEST_F(ParserTest, Number) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::number);
+  EXPECT_EQ(result->data_type, type3::number);
   EXPECT_EQ(result->value(), "12345");
   EXPECT_TRUE(p.done());
 }
@@ -65,7 +65,7 @@ TEST_F(ParserTest, Double) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::doublean);
+  EXPECT_EQ(result->data_type, type3::doublean);
   EXPECT_EQ(result->value(), "3.14159");
   EXPECT_TRUE(p.done());
 }
@@ -76,7 +76,7 @@ TEST_F(ParserTest, BooleanTrue) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::boolean);
+  EXPECT_EQ(result->data_type, type3::boolean);
   EXPECT_EQ(result->value(), "t");
   EXPECT_TRUE(p.done());
 }
@@ -87,7 +87,7 @@ TEST_F(ParserTest, Null) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::null);
+  EXPECT_EQ(result->data_type, type3::null);
   EXPECT_EQ(result->value(), "");
   EXPECT_TRUE(p.done());
 }
@@ -98,7 +98,7 @@ TEST_F(ParserTest, BigNumber) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::big_number);
+  EXPECT_EQ(result->data_type, type3::big_number);
   EXPECT_EQ(result->value(), "123456789012345678901234567890");
   EXPECT_TRUE(p.done());
 }
@@ -114,7 +114,7 @@ TEST_F(ParserTest, BlobString) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->data_type, type3::blob_string);
   EXPECT_EQ(result->value(), "hello");
   EXPECT_TRUE(p.done());
 }
@@ -125,7 +125,7 @@ TEST_F(ParserTest, EmptyBlobString) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->data_type, type3::blob_string);
   EXPECT_EQ(result->value(), "");
   EXPECT_TRUE(p.done());
 }
@@ -136,7 +136,7 @@ TEST_F(ParserTest, BlobError) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::blob_error);
+  EXPECT_EQ(result->data_type, type3::blob_error);
   EXPECT_EQ(result->value(), "SYNTAX invalid syntax");
   EXPECT_TRUE(p.done());
 }
@@ -147,7 +147,7 @@ TEST_F(ParserTest, VerbatimString) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::verbatim_string);
+  EXPECT_EQ(result->data_type, type3::verbatim_string);
   EXPECT_EQ(result->value(), "txt:Some string");
   EXPECT_TRUE(p.done());
 }
@@ -162,7 +162,7 @@ TEST_F(ParserTest, EmptyArray) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 0u);
   EXPECT_TRUE(p.done());
 }
@@ -174,7 +174,7 @@ TEST_F(ParserTest, ArrayWithSimpleStrings) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 3u);
   EXPECT_FALSE(p.done());
 
@@ -182,7 +182,7 @@ TEST_F(ParserTest, ArrayWithSimpleStrings) {
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::simple_string);
+  EXPECT_EQ(result->data_type, type3::simple_string);
   EXPECT_EQ(result->value(), "foo");
   EXPECT_FALSE(p.done());
 
@@ -190,7 +190,7 @@ TEST_F(ParserTest, ArrayWithSimpleStrings) {
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::simple_string);
+  EXPECT_EQ(result->data_type, type3::simple_string);
   EXPECT_EQ(result->value(), "bar");
   EXPECT_FALSE(p.done());
 
@@ -198,7 +198,7 @@ TEST_F(ParserTest, ArrayWithSimpleStrings) {
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::simple_string);
+  EXPECT_EQ(result->data_type, type3::simple_string);
   EXPECT_EQ(result->value(), "baz");
   EXPECT_TRUE(p.done());
 }
@@ -208,7 +208,7 @@ TEST_F(ParserTest, Set) {
 
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::set);
+  EXPECT_EQ(result->data_type, type3::set);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   result = p.consume(data, ec);
@@ -226,7 +226,7 @@ TEST_F(ParserTest, Map) {
 
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->data_type, type3::map);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   // First key-value pair
@@ -255,7 +255,7 @@ TEST_F(ParserTest, Push) {
 
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::push);
+  EXPECT_EQ(result->data_type, type3::push);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   result = p.consume(data, ec);
@@ -278,13 +278,13 @@ TEST_F(ParserTest, NestedArray) {
   // Outer array
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   // First inner array
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   result = p.consume(data, ec);
@@ -296,7 +296,7 @@ TEST_F(ParserTest, NestedArray) {
   // Second inner array
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   result = p.consume(data, ec);
@@ -312,23 +312,23 @@ TEST_F(ParserTest, ArrayWithMixedTypes) {
   std::string_view data = "*4\r\n+hello\r\n:42\r\n#t\r\n_\r\n";
 
   auto result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 4u);
 
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::simple_string);
+  EXPECT_EQ(result->data_type, type3::simple_string);
   EXPECT_EQ(result->value(), "hello");
 
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::number);
+  EXPECT_EQ(result->data_type, type3::number);
   EXPECT_EQ(result->value(), "42");
 
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::boolean);
+  EXPECT_EQ(result->data_type, type3::boolean);
   EXPECT_EQ(result->value(), "t");
 
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::null);
+  EXPECT_EQ(result->data_type, type3::null);
 
   EXPECT_TRUE(p.done());
 }
@@ -414,7 +414,7 @@ TEST_F(ParserTest, BlobStringWithSpecialCharacters) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->data_type, type3::blob_string);
   EXPECT_EQ(result->value(), "Hello\r\nWorld!");
   EXPECT_TRUE(p.done());
 }
@@ -429,7 +429,7 @@ TEST_F(ParserTest, BlobStringWithNullBytes) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->data_type, type3::blob_string);
   EXPECT_EQ(result->value().length(), 5);
   EXPECT_TRUE(p.done());
 }
@@ -444,7 +444,7 @@ TEST_F(ParserTest, EmptySet) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::set);
+  EXPECT_EQ(result->data_type, type3::set);
   EXPECT_EQ(result->aggregate_size(), 0u);
   EXPECT_TRUE(p.done());
 }
@@ -455,7 +455,7 @@ TEST_F(ParserTest, EmptyMap) {
 
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->data_type, type3::map);
   EXPECT_EQ(result->aggregate_size(), 0u);
   EXPECT_TRUE(p.done());
 }
@@ -464,14 +464,14 @@ TEST_F(ParserTest, MapWithNullValues) {
   std::string_view data = "%2\r\n+key1\r\n_\r\n+key2\r\n:42\r\n";
 
   auto result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->data_type, type3::map);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   result = p.consume(data, ec);
   EXPECT_EQ(result->value(), "key1");
 
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::null);
+  EXPECT_EQ(result->data_type, type3::null);
 
   result = p.consume(data, ec);
   EXPECT_EQ(result->value(), "key2");
@@ -491,27 +491,27 @@ TEST_F(ParserTest, DeeplyNestedArrays) {
 
   // Level 1
   auto result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   // Level 2
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   // Level 3
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   // Level 4
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   // Level 5
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   // Value
@@ -526,12 +526,12 @@ TEST_F(ParserTest, MixedComplexNesting) {
 
   // Outer array
   auto result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::array);
+  EXPECT_EQ(result->data_type, type3::array);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   // First element: map
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->data_type, type3::map);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   // Map key
@@ -540,7 +540,7 @@ TEST_F(ParserTest, MixedComplexNesting) {
 
   // Map value: set
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::set);
+  EXPECT_EQ(result->data_type, type3::set);
   EXPECT_EQ(result->aggregate_size(), 2u);
 
   // Set elements
@@ -552,7 +552,7 @@ TEST_F(ParserTest, MixedComplexNesting) {
 
   // Second element: blob string
   result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::blob_string);
+  EXPECT_EQ(result->data_type, type3::blob_string);
   EXPECT_EQ(result->value(), "hello");
 
   EXPECT_TRUE(p.done());
@@ -568,7 +568,7 @@ TEST_F(ParserTest, AttributeBasic) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::attribute);
+  EXPECT_EQ(result->data_type, type3::attribute);
   EXPECT_EQ(result->aggregate_size(), 1u);
 
   result = p.consume(data, ec);
@@ -586,7 +586,7 @@ TEST_F(ParserTest, AttributeEmpty) {
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->data_type, type_t::attribute);
+  EXPECT_EQ(result->data_type, type3::attribute);
   EXPECT_EQ(result->aggregate_size(), 0u);
   EXPECT_TRUE(p.done());
 }
@@ -595,7 +595,7 @@ TEST_F(ParserTest, AttributeWithMultiplePairs) {
   std::string_view data = "|3\r\n+k1\r\n:1\r\n+k2\r\n:2\r\n+k3\r\n:3\r\n";
 
   auto result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::attribute);
+  EXPECT_EQ(result->data_type, type3::attribute);
   EXPECT_EQ(result->aggregate_size(), 3u);
 
   for (int i = 1; i <= 3; ++i) {
@@ -621,31 +621,31 @@ TEST_F(ParserTest, StreamedStringBasic) {
   // Streamed string header
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string);
+  EXPECT_EQ(result->data_type, type3::streamed_string);
   EXPECT_EQ(result->aggregate_size(), 0u);
 
   // Part 1
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->data_type, type3::streamed_string_part);
   EXPECT_EQ(result->value(), "Hell");
 
   // Part 2
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->data_type, type3::streamed_string_part);
   EXPECT_EQ(result->value(), "o worl");
 
   // Part 3
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->data_type, type3::streamed_string_part);
   EXPECT_EQ(result->value(), "d");
 
   // Terminator
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->data_type, type3::streamed_string_part);
   EXPECT_EQ(result->value().length(), 0);
 
   EXPECT_TRUE(p.done());
@@ -656,11 +656,11 @@ TEST_F(ParserTest, StreamedStringEmpty) {
 
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string);
+  EXPECT_EQ(result->data_type, type3::streamed_string);
 
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string_part);
+  EXPECT_EQ(result->data_type, type3::streamed_string_part);
   EXPECT_EQ(result->value().length(), 0);
 
   EXPECT_TRUE(p.done());
@@ -684,7 +684,7 @@ TEST_F(ParserTest, PartialData_MapWithPartialKey) {
 
   auto result = p.consume(data, ec);
   ASSERT_FALSE(ec);
-  EXPECT_EQ(result->data_type, type_t::map);
+  EXPECT_EQ(result->data_type, type3::map);
 
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);
@@ -705,7 +705,7 @@ TEST_F(ParserTest, PartialData_StreamedStringPart) {
   std::string_view data = "$?\r\n;10\r\nabcde";
 
   auto result = p.consume(data, ec);
-  EXPECT_EQ(result->data_type, type_t::streamed_string);
+  EXPECT_EQ(result->data_type, type3::streamed_string);
 
   result = p.consume(data, ec);
   ASSERT_FALSE(ec);

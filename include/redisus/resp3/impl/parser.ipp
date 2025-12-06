@@ -39,7 +39,7 @@ void parser::commit_elem() noexcept {
 
 auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> parser::result {
   switch (bulk_type_) {
-    case type_t::invalid: {
+    case type3::invalid: {
       auto const pos = view.find(sep, consumed_);
       if (pos == std::string::npos) return std::nullopt;  // Needs more data to proceeed.
 
@@ -60,7 +60,7 @@ auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> par
 
       auto const bulk_view = view.substr(consumed_, bulk_length_);
       node_view const ret = {bulk_type_, bulk_view};
-      bulk_type_ = type_t::invalid;
+      bulk_type_ = type3::invalid;
       commit_elem();
 
       consumed_ += span;
@@ -69,30 +69,30 @@ auto parser::consume(std::string_view view, std::error_code& ec) noexcept -> par
   }
 }
 
-auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& ec) -> parser::result {
-  REDISUS_ASSERT(bulk_type_ == type_t::invalid);
+auto parser::consume_impl(type3 type, std::string_view elem, std::error_code& ec) -> parser::result {
+  REDISUS_ASSERT(bulk_type_ == type3::invalid);
 
   node_view ret;
   switch (type) {
-    case type_t::streamed_string_part: {
+    case type3::streamed_string_part: {
       REDISUS_ASSERT(!pending_.empty());
 
       to_int(bulk_length_, elem, ec);
       if (ec) return std::nullopt;
 
       if (bulk_length_ == 0) {
-        ret = {type_t::streamed_string_part, std::string_view{}};
+        ret = {type3::streamed_string_part, std::string_view{}};
         pending_.top() = 1;
         commit_elem();
       } else {
-        bulk_type_ = type_t::streamed_string_part;
+        bulk_type_ = type3::streamed_string_part;
         return std::nullopt;
       }
       break;
     }
-    case type_t::blob_error:
-    case type_t::verbatim_string:
-    case type_t::blob_string: {
+    case type3::blob_error:
+    case type3::verbatim_string:
+    case type3::blob_string: {
       if (std::empty(elem)) {
         ec = error::empty_field;
         return std::nullopt;
@@ -103,7 +103,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
         // infinite length. When the streaming is done the server
         // is supposed to send a part with length 0.
         pending_.push(std::numeric_limits<std::size_t>::max());
-        ret = {type_t::streamed_string, std::size_t{0}};
+        ret = {type3::streamed_string, std::size_t{0}};
       } else {
         to_int(bulk_length_, elem, ec);
         if (ec) return std::nullopt;
@@ -114,7 +114,7 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
       break;
     }
 
-    case type_t::boolean: {
+    case type3::boolean: {
       if (std::empty(elem)) {
         ec = error::empty_field;
         return std::nullopt;
@@ -129,27 +129,27 @@ auto parser::consume_impl(type_t type, std::string_view elem, std::error_code& e
       commit_elem();
       break;
     }
-    case type_t::doublean:
-    case type_t::big_number:
-    case type_t::number: {
+    case type3::doublean:
+    case type3::big_number:
+    case type3::number: {
       if (std::empty(elem)) {
         ec = error::empty_field;
         return std::nullopt;
       }
     }
       [[fallthrough]];
-    case type_t::simple_error:
-    case type_t::simple_string:
-    case type_t::null: {
+    case type3::simple_error:
+    case type3::simple_string:
+    case type3::null: {
       ret = {type, elem};
       commit_elem();
       break;
     }
-    case type_t::push:
-    case type_t::set:
-    case type_t::array:
-    case type_t::attribute:
-    case type_t::map: {
+    case type3::push:
+    case type3::set:
+    case type3::array:
+    case type3::attribute:
+    case type3::map: {
       std::size_t size;
       to_int(size, elem, ec);
       if (ec) return std::nullopt;

@@ -19,7 +19,7 @@ namespace redisus::resp3 {
     The RESP3 specification can be found at
     <a href="https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md"></a>
  */
-enum class type_t {
+enum class type3 {
   // Aggregate
   array,
   push,
@@ -49,7 +49,7 @@ enum class type_t {
  *  @relates type
  *  @param t The type to convert.
  */
-auto to_string(type_t type) noexcept -> char const*;
+auto to_string(type3 type) noexcept -> char const*;
 
 /** @brief Writes the type to the output stream.
  *
@@ -57,7 +57,7 @@ auto to_string(type_t type) noexcept -> char const*;
  *  @param os Output stream.
  *  @param t The type to stream.
  */
-auto operator<<(std::ostream& os, type_t type) -> std::ostream&;
+auto operator<<(std::ostream& os, type3 type) -> std::ostream&;
 
 /** @brief Checks whether the data type is an aggregate.
  *
@@ -65,13 +65,13 @@ auto operator<<(std::ostream& os, type_t type) -> std::ostream&;
  *  @param t The type to check.
  *  @returns True if the given type is an aggregate.
  */
-constexpr auto is_aggregate(type_t type) noexcept -> bool {
+constexpr auto is_aggregate(type3 type) noexcept -> bool {
   switch (type) {
-    case type_t::array:
-    case type_t::push:
-    case type_t::set:
-    case type_t::map:
-    case type_t::attribute:
+    case type3::array:
+    case type3::push:
+    case type3::set:
+    case type3::map:
+    case type3::attribute:
       return true;
 
     default:
@@ -81,10 +81,10 @@ constexpr auto is_aggregate(type_t type) noexcept -> bool {
 
 // For map and attribute data types this function returns 2.  All
 // other types have value 1.
-constexpr auto element_multiplicity(type_t type) noexcept -> std::size_t {
+constexpr auto element_multiplicity(type3 type) noexcept -> std::size_t {
   switch (type) {
-    case type_t::map:
-    case type_t::attribute:
+    case type3::map:
+    case type3::attribute:
       return 2ULL;
 
     default:
@@ -93,25 +93,25 @@ constexpr auto element_multiplicity(type_t type) noexcept -> std::size_t {
 }
 
 // Returns the wire code of a given type.
-constexpr auto to_code(type_t type) noexcept -> char {
+constexpr auto to_code(type3 type) noexcept -> char {
   switch (type) {
       // clang-format off
-    case type_t::blob_error:           return '!';
-    case type_t::verbatim_string:      return '=';
-    case type_t::blob_string:          return '$';
-    case type_t::streamed_string_part: return ';';
-    case type_t::simple_error:         return '-';
-    case type_t::number:               return ':';
-    case type_t::doublean:             return ',';
-    case type_t::boolean:              return '#';
-    case type_t::big_number:           return '(';
-    case type_t::simple_string:        return '+';
-    case type_t::null:                 return '_';
-    case type_t::push:                 return '>';
-    case type_t::set:                  return '~';
-    case type_t::array:                return '*';
-    case type_t::attribute:            return '|';
-    case type_t::map:                  return '%';
+    case type3::blob_error:           return '!';
+    case type3::verbatim_string:      return '=';
+    case type3::blob_string:          return '$';
+    case type3::streamed_string_part: return ';';
+    case type3::simple_error:         return '-';
+    case type3::number:               return ':';
+    case type3::doublean:             return ',';
+    case type3::boolean:              return '#';
+    case type3::big_number:           return '(';
+    case type3::simple_string:        return '+';
+    case type3::null:                 return '_';
+    case type3::push:                 return '>';
+    case type3::set:                  return '~';
+    case type3::array:                return '*';
+    case type3::attribute:            return '|';
+    case type3::map:                  return '%';
 
      default: REDISUS_ASSERT(false); return ' ';
       // clang-format on
@@ -119,26 +119,26 @@ constexpr auto to_code(type_t type) noexcept -> char {
 }
 
 // Converts a wire-format RESP3 type (char) to a resp3 type.
-constexpr auto to_type(char c) noexcept -> type_t {
+constexpr auto to_type(char c) noexcept -> type3 {
   switch (c) {
       // clang-format off
-    case '!': return type_t::blob_error;
-    case '=': return type_t::verbatim_string;
-    case '$': return type_t::blob_string;
-    case ';': return type_t::streamed_string_part;
-    case '-': return type_t::simple_error;
-    case ':': return type_t::number;
-    case ',': return type_t::doublean;
-    case '#': return type_t::boolean;
-    case '(': return type_t::big_number;
-    case '+': return type_t::simple_string;
-    case '_': return type_t::null;
-    case '>': return type_t::push;
-    case '~': return type_t::set;
-    case '*': return type_t::array;
-    case '|': return type_t::attribute;
-    case '%': return type_t::map;
-    default:  return type_t::invalid;
+    case '!': return type3::blob_error;
+    case '=': return type3::verbatim_string;
+    case '$': return type3::blob_string;
+    case ';': return type3::streamed_string_part;
+    case '-': return type3::simple_error;
+    case ':': return type3::number;
+    case ',': return type3::doublean;
+    case '#': return type3::boolean;
+    case '(': return type3::big_number;
+    case '+': return type3::simple_string;
+    case '_': return type3::null;
+    case '>': return type3::push;
+    case '~': return type3::set;
+    case '*': return type3::array;
+    case '|': return type3::attribute;
+    case '%': return type3::map;
+    default:  return type3::invalid;
       // clang-format on
   }
 }
