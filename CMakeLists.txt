@@ -9,7 +9,7 @@ option(REDISUS_BUILD_TESTS "Build tests" ON)
 add_library(redisus INTERFACE)
 
 # Set C++ standard
-target_compile_features(redisus INTERFACE cxx_std_17)
+target_compile_features(redisus INTERFACE cxx_std_20)
 
 # Add include directories
 target_include_directories(redisus INTERFACE

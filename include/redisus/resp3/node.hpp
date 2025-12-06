@@ -32,7 +32,7 @@ struct basic_node {
   type3 data_type = type3::invalid;
 
   /// The data: either aggregate size or value.
-  std::variant<std::size_t, String> data{std::size_t{0}};
+  std::variant<std::size_t, String> data;
 
   /** @brief Returns the aggregate size.
    *  @note Only valid when data_type is an aggregate type.
@@ -56,17 +56,6 @@ struct basic_node {
   auto is_aggregate_node() const -> bool {
     return std::holds_alternative<std::size_t>(data);
   }
-};
-
-/** @brief Compares a node for equality.
- *  @relates basic_node
- *
- *  @param a Left hand side node object.
- *  @param b Right hand side node object.
- */
-template <class String>
-auto operator==(basic_node<String> const& a, basic_node<String> const& b) {
-  return a.data_type == b.data_type && a.data == b.data;
 };
 
 /// A node in the response tree that owns its data.
