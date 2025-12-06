@@ -93,9 +93,17 @@ class generator {
 
 class parser {
  public:
-  using result = std::optional<node_view>;
-
   static constexpr std::string_view sep = "\r\n";
+
+  parser() { reset(); }
+
+  // Returns true when the parser is done with the current message.
+  [[nodiscard]] auto done() const noexcept -> bool;
+
+  auto consumed() const noexcept -> std::size_t;
+
+  // Coroutine that yields parsed nodes
+  auto parse(std::string_view view, std::error_code& ec) -> generator<node_view>;
 
  private:
   std::string_view view_;
@@ -106,10 +114,6 @@ class parser {
   auto read_until_separator() -> std::optional<std::string_view>;
   auto read_bulk_data(std::size_t length) -> std::optional<std::string_view>;
 
-  // Coroutine that yields parsed nodes
-  auto parse_elements(std::error_code& ec) -> generator<node_view>;
-  auto parse_element(std::string_view line, std::error_code& ec) -> generator<node_view>;
-
   void commit_elem() noexcept;
 
   void reset() {
@@ -117,34 +121,6 @@ class parser {
     pending_ = std::stack<size_t>();
     pending_.push(1);
   }
-
- public:
-  parser() { reset(); }
-
-  // Returns true when the parser is done with the current message.
-  [[nodiscard]] auto done() const noexcept -> bool;
-
-  auto consumed() const noexcept -> std::size_t;
-
-  auto consume(std::string_view view, std::error_code& ec) noexcept -> result;
 };
-
-// Returns false if more data is needed. If true is returned the
-// parser is either done or an error occured, that can be checked on
-// ec.
-template <class Adapter>
-bool parse(parser& p, std::string_view const& msg, Adapter& adapter, std::error_code& ec) {
-  while (!p.done()) {
-    auto const res = p.consume(msg, ec);
-    if (ec) return true;
-
-    if (!res) return false;
-
-    adapter.on_node(res.value(), ec);
-    if (ec) return true;
-  }
-
-  return true;
-}
 
 }  // namespace redisus::resp3
