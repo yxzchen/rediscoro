@@ -63,9 +63,9 @@ class generator {
     if (!handle_ || handle_.done()) return false;
     handle_.resume();
     if (handle_.promise().exception_) {
-      return false;
+      std::rethrow_exception(handle_.promise().exception_);
     }
-    return true;
+    return !handle_.done();
   }
 
   T& value() { return handle_.promise().current_value; }

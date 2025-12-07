@@ -22,8 +22,10 @@ namespace redisus::resp3 {
 class parser {
  public:
   static constexpr std::string_view sep = "\r\n";
+  static constexpr std::size_t default_max_depth = 64;
 
-  explicit parser(std::size_t buffer_capacity = 8192) : buffer_(buffer_capacity) {}
+  explicit parser(std::size_t buffer_capacity = 8192, std::size_t max_depth = default_max_depth)
+    : buffer_(buffer_capacity), max_depth_(max_depth) {}
 
   // Feed data to the parser buffer
   void feed(std::string_view data) {
@@ -45,10 +47,10 @@ class parser {
   buffer buffer_;
   std::stack<size_t> pending_;
   std::error_code ec_;
+  std::size_t max_depth_;
 
-  // Helper functions for parsing (consume buffer on successful read)
-  auto read_until_separator() -> std::optional<std::string_view>;
-  auto read_bulk_data(std::size_t length) -> std::optional<std::string_view>;
+  auto read_until_separator() noexcept -> std::optional<std::string_view>;
+  auto read_bulk_data(std::size_t length) noexcept -> std::optional<std::string_view>;
 
   void commit_elem() noexcept;
 };

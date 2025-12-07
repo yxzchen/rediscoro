@@ -18,8 +18,14 @@ enum class error {
   /// Can't parse the string as a number.
   not_a_number,
 
+  /// Number parsing consumed only part of the input.
+  invalid_number_format,
+
   /// The maximum depth of a nested response was exceeded.
   exceeeds_max_nested_depth,
+
+  /// Aggregate size would cause integer overflow.
+  aggregate_size_overflow,
 
   /// Got non boolean value.
   unexpected_bool_value,
@@ -92,8 +98,6 @@ enum class error {
 
   /// Timeout while writing data to the server.
   write_timeout,
-
-  unhandled_exception,
 };
 
 /**

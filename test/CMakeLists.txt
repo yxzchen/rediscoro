@@ -1,6 +1,10 @@
-# Test executable for partial feeding
-add_executable(partial_feeding_test partial_feeding_test.cpp)
-target_link_libraries(partial_feeding_test PRIVATE redisus)
+# Find Google Test
+find_package(GTest REQUIRED)
+
+# Test executable
+add_executable(parser_test parser_test.cpp)
+target_link_libraries(parser_test PRIVATE redisus GTest::gtest GTest::gtest_main)
 
 # Add test
-add_test(NAME partial_feeding_test COMMAND partial_feeding_test)
+include(GoogleTest)
+gtest_discover_tests(parser_test)
