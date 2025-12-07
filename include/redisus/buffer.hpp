@@ -6,10 +6,14 @@
 
 #pragma once
 
+#include <redisus/assert.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -33,6 +37,7 @@ class buffer {
   }
 
   void commit(std::size_t n) {
+    REDISUS_ASSERT(write_pos_ + n <= data_.size());
     write_pos_ += n;
   }
 
@@ -41,6 +46,7 @@ class buffer {
   }
 
   void consume(std::size_t n) {
+    REDISUS_ASSERT(read_pos_ + n <= write_pos_);
     read_pos_ += n;
   }
 
@@ -88,12 +94,20 @@ class buffer {
 
   void ensure_writable(std::size_t n) {
     if (writable_size() < n) {
-      // Just grow the buffer - never auto-compact to preserve string_view validity
-      std::size_t new_capacity = data_.size();
+      // Check for overflow
+      if (n > std::numeric_limits<std::size_t>::max() - write_pos_) {
+        throw std::length_error("Buffer size would overflow");
+      }
+
       std::size_t needed = write_pos_ + n;
+      std::size_t new_capacity = data_.size();
+
+      // Optimize growth: double until we reach needed, or use needed if larger
+      if (new_capacity == 0) new_capacity = 1;
       while (new_capacity < needed) {
         new_capacity *= 2;
       }
+
       data_.resize(new_capacity);
     }
   }

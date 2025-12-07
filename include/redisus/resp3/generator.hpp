@@ -69,6 +69,7 @@ class generator {
   }
 
   T& value() { return handle_.promise().current_value; }
+  const T& value() const { return handle_.promise().current_value; }
 
  private:
   handle_type handle_;

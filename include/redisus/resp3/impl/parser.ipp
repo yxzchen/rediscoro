@@ -50,10 +50,23 @@ auto parser::read_until_separator() noexcept -> std::optional<std::string_view> 
   return result;
 }
 
-auto parser::read_bulk_data(std::size_t length) noexcept -> std::optional<std::string_view> {
+auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept -> std::optional<std::string_view> {
   auto view = buffer_.view();
+
+  // Check for overflow when adding 2 for \r\n
+  if (length > std::numeric_limits<std::size_t>::max() - 2) {
+    ec = error::invalid_data_type;
+    return std::nullopt;
+  }
+
   auto const span = length + 2;
   if (view.length() < span) {
+    return std::nullopt;  // Need more data
+  }
+
+  // Validate CRLF terminator
+  if (view[length] != '\r' || view[length + 1] != '\n') {
+    ec = error::invalid_data_type;
     return std::nullopt;
   }
 
@@ -64,6 +77,7 @@ auto parser::read_bulk_data(std::size_t length) noexcept -> std::optional<std::s
 
 auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
   std::vector<node_view> nodes;
+  nodes.reserve(16);  // Reserve initial capacity to reduce reallocations
   std::optional<std::string_view> line;
   std::optional<std::string_view> bulk_data;
 
@@ -74,10 +88,6 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
     }
 
     // === Wait for header line ===
-    while (buffer_.empty()) {
-      co_yield std::nullopt;
-    }
-
     while (!(line = read_until_separator())) {
       co_yield std::nullopt;
     }
@@ -105,7 +115,8 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
           commit_elem();
           nodes.push_back(node_view{type3::streamed_string_part, std::string_view{}});
         } else {
-          while (!(bulk_data = read_bulk_data(bulk_length))) {
+          while (!(bulk_data = read_bulk_data(bulk_length, ec_))) {
+            if (ec_) co_return;
             co_yield std::nullopt;
           }
           commit_elem();
@@ -135,7 +146,8 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
           to_int(bulk_length, elem, ec_);
           if (ec_) co_return;
 
-          while (!(bulk_data = read_bulk_data(bulk_length))) {
+          while (!(bulk_data = read_bulk_data(bulk_length, ec_))) {
+            if (ec_) co_return;
             co_yield std::nullopt;
           }
           commit_elem();

@@ -75,7 +75,7 @@ class parser {
   std::size_t max_depth_;
 
   auto read_until_separator() noexcept -> std::optional<std::string_view>;
-  auto read_bulk_data(std::size_t length) noexcept -> std::optional<std::string_view>;
+  auto read_bulk_data(std::size_t length, std::error_code& ec) noexcept -> std::optional<std::string_view>;
 
   void commit_elem() noexcept;
 };
