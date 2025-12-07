@@ -41,7 +41,8 @@ install(EXPORT redisus-targets
     DESTINATION lib/cmake/redisus
 )
 
-# Tests removed - will be rewritten later
-# if(REDISUS_BUILD_TESTS)
-#     add_subdirectory(test)
-# endif()
+# Tests
+if(REDISUS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()

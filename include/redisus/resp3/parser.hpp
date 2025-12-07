@@ -42,7 +42,9 @@ class generator {
     void unhandled_exception() noexcept {}
   };
 
-  explicit generator(std::coroutine_handle<promise_type> handle) : handle_(handle) {}
+  using handle_type = std::coroutine_handle<promise_type>;
+
+  explicit generator(handle_type handle) : handle_(handle) {}
 
   ~generator() {
     if (handle_) handle_.destroy();
@@ -61,35 +63,25 @@ class generator {
     return *this;
   }
 
-  // Iterator interface - generator acts as its own iterator
-  generator& operator++() {
+  bool next() {
+    if (!handle_ || handle_.done()) return false;
     handle_.resume();
-    return *this;
+    return true;
   }
 
-  T& operator*() const { return handle_.promise().current_value; }
-
-  bool operator==(std::default_sentinel_t) const { return !handle_ || handle_.done(); }
-
-  // Range interface
-  generator& begin() {
-    if (handle_) {
-      handle_.resume();
-    }
-    return *this;
-  }
-
-  std::default_sentinel_t end() const noexcept { return {}; }
+  T& value() { return handle_.promise().current_value; }
 
  private:
-  std::coroutine_handle<promise_type> handle_;
+  handle_type handle_;
 };
 
 class parser {
  public:
   static constexpr std::string_view sep = "\r\n";
 
-  explicit parser(std::size_t buffer_capacity = 8192) : buffer_(buffer_capacity) { reset(); }
+  explicit parser(std::size_t buffer_capacity = 8192) : buffer_(buffer_capacity) {
+    pending_.push(1);
+  }
 
   // Feed data to the parser buffer
   void feed(std::string_view data) {
@@ -105,9 +97,6 @@ class parser {
   void commit(std::size_t n) {
     buffer_.commit(n);
   }
-
-  // Returns true when the parser is done with the current message
-  [[nodiscard]] auto done() const noexcept -> bool;
 
   // Coroutine that yields parsed messages (runs forever until error)
   // Yields nullopt when needs more data, yields complete message when available
@@ -132,13 +121,6 @@ class parser {
   auto read_bulk_data(std::size_t length) -> std::optional<std::string_view>;
 
   void commit_elem() noexcept;
-
-  void reset() {
-    pending_.push(1);
-    state_ = state::read_header;
-    pending_bulk_length_ = 0;
-    pending_type_ = type3::invalid;
-  }
 };
 
 }  // namespace redisus::resp3

@@ -24,10 +24,6 @@ void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
 
 }  // namespace
 
-bool parser::done() const noexcept {
-  return pending_.empty();
-}
-
 void parser::commit_elem() noexcept {
   pending_.top()--;
   while (pending_.top() == 0) {

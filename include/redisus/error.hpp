@@ -92,6 +92,8 @@ enum class error {
 
   /// Timeout while writing data to the server.
   write_timeout,
+
+  unhandled_exception,
 };
 
 /**
