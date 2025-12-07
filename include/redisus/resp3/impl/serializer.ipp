@@ -22,8 +22,6 @@ void add_blob(std::string& payload, std::string_view blob) {
   payload += parser::sep;
 }
 
-void add_separator(std::string& payload) {
-  payload += parser::sep;
-}
+void add_separator(std::string& payload) { payload += parser::sep; }
 
 }  // namespace redisus::resp3

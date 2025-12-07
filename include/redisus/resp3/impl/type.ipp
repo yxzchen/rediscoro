@@ -8,6 +8,7 @@
 
 namespace redisus::resp3 {
 
+// clang-format off
 auto to_string(type3 type) noexcept -> char const*
 {
    switch (type) {
@@ -31,11 +32,11 @@ auto to_string(type3 type) noexcept -> char const*
       default:                         return "invalid";
    }
 }
+// clang-format on
 
-auto operator<<(std::ostream& os, type3 type) -> std::ostream&
-{
-   os << to_string(type);
-   return os;
+auto operator<<(std::ostream& os, type3 type) -> std::ostream& {
+  os << to_string(type);
+  return os;
 }
 
 }  // namespace redisus::resp3

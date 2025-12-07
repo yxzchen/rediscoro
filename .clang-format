@@ -1,6 +1,6 @@
 Language: Cpp
 BasedOnStyle: Google
-ColumnLimit: 180
+ColumnLimit: 120
 
 DerivePointerAlignment: false
 
@@ -9,4 +9,4 @@ PointerAlignment: Left
 SortIncludes: true
 IncludeBlocks: Preserve
 
-AllowShortFunctionsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: true

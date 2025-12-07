@@ -6,9 +6,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <redisus/resp3/type.hpp>
 #include <variant>
-#include <cstddef>
 
 namespace redisus::resp3 {
 
@@ -38,24 +38,18 @@ struct basic_node {
    *  @note Only valid when data_type is an aggregate type.
    *  @return The number of elements in the aggregate.
    */
-  auto aggregate_size() const -> std::size_t {
-    return std::get<std::size_t>(data);
-  }
+  auto aggregate_size() const -> std::size_t { return std::get<std::size_t>(data); }
 
   /** @brief Returns the value.
    *  @note Only valid when data_type is a simple type.
    *  @return Reference to the value string.
    */
-  auto value() const -> String const& {
-    return std::get<String>(data);
-  }
+  auto value() const -> String const& { return std::get<String>(data); }
 
   /** @brief Checks if this node holds an aggregate.
    *  @return True if the node contains an aggregate size, false if it contains a value.
    */
-  auto is_aggregate_node() const -> bool {
-    return std::holds_alternative<std::size_t>(data);
-  }
+  auto is_aggregate_node() const -> bool { return std::holds_alternative<std::size_t>(data); }
 };
 
 /// A node in the response tree that owns its data.

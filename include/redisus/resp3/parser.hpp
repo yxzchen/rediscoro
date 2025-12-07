@@ -25,15 +25,10 @@ class parser {
   static constexpr std::size_t default_max_depth = 64;
 
   explicit parser(std::size_t buffer_capacity = 8192, std::size_t max_depth = default_max_depth)
-    : buffer_(buffer_capacity), max_depth_(max_depth) {}
+      : buffer_(buffer_capacity), max_depth_(max_depth) {}
 
-  void feed(std::string_view data) {
-    buffer_.feed(data);
-  }
-
-  std::span<char> prepare(std::size_t n) {
-    return buffer_.prepare(n);
-  }
+  void feed(std::string_view data) { buffer_.feed(data); }
+  std::span<char> prepare(std::size_t n) { return buffer_.prepare(n); }
 
   /** @brief Manually compact the internal buffer.
    *
@@ -44,9 +39,7 @@ class parser {
    *  The buffer grows automatically but never shrinks or compacts automatically
    *  to preserve string_view validity.
    */
-  void compact() {
-    buffer_.compact();
-  }
+  void compact() { buffer_.compact(); }
 
   std::error_code error() const { return ec_; }
 
