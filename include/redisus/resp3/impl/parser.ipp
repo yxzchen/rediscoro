@@ -56,40 +56,35 @@ auto parser::read_bulk_data(std::size_t length) -> std::optional<std::string_vie
 
 auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
   std::vector<node_view> nodes;
+  std::optional<std::string_view> line;
+  std::optional<std::string_view> bulk_data;
 
-  // Parse forever until error
   while (!ec_) {
-    // Initialize pending for new message if needed
+    // === Prepare for new message ===
     if (pending_.empty()) {
       pending_.push(1);
     }
 
-    // Wait for data if buffer is empty
+    // === Wait for header line ===
     while (buffer_.empty()) {
       co_yield std::nullopt;
     }
 
-    // Read line until \r\n
-    auto line = read_until_separator();
-    while (!line) {
+    while (!(line = read_until_separator())) {
       co_yield std::nullopt;
-      line = read_until_separator();
     }
 
+    // === Parse header ===
     REDISUS_ASSERT(!pending_.empty());
-
     if (line->empty()) {
       ec_ = error::invalid_data_type;
       co_return;
     }
 
-    // Extract type from first character
-    char type_char = line->at(0);
-    type3 type = to_type(type_char);
-
-    // Rest is element data
+    auto type = to_type(line->at(0));
     auto elem = line->substr(1);
 
+    // === Parse element by type ===
     switch (type) {
       case type3::streamed_string_part: {
         std::size_t bulk_length;
@@ -97,18 +92,13 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
         if (ec_) co_return;
 
         if (bulk_length == 0) {
-          // Terminator for streamed string
           pending_.top() = 1;
           commit_elem();
           nodes.push_back(node_view{type3::streamed_string_part, std::string_view{}});
         } else {
-          // Read the bulk data - loop until successful
-          auto bulk_data = read_bulk_data(bulk_length);
-          while (!bulk_data) {
+          while (!(bulk_data = read_bulk_data(bulk_length))) {
             co_yield std::nullopt;
-            bulk_data = read_bulk_data(bulk_length);
           }
-
           commit_elem();
           nodes.push_back(node_view{type3::streamed_string_part, *bulk_data});
         }
@@ -124,7 +114,6 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
         }
 
         if (elem.at(0) == '?') {
-          // Streamed string marker
           pending_.push(std::numeric_limits<std::size_t>::max());
           nodes.push_back(node_view{type3::streamed_string, std::size_t{0}});
         } else {
@@ -132,13 +121,9 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
           to_int(bulk_length, elem, ec_);
           if (ec_) co_return;
 
-          // Read the bulk data - loop until successful
-          auto bulk_data = read_bulk_data(bulk_length);
-          while (!bulk_data) {
+          while (!(bulk_data = read_bulk_data(bulk_length))) {
             co_yield std::nullopt;
-            bulk_data = read_bulk_data(bulk_length);
           }
-
           commit_elem();
           nodes.push_back(node_view{type, *bulk_data});
         }
@@ -204,7 +189,7 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
       }
     }
 
-    // Check if message is complete after processing any node
+    // === Yield complete message ===
     if (pending_.empty()) {
       co_yield std::optional<std::vector<node_view>>{std::move(nodes)};
       nodes.clear();
