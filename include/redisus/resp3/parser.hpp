@@ -111,16 +111,6 @@ class parser {
   std::stack<size_t> pending_;
   std::error_code ec_;
 
-  // Parser state for resumption
-  enum class state {
-    read_header,
-    read_bulk_data,
-  };
-
-  state state_ = state::read_header;
-  std::size_t pending_bulk_length_ = 0;
-  type3 pending_type_ = type3::invalid;
-
   // Helper functions for parsing (consume buffer on successful read)
   auto read_until_separator() -> std::optional<std::string_view>;
   auto read_bulk_data(std::size_t length) -> std::optional<std::string_view>;

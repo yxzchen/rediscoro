@@ -15,14 +15,10 @@
 
 namespace redisus::resp3 {
 
-namespace {
-
 void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
   auto const res = std::from_chars(sv.data(), sv.data() + std::size(sv), i);
   if (res.ec != std::errc()) ec = error::not_a_number;
 }
-
-}  // namespace
 
 void parser::commit_elem() noexcept {
   pending_.top()--;
@@ -63,175 +59,143 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
 
   // Parse forever until error
   while (!ec_) {
-    switch (state_) {
-      case state::read_header: {
-        // Wait for data if buffer is empty
-        if (buffer_.empty()) {
-          co_yield std::nullopt;
-          continue;
-        }
+    // Wait for data if buffer is empty
+    while (buffer_.empty()) {
+      co_yield std::nullopt;
+    }
 
-        // Read line until \r\n
-        auto line = read_until_separator();
-        if (!line) {
-          co_yield std::nullopt;
-          continue;
-        }
+    // Read line until \r\n
+    auto line = read_until_separator();
+    while (!line) {
+      co_yield std::nullopt;
+      line = read_until_separator();
+    }
 
-        REDISUS_ASSERT(!pending_.empty());
+    REDISUS_ASSERT(!pending_.empty());
 
-        if (line->empty()) {
-          ec_ = error::invalid_data_type;
-          co_return;
-        }
+    if (line->empty()) {
+      ec_ = error::invalid_data_type;
+      co_return;
+    }
 
-        // Extract type from first character
-        char type_char = line->at(0);
-        type3 type = to_type(type_char);
+    // Extract type from first character
+    char type_char = line->at(0);
+    type3 type = to_type(type_char);
 
-        // Rest is element data
-        auto elem = line->substr(1);
+    // Rest is element data
+    auto elem = line->substr(1);
 
-        switch (type) {
-          case type3::streamed_string_part: {
-            std::size_t bulk_length;
-            to_int(bulk_length, elem, ec_);
-            if (ec_) co_return;
+    switch (type) {
+      case type3::streamed_string_part: {
+        std::size_t bulk_length;
+        to_int(bulk_length, elem, ec_);
+        if (ec_) co_return;
 
-            if (bulk_length == 0) {
-              // Terminator for streamed string
-              pending_.top() = 1;
-              commit_elem();
-              nodes.push_back(node_view{type3::streamed_string_part, std::string_view{}});
-            } else {
-              // Read the bulk data
-              auto bulk_data = read_bulk_data(bulk_length);
-              if (!bulk_data) {
-                // Need more data - save state and yield
-                pending_bulk_length_ = bulk_length;
-                pending_type_ = type3::streamed_string_part;
-                state_ = state::read_bulk_data;
-                co_yield std::nullopt;
-                continue;
-              }
-
-              commit_elem();
-              nodes.push_back(node_view{type3::streamed_string_part, *bulk_data});
-            }
-            break;
+        if (bulk_length == 0) {
+          // Terminator for streamed string
+          pending_.top() = 1;
+          commit_elem();
+          nodes.push_back(node_view{type3::streamed_string_part, std::string_view{}});
+        } else {
+          // Read the bulk data - loop until successful
+          auto bulk_data = read_bulk_data(bulk_length);
+          while (!bulk_data) {
+            co_yield std::nullopt;
+            bulk_data = read_bulk_data(bulk_length);
           }
 
-          case type3::blob_error:
-          case type3::verbatim_string:
-          case type3::blob_string: {
-            if (std::empty(elem)) {
-              ec_ = error::empty_field;
-              co_return;
-            }
-
-            if (elem.at(0) == '?') {
-              // Streamed string marker
-              pending_.push(std::numeric_limits<std::size_t>::max());
-              nodes.push_back(node_view{type3::streamed_string, std::size_t{0}});
-            } else {
-              std::size_t bulk_length;
-              to_int(bulk_length, elem, ec_);
-              if (ec_) co_return;
-
-              // Read the bulk data
-              auto bulk_data = read_bulk_data(bulk_length);
-              if (!bulk_data) {
-                // Need more data - save state and yield
-                pending_bulk_length_ = bulk_length;
-                pending_type_ = type;
-                state_ = state::read_bulk_data;
-                co_yield std::nullopt;
-                continue;
-              }
-
-              commit_elem();
-              nodes.push_back(node_view{type, *bulk_data});
-            }
-            break;
-          }
-
-          case type3::boolean: {
-            if (std::empty(elem)) {
-              ec_ = error::empty_field;
-              co_return;
-            }
-
-            if (elem.at(0) != 'f' && elem.at(0) != 't') {
-              ec_ = error::unexpected_bool_value;
-              co_return;
-            }
-
-            commit_elem();
-            nodes.push_back(node_view{type, elem});
-            break;
-          }
-
-          case type3::doublean:
-          case type3::big_number:
-          case type3::number: {
-            if (std::empty(elem)) {
-              ec_ = error::empty_field;
-              co_return;
-            }
-            [[fallthrough]];
-          }
-
-          case type3::simple_error:
-          case type3::simple_string:
-          case type3::null: {
-            commit_elem();
-            nodes.push_back(node_view{type, elem});
-            break;
-          }
-
-          case type3::push:
-          case type3::set:
-          case type3::array:
-          case type3::attribute:
-          case type3::map: {
-            std::size_t size;
-            to_int(size, elem, ec_);
-            if (ec_) co_return;
-
-            if (size == 0) {
-              commit_elem();
-            } else {
-              pending_.push(size * element_multiplicity(type));
-            }
-
-            nodes.push_back(node_view{type, size});
-            break;
-          }
-
-          default: {
-            ec_ = error::invalid_data_type;
-            co_return;
-          }
+          commit_elem();
+          nodes.push_back(node_view{type3::streamed_string_part, *bulk_data});
         }
         break;
       }
 
-      case state::read_bulk_data: {
-        // Resume reading bulk data
-        auto bulk_data = read_bulk_data(pending_bulk_length_);
-        if (!bulk_data) {
-          co_yield std::nullopt;
-          continue;
+      case type3::blob_error:
+      case type3::verbatim_string:
+      case type3::blob_string: {
+        if (std::empty(elem)) {
+          ec_ = error::empty_field;
+          co_return;
+        }
+
+        if (elem.at(0) == '?') {
+          // Streamed string marker
+          pending_.push(std::numeric_limits<std::size_t>::max());
+          nodes.push_back(node_view{type3::streamed_string, std::size_t{0}});
+        } else {
+          std::size_t bulk_length;
+          to_int(bulk_length, elem, ec_);
+          if (ec_) co_return;
+
+          // Read the bulk data - loop until successful
+          auto bulk_data = read_bulk_data(bulk_length);
+          while (!bulk_data) {
+            co_yield std::nullopt;
+            bulk_data = read_bulk_data(bulk_length);
+          }
+
+          commit_elem();
+          nodes.push_back(node_view{type, *bulk_data});
+        }
+        break;
+      }
+
+      case type3::boolean: {
+        if (std::empty(elem)) {
+          ec_ = error::empty_field;
+          co_return;
+        }
+
+        if (elem.at(0) != 'f' && elem.at(0) != 't') {
+          ec_ = error::unexpected_bool_value;
+          co_return;
         }
 
         commit_elem();
-        nodes.push_back(node_view{pending_type_, *bulk_data});
-
-        // Reset to header state
-        state_ = state::read_header;
-        pending_bulk_length_ = 0;
-        pending_type_ = type3::invalid;
+        nodes.push_back(node_view{type, elem});
         break;
+      }
+
+      case type3::doublean:
+      case type3::big_number:
+      case type3::number: {
+        if (std::empty(elem)) {
+          ec_ = error::empty_field;
+          co_return;
+        }
+        [[fallthrough]];
+      }
+
+      case type3::simple_error:
+      case type3::simple_string:
+      case type3::null: {
+        commit_elem();
+        nodes.push_back(node_view{type, elem});
+        break;
+      }
+
+      case type3::push:
+      case type3::set:
+      case type3::array:
+      case type3::attribute:
+      case type3::map: {
+        std::size_t size;
+        to_int(size, elem, ec_);
+        if (ec_) co_return;
+
+        if (size == 0) {
+          commit_elem();
+        } else {
+          pending_.push(size * element_multiplicity(type));
+        }
+
+        nodes.push_back(node_view{type, size});
+        break;
+      }
+
+      default: {
+        ec_ = error::invalid_data_type;
+        co_return;
       }
     }
 
