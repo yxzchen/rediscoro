@@ -25,22 +25,6 @@ else()
     message(STATUS "Redisus: Assertions are DISABLED")
 endif()
 
-# Installation rules
-install(TARGETS redisus
-    EXPORT redisus-targets
-    INCLUDES DESTINATION include
-)
-
-install(DIRECTORY include/
-    DESTINATION include
-)
-
-install(EXPORT redisus-targets
-    FILE redisus-targets.cmake
-    NAMESPACE redisus::
-    DESTINATION lib/cmake/redisus
-)
-
 # Tests
 if(REDISUS_BUILD_TESTS)
     enable_testing()
