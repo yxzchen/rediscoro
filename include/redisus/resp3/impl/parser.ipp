@@ -59,6 +59,11 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
 
   // Parse forever until error
   while (!ec_) {
+    // Initialize pending for new message if needed
+    if (pending_.empty()) {
+      pending_.push(1);
+    }
+
     // Wait for data if buffer is empty
     while (buffer_.empty()) {
       co_yield std::nullopt;
@@ -203,7 +208,6 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
     if (pending_.empty()) {
       co_yield std::optional<std::vector<node_view>>{std::move(nodes)};
       nodes.clear();
-      pending_.push(1);
     }
   }
 }
