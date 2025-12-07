@@ -11,6 +11,7 @@
 #include <charconv>
 #include <cstddef>
 #include <limits>
+#include <vector>
 
 namespace redisus::resp3 {
 
@@ -61,7 +62,9 @@ auto parser::read_bulk_data(std::size_t length) -> std::optional<std::string_vie
   return result;
 }
 
-auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
+auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<node_view>>> {
+  std::vector<node_view> nodes;
+
   // Parse forever until error
   while (!ec) {
     switch (state_) {
@@ -103,7 +106,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
               // Terminator for streamed string
               pending_.top() = 1;
               commit_elem();
-              co_yield std::optional<node_view>{node_view{type3::streamed_string_part, std::string_view{}}};
+              nodes.push_back(node_view{type3::streamed_string_part, std::string_view{}});
             } else {
               // Read the bulk data
               auto bulk_data = read_bulk_data(bulk_length);
@@ -117,7 +120,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
               }
 
               commit_elem();
-              co_yield std::optional<node_view>{node_view{type3::streamed_string_part, *bulk_data}};
+              nodes.push_back(node_view{type3::streamed_string_part, *bulk_data});
             }
             break;
           }
@@ -133,7 +136,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
             if (elem.at(0) == '?') {
               // Streamed string marker
               pending_.push(std::numeric_limits<std::size_t>::max());
-              co_yield std::optional<node_view>{node_view{type3::streamed_string, std::size_t{0}}};
+              nodes.push_back(node_view{type3::streamed_string, std::size_t{0}});
             } else {
               std::size_t bulk_length;
               to_int(bulk_length, elem, ec);
@@ -151,7 +154,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
               }
 
               commit_elem();
-              co_yield std::optional<node_view>{node_view{type, *bulk_data}};
+              nodes.push_back(node_view{type, *bulk_data});
             }
             break;
           }
@@ -168,7 +171,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
             }
 
             commit_elem();
-            co_yield std::optional<node_view>{node_view{type, elem}};
+            nodes.push_back(node_view{type, elem});
             break;
           }
 
@@ -186,7 +189,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
           case type3::simple_string:
           case type3::null: {
             commit_elem();
-            co_yield std::optional<node_view>{node_view{type, elem}};
+            nodes.push_back(node_view{type, elem});
             break;
           }
 
@@ -205,7 +208,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
               pending_.push(size * element_multiplicity(type));
             }
 
-            co_yield std::optional<node_view>{node_view{type, size}};
+            nodes.push_back(node_view{type, size});
             break;
           }
 
@@ -226,7 +229,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
         }
 
         commit_elem();
-        co_yield std::optional<node_view>{node_view{pending_type_, *bulk_data}};
+        nodes.push_back(node_view{pending_type_, *bulk_data});
 
         // Reset to header state
         state_ = state::read_header;
@@ -234,6 +237,13 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<node_view>> {
         pending_type_ = type3::invalid;
         break;
       }
+    }
+
+    // Check if message is complete after processing any node
+    if (pending_.empty()) {
+      co_yield std::optional<std::vector<node_view>>{std::move(nodes)};
+      nodes.clear();
+      pending_.push(1);
     }
   }
 }

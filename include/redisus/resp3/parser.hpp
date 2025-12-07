@@ -109,9 +109,9 @@ class parser {
   // Returns true when the parser is done with the current message
   [[nodiscard]] auto done() const noexcept -> bool;
 
-  // Coroutine that yields parsed nodes (runs forever until error)
-  // Yields nullopt when needs more data, yields node when available
-  auto parse(std::error_code& ec) -> generator<std::optional<node_view>>;
+  // Coroutine that yields parsed messages (runs forever until error)
+  // Yields nullopt when needs more data, yields complete message when available
+  auto parse(std::error_code& ec) -> generator<std::optional<std::vector<node_view>>>;
 
  private:
   buffer buffer_;
@@ -134,7 +134,6 @@ class parser {
   void commit_elem() noexcept;
 
   void reset() {
-    pending_ = std::stack<size_t>();
     pending_.push(1);
     state_ = state::read_header;
     pending_bulk_length_ = 0;
