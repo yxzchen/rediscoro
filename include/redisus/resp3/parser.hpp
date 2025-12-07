@@ -25,6 +25,7 @@ class generator {
  public:
   struct promise_type {
     T current_value;
+    std::exception_ptr exception_;
 
     generator get_return_object() {
       return generator{std::coroutine_handle<promise_type>::from_promise(*this)};
@@ -39,7 +40,10 @@ class generator {
     }
 
     void return_void() noexcept {}
-    void unhandled_exception() noexcept {}
+    void unhandled_exception() noexcept {
+      // TODO: Add logging when logger is available
+      exception_ = std::current_exception();
+    }
   };
 
   using handle_type = std::coroutine_handle<promise_type>;
@@ -66,6 +70,9 @@ class generator {
   bool next() {
     if (!handle_ || handle_.done()) return false;
     handle_.resume();
+    if (handle_.promise().exception_) {
+      return false;
+    }
     return true;
   }
 
@@ -93,18 +100,16 @@ class parser {
     return buffer_.prepare(n);
   }
 
-  // Commit bytes written to buffer
-  void commit(std::size_t n) {
-    buffer_.commit(n);
-  }
+  std::error_code error() const { return ec_; }
 
   // Coroutine that yields parsed messages (runs forever until error)
   // Yields nullopt when needs more data, yields complete message when available
-  auto parse(std::error_code& ec) -> generator<std::optional<std::vector<node_view>>>;
+  auto parse() -> generator<std::optional<std::vector<node_view>>>;
 
  private:
   buffer buffer_;
   std::stack<size_t> pending_;
+  std::error_code ec_;
 
   // Parser state for resumption
   enum class state {

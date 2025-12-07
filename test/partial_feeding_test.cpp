@@ -7,9 +7,8 @@
 
 void test_partial_feeding() {
   redisus::resp3::parser p;
-  std::error_code ec;
 
-  auto gen = p.parse(ec);
+  auto gen = p.parse();
 
   // Feed first chunk of Message 1: +OK\r\n (simple string)
   p.feed("+OK");
@@ -68,6 +67,8 @@ void test_partial_feeding() {
   assert(result->at(0).data_type == redisus::resp3::type3::number);
   std::cout << "Message 3: number parsed successfully\n";
 
+  // Verify no errors occurred
+  assert(!p.error());
   std::cout << "\nAll partial feeding tests passed!\n";
 }
 

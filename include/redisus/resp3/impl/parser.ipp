@@ -58,11 +58,11 @@ auto parser::read_bulk_data(std::size_t length) -> std::optional<std::string_vie
   return result;
 }
 
-auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<node_view>>> {
+auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
   std::vector<node_view> nodes;
 
   // Parse forever until error
-  while (!ec) {
+  while (!ec_) {
     switch (state_) {
       case state::read_header: {
         // Wait for data if buffer is empty
@@ -81,7 +81,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
         REDISUS_ASSERT(!pending_.empty());
 
         if (line->empty()) {
-          ec = error::invalid_data_type;
+          ec_ = error::invalid_data_type;
           co_return;
         }
 
@@ -95,8 +95,8 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
         switch (type) {
           case type3::streamed_string_part: {
             std::size_t bulk_length;
-            to_int(bulk_length, elem, ec);
-            if (ec) co_return;
+            to_int(bulk_length, elem, ec_);
+            if (ec_) co_return;
 
             if (bulk_length == 0) {
               // Terminator for streamed string
@@ -125,7 +125,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
           case type3::verbatim_string:
           case type3::blob_string: {
             if (std::empty(elem)) {
-              ec = error::empty_field;
+              ec_ = error::empty_field;
               co_return;
             }
 
@@ -135,8 +135,8 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
               nodes.push_back(node_view{type3::streamed_string, std::size_t{0}});
             } else {
               std::size_t bulk_length;
-              to_int(bulk_length, elem, ec);
-              if (ec) co_return;
+              to_int(bulk_length, elem, ec_);
+              if (ec_) co_return;
 
               // Read the bulk data
               auto bulk_data = read_bulk_data(bulk_length);
@@ -157,12 +157,12 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
 
           case type3::boolean: {
             if (std::empty(elem)) {
-              ec = error::empty_field;
+              ec_ = error::empty_field;
               co_return;
             }
 
             if (elem.at(0) != 'f' && elem.at(0) != 't') {
-              ec = error::unexpected_bool_value;
+              ec_ = error::unexpected_bool_value;
               co_return;
             }
 
@@ -175,7 +175,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
           case type3::big_number:
           case type3::number: {
             if (std::empty(elem)) {
-              ec = error::empty_field;
+              ec_ = error::empty_field;
               co_return;
             }
             [[fallthrough]];
@@ -195,8 +195,8 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
           case type3::attribute:
           case type3::map: {
             std::size_t size;
-            to_int(size, elem, ec);
-            if (ec) co_return;
+            to_int(size, elem, ec_);
+            if (ec_) co_return;
 
             if (size == 0) {
               commit_elem();
@@ -209,7 +209,7 @@ auto parser::parse(std::error_code& ec) -> generator<std::optional<std::vector<n
           }
 
           default: {
-            ec = error::invalid_data_type;
+            ec_ = error::invalid_data_type;
             co_return;
           }
         }
