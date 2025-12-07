@@ -35,10 +35,37 @@ class parser {
     return buffer_.prepare(n);
   }
 
+  /** @brief Manually compact the internal buffer.
+   *
+   *  Call this when you're done with all node_views from previous messages
+   *  to reclaim memory consumed by parsed data. This invalidates ALL
+   *  previously returned node_views.
+   *
+   *  The buffer grows automatically but never shrinks or compacts automatically
+   *  to preserve string_view validity.
+   */
+  void compact() {
+    buffer_.compact();
+  }
+
   std::error_code error() const { return ec_; }
 
-  // Coroutine that yields parsed messages (runs forever until error)
-  // Yields nullopt when needs more data, yields complete message when available
+  /** @brief Coroutine that yields parsed messages.
+   *
+   *  Yields std::nullopt when more data is needed, or a vector of node_views
+   *  when a complete message is available.
+   *
+   *  @warning Lifetime guarantee: The returned node_views contain string_views
+   *  that point into the parser's internal buffer. These views remain valid
+   *  indefinitely and across feed() calls, until you call compact() or destroy
+   *  the parser. The buffer never auto-compacts to preserve view validity.
+   *
+   *  Call compact() when you're done with all views to reclaim buffer memory.
+   *  For long-term storage, use to_owning_node() or to_owning_nodes() from
+   *  <redisus/resp3/node.hpp> to create deep copies.
+   *
+   *  @return A generator yielding optional vectors of node_views.
+   */
   auto parse() -> generator<std::optional<std::vector<node_view>>>;
 
  private:

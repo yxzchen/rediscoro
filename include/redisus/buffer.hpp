@@ -54,6 +54,10 @@ class buffer {
 
     read_pos_ = 0;
     write_pos_ = readable;
+
+    std::size_t new_size = std::max(write_pos_ + 1024, std::size_t(8192));
+    data_.resize(new_size);
+    data_.shrink_to_fit();
   }
 
   std::size_t writable_size() const {
@@ -83,13 +87,11 @@ class buffer {
   std::size_t write_pos_ = 0;
 
   void ensure_writable(std::size_t n) {
-    if (read_pos_ > 0) {
-      compact();
-    }
-
     if (writable_size() < n) {
+      // Just grow the buffer - never auto-compact to preserve string_view validity
       std::size_t new_capacity = data_.size();
-      while (new_capacity - write_pos_ < n) {
+      std::size_t needed = write_pos_ + n;
+      while (new_capacity < needed) {
         new_capacity *= 2;
       }
       data_.resize(new_capacity);

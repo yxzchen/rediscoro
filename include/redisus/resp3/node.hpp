@@ -64,4 +64,42 @@ using node = basic_node<std::string>;
 /// A node in the response tree that does not own its data.
 using node_view = basic_node<std::string_view>;
 
+/** @brief Converts a node_view to an owning node.
+ *
+ *  Creates a deep copy that owns its string data. Use this when you need
+ *  to keep nodes beyond the lifetime of the parser's buffer.
+ *
+ *  @param view The node_view to convert.
+ *  @return An owning node with copied string data.
+ */
+inline auto to_owning_node(node_view const& view) -> node {
+  node result;
+  result.data_type = view.data_type;
+
+  if (view.is_aggregate_node()) {
+    result.data = view.aggregate_size();
+  } else {
+    result.data = std::string(view.value());
+  }
+
+  return result;
+}
+
+/** @brief Converts a vector of node_views to owning nodes.
+ *
+ *  Creates deep copies of all nodes. Use this when you need to keep
+ *  a complete message beyond the lifetime of the parser's buffer.
+ *
+ *  @param views The node_views to convert.
+ *  @return A vector of owning nodes with copied string data.
+ */
+inline auto to_owning_nodes(std::vector<node_view> const& views) -> std::vector<node> {
+  std::vector<node> result;
+  result.reserve(views.size());
+  for (auto const& view : views) {
+    result.push_back(to_owning_node(view));
+  }
+  return result;
+}
+
 }  // namespace redisus::resp3

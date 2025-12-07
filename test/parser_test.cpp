@@ -333,6 +333,67 @@ TEST_F(ParserTest, EmptyAggregates) {
   EXPECT_FALSE(p.error());
 }
 
+// === Lifetime Tests ===
+
+TEST_F(ParserTest, StringViewLifetimeBetweenMessages) {
+  redisus::resp3::parser p;
+  auto gen = p.parse();
+
+  // Parse first message
+  p.feed("$5\r\nhello\r\n");
+  ASSERT_TRUE(gen.next());
+  auto result1 = gen.value();
+  ASSERT_TRUE(result1.has_value());
+
+  // Store string_view from first message
+  std::string_view saved_view = result1->at(0).value();
+  EXPECT_EQ(saved_view, "hello");
+
+  // Feed more data - this would trigger compaction in old code
+  p.feed("$5\r\nworld\r\n");
+
+  // The saved view should still be valid
+  EXPECT_EQ(saved_view, "hello");
+
+  // Parse second message
+  ASSERT_TRUE(gen.next());
+  auto result2 = gen.value();
+  ASSERT_TRUE(result2.has_value());
+  EXPECT_EQ(result2->at(0).value(), "world");
+
+  // After parsing second message, first view should still be valid
+  EXPECT_EQ(saved_view, "hello");
+
+  EXPECT_FALSE(p.error());
+}
+
+TEST_F(ParserTest, ConvertToOwningNode) {
+  redisus::resp3::parser p;
+  auto gen = p.parse();
+
+  p.feed("$7\r\ntesting\r\n");
+  ASSERT_TRUE(gen.next());
+  auto result = gen.value();
+  ASSERT_TRUE(result.has_value());
+
+  // Convert to owning node
+  auto owning = redisus::resp3::to_owning_nodes(*result);
+  EXPECT_EQ(owning.size(), 1);
+  EXPECT_EQ(owning[0].value(), "testing");
+
+  // Feed lots of data to trigger buffer operations
+  for (int i = 0; i < 100; ++i) {
+    p.feed("$4\r\ntest\r\n");
+    ASSERT_TRUE(gen.next());
+    gen.value();
+  }
+
+  // Owning node should still be valid
+  EXPECT_EQ(owning[0].value(), "testing");
+
+  EXPECT_FALSE(p.error());
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
