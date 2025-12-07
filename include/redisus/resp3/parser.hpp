@@ -27,12 +27,10 @@ class parser {
   explicit parser(std::size_t buffer_capacity = 8192, std::size_t max_depth = default_max_depth)
     : buffer_(buffer_capacity), max_depth_(max_depth) {}
 
-  // Feed data to the parser buffer
   void feed(std::string_view data) {
     buffer_.feed(data);
   }
 
-  // Get writable buffer for direct I/O
   std::span<char> prepare(std::size_t n) {
     return buffer_.prepare(n);
   }
