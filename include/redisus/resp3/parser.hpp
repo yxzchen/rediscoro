@@ -25,7 +25,6 @@ class generator {
  public:
   struct promise_type {
     T current_value;
-    std::exception_ptr exception_;
 
     generator get_return_object() {
       return generator{std::coroutine_handle<promise_type>::from_promise(*this)};
@@ -40,22 +39,7 @@ class generator {
     }
 
     void return_void() noexcept {}
-    void unhandled_exception() { exception_ = std::current_exception(); }
-  };
-
-  struct iterator {
-    std::coroutine_handle<promise_type> handle_;
-
-    iterator(std::coroutine_handle<promise_type> handle) : handle_(handle) {}
-
-    iterator& operator++() {
-      handle_.resume();
-      return *this;
-    }
-
-    T& operator*() const { return handle_.promise().current_value; }
-
-    bool operator==(std::default_sentinel_t) const { return handle_.done(); }
+    void unhandled_exception() noexcept {}
   };
 
   explicit generator(std::coroutine_handle<promise_type> handle) : handle_(handle) {}
@@ -77,14 +61,22 @@ class generator {
     return *this;
   }
 
-  iterator begin() {
+  // Iterator interface - generator acts as its own iterator
+  generator& operator++() {
+    handle_.resume();
+    return *this;
+  }
+
+  T& operator*() const { return handle_.promise().current_value; }
+
+  bool operator==(std::default_sentinel_t) const { return !handle_ || handle_.done(); }
+
+  // Range interface
+  generator& begin() {
     if (handle_) {
       handle_.resume();
-      if (handle_.promise().exception_) {
-        std::rethrow_exception(handle_.promise().exception_);
-      }
     }
-    return iterator{handle_};
+    return *this;
   }
 
   std::default_sentinel_t end() const noexcept { return {}; }
@@ -118,11 +110,22 @@ class parser {
   [[nodiscard]] auto done() const noexcept -> bool;
 
   // Coroutine that yields parsed nodes (runs forever until error)
-  auto parse(std::error_code& ec) -> generator<node_view>;
+  // Yields nullopt when needs more data, yields node when available
+  auto parse(std::error_code& ec) -> generator<std::optional<node_view>>;
 
  private:
   buffer buffer_;
   std::stack<size_t> pending_;
+
+  // Parser state for resumption
+  enum class state {
+    read_header,
+    read_bulk_data,
+  };
+
+  state state_ = state::read_header;
+  std::size_t pending_bulk_length_ = 0;
+  type3 pending_type_ = type3::invalid;
 
   // Helper functions for parsing (consume buffer on successful read)
   auto read_until_separator() -> std::optional<std::string_view>;
@@ -131,9 +134,11 @@ class parser {
   void commit_elem() noexcept;
 
   void reset() {
-    consumed_ = 0;
     pending_ = std::stack<size_t>();
     pending_.push(1);
+    state_ = state::read_header;
+    pending_bulk_length_ = 0;
+    pending_type_ = type3::invalid;
   }
 };
 
