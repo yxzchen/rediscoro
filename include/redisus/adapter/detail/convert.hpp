@@ -64,14 +64,14 @@ struct from_bulk_impl {
 template <class T>
 struct from_bulk_impl<std::optional<T>> {
   static void apply(std::optional<T>& op, resp3::node_view const& node, std::error_code& ec) {
-    if (node.data_type != resp3::type::null) {
+    if (node.data_type != resp3::type3::null) {
       op.emplace(T{});
       converter<T>::apply(op.value(), node, ec);
     }
   }
 };
 
-template <class T, class String>
+template <class T>
 void from_bulk(T& t, resp3::node_view const& node, std::error_code& ec) {
   from_bulk_impl<T>::apply(t, node, ec);
 }

@@ -16,3 +16,4 @@ endmacro()
 
 make_test(parser_test)
 make_test(expected_test)
+make_test(adapter_test)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <include/redisus/adapter/detail/convert.hpp>
+#include <redisus/adapter/detail/convert.hpp>
 
 #include <array>
 #include <charconv>
@@ -78,15 +78,14 @@ namespace redisus::adapter::detail {
 template <class Result>
 class simple_impl {
  public:
-  template <class String>
-  void on_node(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+  void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
     if (msg.size() != 1) {
       ec = redisus::error::expects_resp3_simple_type;
       return;
     }
 
     if (is_aggregate(msg.front().data_type)) {
-      ec = redis::error::expects_resp3_simple_type;
+      ec = redisus::error::expects_resp3_simple_type;
       return;
     }
 
@@ -224,64 +223,64 @@ struct impl_map {
   using type = simple_impl<T>;
 };
 
-template <class Key, class Compare, class Allocator>
-struct impl_map<std::set<Key, Compare, Allocator>> {
-  using type = set_impl<std::set<Key, Compare, Allocator>>;
-};
+// template <class Key, class Compare, class Allocator>
+// struct impl_map<std::set<Key, Compare, Allocator>> {
+//   using type = set_impl<std::set<Key, Compare, Allocator>>;
+// };
 
-template <class Key, class Compare, class Allocator>
-struct impl_map<std::multiset<Key, Compare, Allocator>> {
-  using type = set_impl<std::multiset<Key, Compare, Allocator>>;
-};
+// template <class Key, class Compare, class Allocator>
+// struct impl_map<std::multiset<Key, Compare, Allocator>> {
+//   using type = set_impl<std::multiset<Key, Compare, Allocator>>;
+// };
 
-template <class Key, class Hash, class KeyEqual, class Allocator>
-struct impl_map<std::unordered_set<Key, Hash, KeyEqual, Allocator>> {
-  using type = set_impl<std::unordered_set<Key, Hash, KeyEqual, Allocator>>;
-};
+// template <class Key, class Hash, class KeyEqual, class Allocator>
+// struct impl_map<std::unordered_set<Key, Hash, KeyEqual, Allocator>> {
+//   using type = set_impl<std::unordered_set<Key, Hash, KeyEqual, Allocator>>;
+// };
 
-template <class Key, class Hash, class KeyEqual, class Allocator>
-struct impl_map<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>> {
-  using type = set_impl<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>>;
-};
+// template <class Key, class Hash, class KeyEqual, class Allocator>
+// struct impl_map<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>> {
+//   using type = set_impl<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>>;
+// };
 
-template <class Key, class T, class Compare, class Allocator>
-struct impl_map<std::map<Key, T, Compare, Allocator>> {
-  using type = map_impl<std::map<Key, T, Compare, Allocator>>;
-};
+// template <class Key, class T, class Compare, class Allocator>
+// struct impl_map<std::map<Key, T, Compare, Allocator>> {
+//   using type = map_impl<std::map<Key, T, Compare, Allocator>>;
+// };
 
-template <class Key, class T, class Compare, class Allocator>
-struct impl_map<std::multimap<Key, T, Compare, Allocator>> {
-  using type = map_impl<std::multimap<Key, T, Compare, Allocator>>;
-};
+// template <class Key, class T, class Compare, class Allocator>
+// struct impl_map<std::multimap<Key, T, Compare, Allocator>> {
+//   using type = map_impl<std::multimap<Key, T, Compare, Allocator>>;
+// };
 
-template <class Key, class Hash, class KeyEqual, class Allocator>
-struct impl_map<std::unordered_map<Key, Hash, KeyEqual, Allocator>> {
-  using type = map_impl<std::unordered_map<Key, Hash, KeyEqual, Allocator>>;
-};
+// template <class Key, class Hash, class KeyEqual, class Allocator>
+// struct impl_map<std::unordered_map<Key, Hash, KeyEqual, Allocator>> {
+//   using type = map_impl<std::unordered_map<Key, Hash, KeyEqual, Allocator>>;
+// };
 
-template <class Key, class Hash, class KeyEqual, class Allocator>
-struct impl_map<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>> {
-  using type = map_impl<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>>;
-};
+// template <class Key, class Hash, class KeyEqual, class Allocator>
+// struct impl_map<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>> {
+//   using type = map_impl<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>>;
+// };
 
-template <class T, class Allocator>
-struct impl_map<std::vector<T, Allocator>> {
-  using type = vector_impl<std::vector<T, Allocator>>;
-};
+// template <class T, class Allocator>
+// struct impl_map<std::vector<T, Allocator>> {
+//   using type = vector_impl<std::vector<T, Allocator>>;
+// };
 
-template <class T, std::size_t N>
-struct impl_map<std::array<T, N>> {
-  using type = array_impl<std::array<T, N>>;
-};
+// template <class T, std::size_t N>
+// struct impl_map<std::array<T, N>> {
+//   using type = array_impl<std::array<T, N>>;
+// };
 
-template <class T, class Allocator>
-struct impl_map<std::list<T, Allocator>> {
-  using type = list_impl<std::list<T, Allocator>>;
-};
+// template <class T, class Allocator>
+// struct impl_map<std::list<T, Allocator>> {
+//   using type = list_impl<std::list<T, Allocator>>;
+// };
 
-template <class T, class Allocator>
-struct impl_map<std::deque<T, Allocator>> {
-  using type = list_impl<std::deque<T, Allocator>>;
-};
+// template <class T, class Allocator>
+// struct impl_map<std::deque<T, Allocator>> {
+//   using type = list_impl<std::deque<T, Allocator>>;
+// };
 
 }  // namespace redisus::adapter::detail

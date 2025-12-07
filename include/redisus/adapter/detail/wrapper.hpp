@@ -18,13 +18,13 @@ class wrapper<result<T>> {
   response_type* result_;
   typename impl_map<T>::type impl_;
 
-  template <class String>
   bool set_if_resp3_error(resp3::msg_view const& msg) noexcept {
-    switch (msg.data_type) {
-      case resp3::type::null:
-      case resp3::type::simple_error:
-      case resp3::type::blob_error:
-        *result_ = error{msg.data_type, {std::cbegin(msg.value), std::cend(msg.value)}};
+    auto const& node = msg.at(0);
+    switch (node.data_type) {
+      case resp3::type3::null:
+      case resp3::type3::simple_error:
+      case resp3::type3::blob_error:
+        *result_ = unexpected(error{node.data_type, {std::cbegin(node.value()), std::cend(node.value())}});
         return true;
       default:
         return false;
@@ -34,11 +34,10 @@ class wrapper<result<T>> {
  public:
   explicit wrapper(response_type* p) : result_(p) { result_->value() = T{}; }
 
-  template <class String>
-  void on_msg(resp3::msg_view const& msg, system::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
     REDISUS_ASSERT(!msg.empty());
 
-    if (set_if_resp3_error(msg.at(0))) return;
+    if (set_if_resp3_error(msg)) return;
 
     impl_.on_msg(result_->value(), msg, ec);
   }
@@ -54,10 +53,11 @@ class wrapper<result<std::optional<T>>> {
   typename impl_map<T>::type impl_{};
 
   bool set_if_resp3_error(resp3::msg_view const& msg) noexcept {
-    switch (msg.data_type) {
-      case resp3::type::blob_error:
-      case resp3::type::simple_error:
-        *result_ = error{msg.data_type, {std::cbegin(msg.value), std::cend(msg.value)}};
+    auto const& node = msg.at(0);
+    switch (node.data_type) {
+      case resp3::type3::blob_error:
+      case resp3::type3::simple_error:
+        *result_ = unexpected(error{node.data_type, {std::cbegin(node.value()), std::cend(node.value())}});
         return true;
       default:
         return false;
@@ -67,12 +67,12 @@ class wrapper<result<std::optional<T>>> {
  public:
   explicit wrapper(response_type* p) : result_(p) {}
 
-  void on_msg(resp3::msg_view const& msg, system::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
     REDISUS_ASSERT(!msg.empty());
 
-    if (set_if_resp3_error(msg.at(0))) return;
+    if (set_if_resp3_error(msg)) return;
 
-    if (msg.at(0).data_type == resp3::type::null) return;
+    if (msg.at(0).data_type == resp3::type3::null) return;
 
     result_->value() = T{};
     impl_.on_msg(result_->value().value(), msg, ec);
