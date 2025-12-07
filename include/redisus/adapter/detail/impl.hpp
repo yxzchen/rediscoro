@@ -79,13 +79,18 @@ template <class Result>
 class simple_impl {
  public:
   template <class String>
-  void on_node(Result& result, resp3::basic_node<String> const& node, system::error_code& ec) {
-    if (is_aggregate(node.data_type)) {
+  void on_node(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+    if (msg.size() != 1) {
+      ec = redisus::error::expects_resp3_simple_type;
+      return;
+    }
+
+    if (is_aggregate(msg.front().data_type)) {
       ec = redis::error::expects_resp3_simple_type;
       return;
     }
 
-    from_bulk(result, node, ec);
+    from_bulk(result, msg.front(), ec);
   }
 };
 
