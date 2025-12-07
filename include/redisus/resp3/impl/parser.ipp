@@ -16,7 +16,7 @@
 namespace redisus::resp3 {
 
 void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
-  auto const res = std::from_chars(sv.data(), sv.data() + std::size(sv), i);
+  auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), i);
   if (res.ec != std::errc()) {
     ec = error::not_a_number;
   } else if (res.ptr != sv.data() + sv.size()) {
@@ -75,9 +75,9 @@ auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept ->
   return result;
 }
 
-auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
-  std::vector<node_view> nodes;
-  nodes.reserve(16);  // Reserve initial capacity to reduce reallocations
+auto parser::parse() -> generator<std::optional<msg_view>> {
+  msg_view msg;
+  msg.reserve(16);  // Reserve initial capacity to reduce reallocations
   std::optional<std::string_view> line;
   std::optional<std::string_view> bulk_data;
 
@@ -113,14 +113,14 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
         if (bulk_length == 0) {
           pending_.top() = 1;
           commit_elem();
-          nodes.push_back(node_view{type3::streamed_string_part, std::string_view{}});
+          msg.push_back(node_view{type3::streamed_string_part, std::string_view{}});
         } else {
           while (!(bulk_data = read_bulk_data(bulk_length, ec_))) {
             if (ec_) co_return;
             co_yield std::nullopt;
           }
           commit_elem();
-          nodes.push_back(node_view{type3::streamed_string_part, *bulk_data});
+          msg.push_back(node_view{type3::streamed_string_part, *bulk_data});
         }
         break;
       }
@@ -140,7 +140,7 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
             co_return;
           }
           pending_.push(std::numeric_limits<std::size_t>::max());
-          nodes.push_back(node_view{type3::streamed_string, std::size_t{0}});
+          msg.push_back(node_view{type3::streamed_string, std::size_t{0}});
         } else {
           std::size_t bulk_length;
           to_int(bulk_length, elem, ec_);
@@ -151,7 +151,7 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
             co_yield std::nullopt;
           }
           commit_elem();
-          nodes.push_back(node_view{type, *bulk_data});
+          msg.push_back(node_view{type, *bulk_data});
         }
         break;
       }
@@ -168,7 +168,7 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
         }
 
         commit_elem();
-        nodes.push_back(node_view{type, elem});
+        msg.push_back(node_view{type, elem});
         break;
       }
 
@@ -186,7 +186,7 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
       case type3::simple_string:
       case type3::null: {
         commit_elem();
-        nodes.push_back(node_view{type, elem});
+        msg.push_back(node_view{type, elem});
         break;
       }
 
@@ -216,7 +216,7 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
           pending_.push(size * multiplicity);
         }
 
-        nodes.push_back(node_view{type, size});
+        msg.push_back(node_view{type, size});
         break;
       }
 
@@ -228,8 +228,8 @@ auto parser::parse() -> generator<std::optional<std::vector<node_view>>> {
 
     // === Yield complete message ===
     if (pending_.empty()) {
-      co_yield std::optional<std::vector<node_view>>{std::move(nodes)};
-      nodes.clear();
+      co_yield std::optional<msg_view>{std::move(msg)};
+      msg.clear();
     }
   }
 }

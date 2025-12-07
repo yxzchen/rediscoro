@@ -60,6 +60,9 @@ enum class error {
   /// Not a double
   not_a_double,
 
+  /// Double parsing consumed only part of the input.
+  invalid_double_format,
+
   /// Got RESP3 null.
   resp3_null,
 

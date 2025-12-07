@@ -58,6 +58,8 @@ using node = basic_node<std::string>;
 /// A node in the response tree that does not own its data.
 using node_view = basic_node<std::string_view>;
 
+using msg_view = std::vector<node_view>;
+
 /** @brief Converts a node_view to an owning node.
  *
  *  Creates a deep copy that owns its string data. Use this when you need

@@ -15,3 +15,4 @@ macro(make_test TEST_NAME)
 endmacro()
 
 make_test(parser_test)
+make_test(expected_test)
