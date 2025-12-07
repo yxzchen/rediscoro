@@ -1,3 +1,4 @@
+#include <redisus/error.hpp>
 #include <redisus/resp3/parser.hpp>
 #include <gtest/gtest.h>
 
