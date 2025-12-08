@@ -17,24 +17,20 @@ class generator {
     std::suspend_always initial_suspend() noexcept { return {}; }
     std::suspend_always final_suspend() noexcept { return {}; }
 
-    std::suspend_always yield_value(T value) noexcept {
-      current_value = std::move(value);
+    template <std::convertible_to<T> From>
+    std::suspend_always yield_value(From&& from) {
+      current_value = std::forward<From>(from);
       return {};
     }
 
     void return_void() noexcept {}
-    void unhandled_exception() noexcept {
-      exception_ = std::current_exception();
-    }
+    void unhandled_exception() noexcept { exception_ = std::current_exception(); }
   };
 
   using handle_type = std::coroutine_handle<promise_type>;
 
   explicit generator(handle_type handle) : handle_(handle) {}
-
-  ~generator() {
-    if (handle_) handle_.destroy();
-  }
+  ~generator() { handle_.destroy(); }
 
   generator(const generator&) = delete;
   generator& operator=(const generator&) = delete;
