@@ -79,6 +79,36 @@ constexpr auto is_aggregate(type3 type) noexcept -> bool {
   }
 }
 
+/** @brief Checks whether the data type is an error.
+ *
+ *  @relates type
+ *  @param t The type to check.
+ *  @returns True if the given type is an error type.
+ */
+constexpr auto is_error(type3 type) noexcept -> bool {
+  return type == type3::simple_error || type == type3::blob_error;
+}
+
+/** @brief Checks whether the data type is array-like (array, set, or push).
+ *
+ *  @relates type
+ *  @param t The type to check.
+ *  @returns True if the given type is array-like.
+ */
+constexpr auto is_array_like(type3 type) noexcept -> bool {
+  return type == type3::array || type == type3::set || type == type3::push;
+}
+
+/** @brief Checks whether the data type is map-like (map or attribute).
+ *
+ *  @relates type
+ *  @param t The type to check.
+ *  @returns True if the given type is map-like.
+ */
+constexpr auto is_map_like(type3 type) noexcept -> bool {
+  return type == type3::map || type == type3::attribute;
+}
+
 // For map and attribute data types this function returns 2.  All
 // other types have value 1.
 constexpr auto element_multiplicity(type3 type) noexcept -> std::size_t {

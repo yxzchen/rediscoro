@@ -1,6 +1,7 @@
 #pragma once
 
 #include <redisus/adapter/detail/convert.hpp>
+#include <redisus/error.hpp>
 #include <redisus/resp3/node.hpp>
 
 #include <array>
@@ -19,6 +20,35 @@
 #include <vector>
 
 namespace redisus::adapter::detail {
+
+// Helper function to validate aggregate header and size
+inline bool validate_aggregate(resp3::msg_view const& msg, std::size_t expected_element_count, std::error_code& ec) {
+  auto const& header = msg.front();
+
+  if (!is_aggregate(header.data_type)) {
+    ec = redisus::error::expects_resp3_aggregate;
+    return false;
+  }
+
+  auto multiplier = element_multiplicity(header.data_type);
+  if (msg.size() != header.aggregate_size() * multiplier + 1) {
+    ec = redisus::error::incompatible_size;
+    return false;
+  }
+
+  return true;
+}
+
+// Helper function to check if any elements in range are nested aggregates
+inline bool has_nested_aggregates(resp3::msg_view const& msg, std::size_t start_idx, std::error_code& ec) {
+  for (std::size_t i = start_idx; i < msg.size(); ++i) {
+    if (msg[i].is_aggregate_node()) {
+      ec = redisus::error::nested_aggregate_not_supported;
+      return true;
+    }
+  }
+  return false;
+}
 
 template <class Result>
 class general_aggregate {
@@ -61,28 +91,22 @@ class set_impl {
   void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
     auto const& header = msg.front();
 
-    if (header.data_type != resp3::type3::set && header.data_type != resp3::type3::array) {
+    if (header.data_type != resp3::type3::set) {
       ec = redisus::error::expects_resp3_set;
       return;
     }
 
-    auto expected_count = header.aggregate_size();
-    if (msg.size() != expected_count + 1) {
+    if (msg.size() != header.aggregate_size() + 1) {
       ec = redisus::error::incompatible_size;
       return;
     }
 
+    if (has_nested_aggregates(msg, 1, ec)) return;
+
     typename Result::iterator hint = result.end();
     for (std::size_t i = 1; i < msg.size(); ++i) {
-      auto const& node = msg[i];
-
-      if (node.is_aggregate_node()) {
-        ec = redisus::error::nested_aggregate_not_supported;
-        return;
-      }
-
       typename Result::key_type obj;
-      from_bulk(obj, node, ec);
+      from_bulk(obj, msg[i], ec);
       if (ec) return;
       hint = result.insert(hint, std::move(obj));
     }
@@ -95,33 +119,26 @@ class map_impl {
   void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
     auto const& header = msg.front();
 
-    if (header.data_type != resp3::type3::map && header.data_type != resp3::type3::attribute) {
+    if (!is_map_like(header.data_type)) {
       ec = redisus::error::expects_resp3_map;
       return;
     }
 
-    auto expected_count = header.aggregate_size() * 2;
-    if (msg.size() != expected_count + 1) {
+    if (msg.size() != header.aggregate_size() * 2 + 1) {
       ec = redisus::error::incompatible_size;
       return;
     }
 
+    if (has_nested_aggregates(msg, 1, ec)) return;
+
     typename Result::iterator hint = result.end();
     for (std::size_t i = 1; i < msg.size(); i += 2) {
-      auto const& key_node = msg[i];
-      auto const& val_node = msg[i + 1];
-
-      if (key_node.is_aggregate_node() || val_node.is_aggregate_node()) {
-        ec = redisus::error::nested_aggregate_not_supported;
-        return;
-      }
-
       typename Result::key_type key;
-      from_bulk(key, key_node, ec);
+      from_bulk(key, msg[i], ec);
       if (ec) return;
 
       typename Result::mapped_type value;
-      from_bulk(value, val_node, ec);
+      from_bulk(value, msg[i + 1], ec);
       if (ec) return;
 
       hint = result.insert(hint, {std::move(key), std::move(value)});
@@ -135,29 +152,22 @@ class vector_impl {
   void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
     auto const& header = msg.front();
 
-    if (header.data_type != resp3::type3::set && header.data_type != resp3::type3::array &&
-        header.data_type != resp3::type3::push) {
+    if (!is_array_like(header.data_type)) {
       ec = redisus::error::expects_resp3_aggregate;
       return;
     }
 
-    auto expected_count = header.aggregate_size();
-    if (msg.size() != expected_count + 1) {
+    if (msg.size() != header.aggregate_size() + 1) {
       ec = redisus::error::incompatible_size;
       return;
     }
 
-    result.reserve(result.size() + expected_count);
+    if (has_nested_aggregates(msg, 1, ec)) return;
+
+    result.reserve(result.size() + header.aggregate_size());
     for (std::size_t i = 1; i < msg.size(); ++i) {
-      auto const& node = msg[i];
-
-      if (node.is_aggregate_node()) {
-        ec = redisus::error::nested_aggregate_not_supported;
-        return;
-      }
-
       typename Result::value_type obj;
-      from_bulk(obj, node, ec);
+      from_bulk(obj, msg[i], ec);
       if (ec) return;
       result.push_back(std::move(obj));
     }
@@ -176,25 +186,15 @@ class array_impl {
     }
 
     auto expected_count = header.aggregate_size();
-    if (msg.size() != expected_count + 1) {
+    if (msg.size() != expected_count + 1 || result.size() != expected_count) {
       ec = redisus::error::incompatible_size;
       return;
     }
 
-    if (result.size() != expected_count) {
-      ec = redisus::error::incompatible_size;
-      return;
-    }
+    if (has_nested_aggregates(msg, 1, ec)) return;
 
     for (std::size_t i = 1; i < msg.size(); ++i) {
-      auto const& node = msg[i];
-
-      if (node.is_aggregate_node()) {
-        ec = redisus::error::nested_aggregate_not_supported;
-        return;
-      }
-
-      from_bulk(result[i - 1], node, ec);
+      from_bulk(result[i - 1], msg[i], ec);
       if (ec) return;
     }
   }
@@ -205,28 +205,21 @@ struct list_impl {
   void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
     auto const& header = msg.front();
 
-    if (header.data_type != resp3::type3::set && header.data_type != resp3::type3::array &&
-        header.data_type != resp3::type3::push) {
+    if (!is_array_like(header.data_type)) {
       ec = redisus::error::expects_resp3_aggregate;
       return;
     }
 
-    auto expected_count = header.aggregate_size();
-    if (msg.size() != expected_count + 1) {
+    if (msg.size() != header.aggregate_size() + 1) {
       ec = redisus::error::incompatible_size;
       return;
     }
 
+    if (has_nested_aggregates(msg, 1, ec)) return;
+
     for (std::size_t i = 1; i < msg.size(); ++i) {
-      auto const& node = msg[i];
-
-      if (node.is_aggregate_node()) {
-        ec = redisus::error::nested_aggregate_not_supported;
-        return;
-      }
-
       typename Result::value_type obj;
-      from_bulk(obj, node, ec);
+      from_bulk(obj, msg[i], ec);
       if (ec) return;
       result.push_back(std::move(obj));
     }

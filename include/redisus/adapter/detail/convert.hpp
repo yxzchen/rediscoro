@@ -27,10 +27,13 @@ struct converter;
 template <class T>
 struct converter<T, true> {
   static void apply(T& i, resp3::node_view const& node, std::error_code& ec) {
-    auto& view = node.value();
+    auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), i);
-    if (res.ec != std::errc()) ec = redisus::error::not_a_number;
-    if (res.ptr != view.data() + view.size()) ec = redisus::error::invalid_number_format;
+    if (res.ec != std::errc()) {
+      ec = redisus::error::not_a_number;
+    } else if (res.ptr != view.data() + view.size()) {
+      ec = redisus::error::invalid_number_format;
+    }
   }
 };
 
@@ -42,10 +45,13 @@ struct converter<bool, false> {
 template <>
 struct converter<double, false> {
   static void apply(double& d, resp3::node_view const& node, std::error_code& ec) {
-    auto& view = node.value();
+    auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), d);
-    if (res.ec != std::errc()) ec = redisus::error::not_a_double;
-    if (res.ptr != view.data() + view.size()) ec = redisus::error::invalid_double_format;
+    if (res.ec != std::errc()) {
+      ec = redisus::error::not_a_double;
+    } else if (res.ptr != view.data() + view.size()) {
+      ec = redisus::error::invalid_double_format;
+    }
   }
 };
 
