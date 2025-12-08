@@ -280,3 +280,17 @@ TEST_F(AdapterTest, GeneralAggregateDeepCopy) {
   EXPECT_FALSE(nodes[2].is_aggregate_node());
   EXPECT_EQ(nodes[2].value(), "42");
 }
+
+TEST_F(AdapterTest, Ignore) {
+  response<ignore_t> res;
+  any_adapter adapter(res);
+  std::error_code ec;
+
+  auto msg = make_aggregate_msg(resp3::type3::array, 3,
+                                  resp3::node_view{resp3::type3::number, "10"},
+                                  resp3::node_view{resp3::type3::number, "20"},
+                                  resp3::node_view{resp3::type3::number, "30"});
+  adapter.on_msg(msg, ec);
+
+  EXPECT_FALSE(ec);
+}

@@ -4,11 +4,10 @@
 #include <redisus/adapter/ignore.hpp>
 #include <redisus/adapter/result.hpp>
 #include <redisus/error.hpp>
+#include <redisus/ignore.hpp>
 #include <redisus/resp3/type.hpp>
 
 namespace redisus::adapter::detail {
-
-using ignore_t = std::decay_t<decltype(std::ignore)>;
 
 template <class Result>
 struct result_traits {
