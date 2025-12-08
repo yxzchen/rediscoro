@@ -29,7 +29,7 @@ class request {
   template <class... Ts>
   void push(std::string_view cmd, Ts const&... args) {
     auto constexpr pack_size = sizeof...(Ts);
-    resp3::add_header(payload_, resp3::type::array, 1 + pack_size);
+    resp3::add_header(payload_, resp3::type3::array, 1 + pack_size);
     resp3::add_bulk(payload_, cmd);
     resp3::add_bulk(payload_, std::tie(std::forward<Ts const&>(args)...));
 
@@ -45,7 +45,7 @@ class request {
 
     auto constexpr size = resp3::bulk_counter<value_type>::size;
     auto const distance = std::distance(begin, end);
-    resp3::add_header(payload_, resp3::type::array, 2 + size * distance);
+    resp3::add_header(payload_, resp3::type3::array, 2 + size * distance);
     resp3::add_bulk(payload_, cmd);
     resp3::add_bulk(payload_, key);
 
@@ -63,7 +63,7 @@ class request {
 
     auto constexpr size = resp3::bulk_counter<value_type>::size;
     auto const distance = std::distance(begin, end);
-    resp3::add_header(payload_, resp3::type::array, 1 + size * distance);
+    resp3::add_header(payload_, resp3::type3::array, 1 + size * distance);
     resp3::add_bulk(payload_, cmd);
 
     for (; begin != end; ++begin) resp3::add_bulk(payload_, *begin);

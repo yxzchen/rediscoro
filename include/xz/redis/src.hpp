@@ -1,5 +1,6 @@
 
 #include <xz/redis/impl/error.ipp>
+#include <xz/redis/impl/request.ipp>
 #include <xz/redis/resp3/impl/buffer.ipp>
 #include <xz/redis/resp3/impl/parser.ipp>
 #include <xz/redis/resp3/impl/serializer.ipp>
