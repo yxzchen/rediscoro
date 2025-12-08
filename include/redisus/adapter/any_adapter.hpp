@@ -31,4 +31,4 @@ class any_adapter {
   impl_t impl_;
 };
 
-}  // namespace redisus
+}  // namespace redisus::adapter

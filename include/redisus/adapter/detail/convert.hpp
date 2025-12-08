@@ -52,7 +52,7 @@ struct converter<double, false> {
 template <class CharT, class Traits, class Allocator>
 struct converter<std::basic_string<CharT, Traits, Allocator>, false> {
   static void apply(std::basic_string<CharT, Traits, Allocator>& s, resp3::node_view const& node, std::error_code&) {
-    s.append(node.value().data(), node.value().size());
+    s.assign(node.value().data(), node.value().size());
   }
 };
 

@@ -36,7 +36,7 @@ class wrapper<result<T>> {
   }
 
  public:
-  explicit wrapper(response_type* p = nullptr) : result_(p) { }
+  explicit wrapper(response_type* p = nullptr) : result_(p) {}
 
   void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
     REDISUS_ASSERT(!msg.empty());
@@ -78,7 +78,7 @@ class wrapper<result<std::optional<T>>> {
 
     if (msg.at(0).data_type == resp3::type3::null) return;
 
-    result_->value() = T{};
+    result_->value().emplace();
     impl_.on_msg(result_->value().value(), msg, ec);
   }
 };
