@@ -4,6 +4,7 @@ project(redisxz VERSION 1.0.0 LANGUAGES CXX)
 # Options
 option(REDISXZ_ENABLE_ASSERTS "Enable assertions in redisxz library" OFF)
 option(REDISXZ_BUILD_TESTS "Build tests" ON)
+option(REDISXZ_USE_STDFMT "Use std::format instead of libfmt" OFF)
 
 # Create interface library (header-only)
 add_library(redisxz INTERFACE)
@@ -23,6 +24,16 @@ if(REDISXZ_ENABLE_ASSERTS)
     message(STATUS "redisxz: Assertions are ENABLED")
 else()
     message(STATUS "redisxz: Assertions are DISABLED")
+endif()
+
+# Handle format library selection
+if(REDISXZ_USE_STDFMT)
+    target_compile_definitions(redisxz INTERFACE REDISXZ_USE_STDFMT)
+    message(STATUS "redisxz: Using std::format for formatting")
+else()
+    find_package(fmt REQUIRED)
+    target_link_libraries(redisxz INTERFACE fmt::fmt)
+    message(STATUS "redisxz: Using libfmt for formatting")
 endif()
 
 # Tests
