@@ -3,7 +3,7 @@
 #include <redisus/adapter/detail/response_traits.hpp>
 #include <redisus/adapter/detail/result_traits.hpp>
 
-namespace boost::redis::adapter {
+namespace redisus::adapter {
 
 template <class T>
 auto adapt_resp(T& t) noexcept {
@@ -11,8 +11,8 @@ auto adapt_resp(T& t) noexcept {
 }
 
 template <class T>
-auto adapt2(T& t = redis::ignore) noexcept {
+auto adapt2(T& t) noexcept {
   return detail::result_traits<T>::adapt(t);
 }
 
-}  // namespace boost::redis::adapter
+}  // namespace redisus::adapter

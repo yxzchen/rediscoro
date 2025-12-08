@@ -31,17 +31,18 @@ namespace redisus::adapter::detail {
 //
 
 //   template <class String>
-//   void on_node(resp3::basic_node<String> const& nd, system::error_code&) {
+//   void on_msg(resp3::msg_view const& msg, system::error_code&) {
 //     BOOST_ASSERT_MSG(!!result_, "Unexpected null pointer");
-//     switch (nd.data_type) {
+//     switch (msg.front().data_type) {
 //       case resp3::type::blob_error:
 //       case resp3::type::simple_error:
-//         *result_ = error{nd.data_type, std::string{std::cbegin(nd.value), std::cend(nd.value)}};
+//         *result_ = error{msg.front().data_type, std::string{std::cbegin(msg.value), std::cend(msg.value)}};
 //         break;
 //       default:
 //         if (result_->has_value()) {
 //           (**result_).push_back(
-//               {nd.data_type, nd.aggregate_size, nd.depth, std::string{std::cbegin(nd.value), std::cend(nd.value)}});
+//               {msg.front().data_type, msg.aggregate_size, msg.depth, std::string{std::cbegin(msg.value),
+//               std::cend(msg.value)}});
 //         }
 //     }
 //   }
@@ -59,18 +60,18 @@ namespace redisus::adapter::detail {
 //
 
 //   template <class String>
-//   void on_node(resp3::basic_node<String> const& nd, system::error_code&) {
+//   void on_msg(resp3::msg_view const& msg, system::error_code&) {
 //     BOOST_ASSERT_MSG(!!result_, "Unexpected null pointer");
-//     switch (nd.data_type) {
+//     switch (msg.front().data_type) {
 //       case resp3::type::blob_error:
 //       case resp3::type::simple_error:
-//         *result_ = error{nd.data_type, std::string{std::cbegin(nd.value), std::cend(nd.value)}};
+//         *result_ = error{msg.front().data_type, std::string{std::cbegin(msg.value), std::cend(msg.value)}};
 //         break;
 //       default:
-//         result_->value().data_type = nd.data_type;
-//         result_->value().aggregate_size = nd.aggregate_size;
-//         result_->value().depth = nd.depth;
-//         result_->value().value.assign(nd.value.data(), nd.value.size());
+//         result_->value().data_type = msg.front().data_type;
+//         result_->value().aggregate_size = msg.aggregate_size;
+//         result_->value().depth = msg.depth;
+//         result_->value().value.assign(msg.value.data(), msg.value.size());
 //     }
 //   }
 // };
@@ -79,7 +80,7 @@ template <class Result>
 class simple_impl {
  public:
   void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
-    if (msg.size() != 1) {
+    if (msg.size() > 1) {
       ec = redisus::error::expects_resp3_simple_type;
       return;
     }
@@ -93,194 +94,247 @@ class simple_impl {
   }
 };
 
-// template <class Result>
-// class set_impl {
-//  private:
-//   typename Result::iterator hint_;
+template <class Result>
+class set_impl {
+ public:
+  void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+    auto const& header = msg.front();
 
-//  public:
-//   template <class String>
-//   void on_node(Result& result, resp3::basic_node<String> const& nd, system::error_code& ec) {
-//     if (is_aggregate(nd.data_type)) {
-//       if (nd.data_type != resp3::type::set) ec = redis::error::expects_resp3_set;
-//       return;
-//     }
+    if (header.data_type != resp3::type3::set && header.data_type != resp3::type3::array) {
+      ec = redisus::error::expects_resp3_set;
+      return;
+    }
 
-//     BOOST_ASSERT(nd.aggregate_size == 1);
+    auto expected_count = header.aggregate_size();
+    if (msg.size() != expected_count + 1) {
+      ec = redisus::error::incompatible_size;
+      return;
+    }
 
-//     if (nd.depth < 1) {
-//       ec = redis::error::expects_resp3_set;
-//       return;
-//     }
+    typename Result::iterator hint = result.end();
+    for (std::size_t i = 1; i < msg.size(); ++i) {
+      auto const& node = msg[i];
 
-//     typename Result::key_type obj;
-//     from_bulk(obj, nd, ec);
-//     hint_ = result.insert(hint_, std::move(obj));
-//   }
-// };
+      if (node.is_aggregate_node()) {
+        ec = redisus::error::nested_aggregate_not_supported;
+        return;
+      }
 
-// template <class Result>
-// class map_impl {
-//  private:
-//   typename Result::iterator current_;
-//   bool on_key_ = true;
+      typename Result::key_type obj;
+      from_bulk(obj, node, ec);
+      if (ec) return;
+      hint = result.insert(hint, std::move(obj));
+    }
+  }
+};
 
-//  public:
-//   template <class String>
-//   void on_node(Result& result, resp3::basic_node<String> const& nd, system::error_code& ec) {
-//     if (is_aggregate(nd.data_type)) {
-//       if (element_multiplicity(nd.data_type) != 2) ec = redis::error::expects_resp3_map;
-//       return;
-//     }
+template <class Result>
+class map_impl {
+ public:
+  void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+    auto const& header = msg.front();
 
-//     BOOST_ASSERT(nd.aggregate_size == 1);
+    if (header.data_type != resp3::type3::map && header.data_type != resp3::type3::attribute) {
+      ec = redisus::error::expects_resp3_map;
+      return;
+    }
 
-//     if (nd.depth < 1) {
-//       ec = redis::error::expects_resp3_map;
-//       return;
-//     }
+    auto expected_count = header.aggregate_size() * 2;
+    if (msg.size() != expected_count + 1) {
+      ec = redisus::error::incompatible_size;
+      return;
+    }
 
-//     if (on_key_) {
-//       typename Result::key_type obj;
-//       from_bulk(obj, nd, ec);
-//       current_ = result.insert(current_, {std::move(obj), {}});
-//     } else {
-//       typename Result::mapped_type obj;
-//       from_bulk(obj, nd, ec);
-//       current_->second = std::move(obj);
-//     }
+    typename Result::iterator hint = result.end();
+    for (std::size_t i = 1; i < msg.size(); i += 2) {
+      auto const& key_node = msg[i];
+      auto const& val_node = msg[i + 1];
 
-//     on_key_ = !on_key_;
-//   }
-// };
+      if (key_node.is_aggregate_node() || val_node.is_aggregate_node()) {
+        ec = redisus::error::nested_aggregate_not_supported;
+        return;
+      }
 
-// template <class Result>
-// class vector_impl {
-//  public:
-//   template <class String>
-//   void on_node(Result& result, resp3::basic_node<String> const& nd, system::error_code& ec) {
-//     if (is_aggregate(nd.data_type)) {
-//       auto const m = element_multiplicity(nd.data_type);
-//       result.reserve(result.size() + m * nd.aggregate_size);
-//     } else {
-//       result.push_back({});
-//       from_bulk(result.back(), nd, ec);
-//     }
-//   }
-// };
+      typename Result::key_type key;
+      from_bulk(key, key_node, ec);
+      if (ec) return;
 
-// template <class Result>
-// class array_impl {
-//  private:
-//   int i_ = -1;
+      typename Result::mapped_type value;
+      from_bulk(value, val_node, ec);
+      if (ec) return;
 
-//  public:
-//   template <class String>
-//   void on_node(Result& result, resp3::basic_node<String> const& nd, system::error_code& ec) {
-//     if (is_aggregate(nd.data_type)) {
-//       if (i_ != -1) {
-//         ec = redis::error::nested_aggregate_not_supported;
-//         return;
-//       }
+      hint = result.insert(hint, {std::move(key), std::move(value)});
+    }
+  }
+};
 
-//       if (result.size() != nd.aggregate_size * element_multiplicity(nd.data_type)) {
-//         ec = redis::error::incompatible_size;
-//         return;
-//       }
-//     } else {
-//       if (i_ == -1) {
-//         ec = redis::error::expects_resp3_aggregate;
-//         return;
-//       }
+template <class Result>
+class vector_impl {
+ public:
+  void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+    auto const& header = msg.front();
 
-//       BOOST_ASSERT(nd.aggregate_size == 1);
-//       from_bulk(result.at(i_), nd, ec);
-//     }
+    if (header.data_type != resp3::type3::set && header.data_type != resp3::type3::array &&
+        header.data_type != resp3::type3::push) {
+      ec = redisus::error::expects_resp3_aggregate;
+      return;
+    }
 
-//     ++i_;
-//   }
-// };
+    auto expected_count = header.aggregate_size();
+    if (msg.size() != expected_count + 1) {
+      ec = redisus::error::incompatible_size;
+      return;
+    }
 
-// template <class Result>
-// struct list_impl {
-//   template <class String>
-//   void on_node(Result& result, resp3::basic_node<String> const& nd, system::error_code& ec) {
-//     if (!is_aggregate(nd.data_type)) {
-//       BOOST_ASSERT(nd.aggregate_size == 1);
-//       if (nd.depth < 1) {
-//         ec = redis::error::expects_resp3_aggregate;
-//         return;
-//       }
+    result.reserve(result.size() + expected_count);
+    for (std::size_t i = 1; i < msg.size(); ++i) {
+      auto const& node = msg[i];
 
-//       result.push_back({});
-//       from_bulk(result.back(), nd, ec);
-//     }
-//   }
-// };
+      if (node.is_aggregate_node()) {
+        ec = redisus::error::nested_aggregate_not_supported;
+        return;
+      }
+
+      typename Result::value_type obj;
+      from_bulk(obj, node, ec);
+      if (ec) return;
+      result.push_back(std::move(obj));
+    }
+  }
+};
+
+template <class Result>
+class array_impl {
+ public:
+  void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+    auto const& header = msg.front();
+
+    if (header.data_type != resp3::type3::array) {
+      ec = redisus::error::expects_resp3_aggregate;
+      return;
+    }
+
+    auto expected_count = header.aggregate_size();
+    if (msg.size() != expected_count + 1) {
+      ec = redisus::error::incompatible_size;
+      return;
+    }
+
+    if (result.size() != expected_count) {
+      ec = redisus::error::incompatible_size;
+      return;
+    }
+
+    for (std::size_t i = 1; i < msg.size(); ++i) {
+      auto const& node = msg[i];
+
+      if (node.is_aggregate_node()) {
+        ec = redisus::error::nested_aggregate_not_supported;
+        return;
+      }
+
+      from_bulk(result[i - 1], node, ec);
+      if (ec) return;
+    }
+  }
+};
+
+template <class Result>
+struct list_impl {
+  void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
+    auto const& header = msg.front();
+
+    if (header.data_type != resp3::type3::set && header.data_type != resp3::type3::array &&
+        header.data_type != resp3::type3::push) {
+      ec = redisus::error::expects_resp3_aggregate;
+      return;
+    }
+
+    auto expected_count = header.aggregate_size();
+    if (msg.size() != expected_count + 1) {
+      ec = redisus::error::incompatible_size;
+      return;
+    }
+
+    for (std::size_t i = 1; i < msg.size(); ++i) {
+      auto const& node = msg[i];
+
+      if (node.is_aggregate_node()) {
+        ec = redisus::error::nested_aggregate_not_supported;
+        return;
+      }
+
+      typename Result::value_type obj;
+      from_bulk(obj, node, ec);
+      if (ec) return;
+      result.push_back(std::move(obj));
+    }
+  }
+};
 
 template <class T>
 struct impl_map {
   using type = simple_impl<T>;
 };
 
-// template <class Key, class Compare, class Allocator>
-// struct impl_map<std::set<Key, Compare, Allocator>> {
-//   using type = set_impl<std::set<Key, Compare, Allocator>>;
-// };
+template <class Key, class Compare, class Allocator>
+struct impl_map<std::set<Key, Compare, Allocator>> {
+  using type = set_impl<std::set<Key, Compare, Allocator>>;
+};
 
-// template <class Key, class Compare, class Allocator>
-// struct impl_map<std::multiset<Key, Compare, Allocator>> {
-//   using type = set_impl<std::multiset<Key, Compare, Allocator>>;
-// };
+template <class Key, class Compare, class Allocator>
+struct impl_map<std::multiset<Key, Compare, Allocator>> {
+  using type = set_impl<std::multiset<Key, Compare, Allocator>>;
+};
 
-// template <class Key, class Hash, class KeyEqual, class Allocator>
-// struct impl_map<std::unordered_set<Key, Hash, KeyEqual, Allocator>> {
-//   using type = set_impl<std::unordered_set<Key, Hash, KeyEqual, Allocator>>;
-// };
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct impl_map<std::unordered_set<Key, Hash, KeyEqual, Allocator>> {
+  using type = set_impl<std::unordered_set<Key, Hash, KeyEqual, Allocator>>;
+};
 
-// template <class Key, class Hash, class KeyEqual, class Allocator>
-// struct impl_map<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>> {
-//   using type = set_impl<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>>;
-// };
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct impl_map<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>> {
+  using type = set_impl<std::unordered_multiset<Key, Hash, KeyEqual, Allocator>>;
+};
 
-// template <class Key, class T, class Compare, class Allocator>
-// struct impl_map<std::map<Key, T, Compare, Allocator>> {
-//   using type = map_impl<std::map<Key, T, Compare, Allocator>>;
-// };
+template <class Key, class T, class Compare, class Allocator>
+struct impl_map<std::map<Key, T, Compare, Allocator>> {
+  using type = map_impl<std::map<Key, T, Compare, Allocator>>;
+};
 
-// template <class Key, class T, class Compare, class Allocator>
-// struct impl_map<std::multimap<Key, T, Compare, Allocator>> {
-//   using type = map_impl<std::multimap<Key, T, Compare, Allocator>>;
-// };
+template <class Key, class T, class Compare, class Allocator>
+struct impl_map<std::multimap<Key, T, Compare, Allocator>> {
+  using type = map_impl<std::multimap<Key, T, Compare, Allocator>>;
+};
 
-// template <class Key, class Hash, class KeyEqual, class Allocator>
-// struct impl_map<std::unordered_map<Key, Hash, KeyEqual, Allocator>> {
-//   using type = map_impl<std::unordered_map<Key, Hash, KeyEqual, Allocator>>;
-// };
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct impl_map<std::unordered_map<Key, Hash, KeyEqual, Allocator>> {
+  using type = map_impl<std::unordered_map<Key, Hash, KeyEqual, Allocator>>;
+};
 
-// template <class Key, class Hash, class KeyEqual, class Allocator>
-// struct impl_map<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>> {
-//   using type = map_impl<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>>;
-// };
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct impl_map<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>> {
+  using type = map_impl<std::unordered_multimap<Key, Hash, KeyEqual, Allocator>>;
+};
 
-// template <class T, class Allocator>
-// struct impl_map<std::vector<T, Allocator>> {
-//   using type = vector_impl<std::vector<T, Allocator>>;
-// };
+template <class T, class Allocator>
+struct impl_map<std::vector<T, Allocator>> {
+  using type = vector_impl<std::vector<T, Allocator>>;
+};
 
-// template <class T, std::size_t N>
-// struct impl_map<std::array<T, N>> {
-//   using type = array_impl<std::array<T, N>>;
-// };
+template <class T, std::size_t N>
+struct impl_map<std::array<T, N>> {
+  using type = array_impl<std::array<T, N>>;
+};
 
-// template <class T, class Allocator>
-// struct impl_map<std::list<T, Allocator>> {
-//   using type = list_impl<std::list<T, Allocator>>;
-// };
+template <class T, class Allocator>
+struct impl_map<std::list<T, Allocator>> {
+  using type = list_impl<std::list<T, Allocator>>;
+};
 
-// template <class T, class Allocator>
-// struct impl_map<std::deque<T, Allocator>> {
-//   using type = list_impl<std::deque<T, Allocator>>;
-// };
+template <class T, class Allocator>
+struct impl_map<std::deque<T, Allocator>> {
+  using type = list_impl<std::deque<T, Allocator>>;
+};
 
 }  // namespace redisus::adapter::detail

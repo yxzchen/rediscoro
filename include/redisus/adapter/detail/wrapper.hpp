@@ -1,10 +1,14 @@
 #pragma once
 
 #include <redisus/adapter/result.hpp>
+#include <redisus/resp3/node.hpp>
 
 #include <optional>
 
 namespace redisus::adapter::detail {
+
+template <class T>
+struct impl_map;
 
 template <class>
 class wrapper;
@@ -32,6 +36,7 @@ class wrapper<result<T>> {
   }
 
  public:
+  wrapper() : result_(nullptr) {}
   explicit wrapper(response_type* p) : result_(p) { result_->value() = T{}; }
 
   void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
@@ -65,6 +70,7 @@ class wrapper<result<std::optional<T>>> {
   }
 
  public:
+  wrapper() : result_(nullptr) {}
   explicit wrapper(response_type* p) : result_(p) {}
 
   void on_msg(resp3::msg_view const& msg, std::error_code& ec) {

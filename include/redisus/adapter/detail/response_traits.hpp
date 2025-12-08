@@ -64,14 +64,15 @@ class static_adapter {
   explicit static_adapter(R& r) { assigner<size - 1>::assign(adapters_, r); }
 
   // clang-format off
-  void on_msg(resp3::msg_view const& msg, system::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
     REDISUS_ASSERT(i_ < adapters_.size());
     std::visit(
       [&](auto& arg) {
-         arg.on_msg(msg, ec); 
-      }, 
+         arg.on_msg(msg, ec);
+      },
       adapters_.at(i_)
     );
+    i_++;
   }
   // clang-format on
 };
