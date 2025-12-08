@@ -24,7 +24,6 @@ class generator {
 
     void return_void() noexcept {}
     void unhandled_exception() noexcept {
-      // TODO: Add logging when logger is available
       exception_ = std::current_exception();
     }
   };
