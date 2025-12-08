@@ -1,13 +1,13 @@
 #pragma once
 
-#include <redisus/error.hpp>
-#include <redisus/resp3/node.hpp>
+#include <xz/redis/error.hpp>
+#include <xz/redis/resp3/node.hpp>
 
 #include <charconv>
 #include <optional>
 #include <type_traits>
 
-namespace redisus::adapter::detail {
+namespace xz::redis::adapter::detail {
 
 // clang-format off
 template <class T> struct is_integral_number : std::is_integral<T> { };
@@ -30,9 +30,9 @@ struct converter<T, true> {
     auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), i);
     if (res.ec != std::errc()) {
-      ec = redisus::error::not_a_number;
+      ec = xz::redis::error::not_a_number;
     } else if (res.ptr != view.data() + view.size()) {
-      ec = redisus::error::invalid_number_format;
+      ec = xz::redis::error::invalid_number_format;
     }
   }
 };
@@ -48,9 +48,9 @@ struct converter<double, false> {
     auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), d);
     if (res.ec != std::errc()) {
-      ec = redisus::error::not_a_double;
+      ec = xz::redis::error::not_a_double;
     } else if (res.ptr != view.data() + view.size()) {
-      ec = redisus::error::invalid_double_format;
+      ec = xz::redis::error::invalid_double_format;
     }
   }
 };
@@ -82,4 +82,4 @@ void from_bulk(T& t, resp3::node_view const& node, std::error_code& ec) {
   from_bulk_impl<T>::apply(t, node, ec);
 }
 
-}  // namespace redisus::adapter::detail
+}  // namespace xz::redis::adapter::detail

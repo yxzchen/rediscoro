@@ -4,9 +4,9 @@
  * accompanying file LICENSE.txt)
  */
 
-#include <redisus/resp3/type.hpp>
+#include <xz/redis/resp3/type.hpp>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 // clang-format off
 auto to_string(type3 type) noexcept -> char const*
@@ -39,4 +39,4 @@ auto operator<<(std::ostream& os, type3 type) -> std::ostream& {
   return os;
 }
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

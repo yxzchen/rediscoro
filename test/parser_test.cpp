@@ -1,5 +1,5 @@
-#include <redisus/error.hpp>
-#include <redisus/resp3/parser.hpp>
+#include <xz/redis/error.hpp>
+#include <xz/redis/resp3/parser.hpp>
 #include <gtest/gtest.h>
 
 class ParserTest : public ::testing::Test {
@@ -11,7 +11,7 @@ protected:
 // === Partial Data Feeding Tests ===
 
 TEST_F(ParserTest, PartialDataSingleByte) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Feed one byte at a time
@@ -31,7 +31,7 @@ TEST_F(ParserTest, PartialDataSingleByte) {
 }
 
 TEST_F(ParserTest, PartialDataAcrossMessageBoundary) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Feed partial first message
@@ -61,7 +61,7 @@ TEST_F(ParserTest, PartialDataAcrossMessageBoundary) {
 }
 
 TEST_F(ParserTest, PartialBulkData) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Feed bulk string header
@@ -93,7 +93,7 @@ TEST_F(ParserTest, PartialBulkData) {
 // === Multiple Nodes Tests ===
 
 TEST_F(ParserTest, MultipleNodesSimpleArray) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Array with 3 elements
@@ -108,7 +108,7 @@ TEST_F(ParserTest, MultipleNodesSimpleArray) {
 }
 
 TEST_F(ParserTest, MultipleNodesNestedArray) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Nested array: *2\r\n*1\r\n+a\r\n*1\r\n+b\r\n
@@ -123,7 +123,7 @@ TEST_F(ParserTest, MultipleNodesNestedArray) {
 }
 
 TEST_F(ParserTest, MultipleNodesDeeplyNested) {
-  redisus::resp3::parser p(8192, 10);
+  xz::redis::resp3::parser p(8192, 10);
   auto gen = p.parse();
 
   // Create 5 levels of nested arrays
@@ -138,7 +138,7 @@ TEST_F(ParserTest, MultipleNodesDeeplyNested) {
 }
 
 TEST_F(ParserTest, MultipleNodesMap) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Map with 3 key-value pairs (6 elements total)
@@ -155,7 +155,7 @@ TEST_F(ParserTest, MultipleNodesMap) {
 // === Feeding After Need Data Tests ===
 
 TEST_F(ParserTest, FeedAfterNeedDataMultipleTimes) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Initial feed - incomplete
@@ -188,7 +188,7 @@ TEST_F(ParserTest, FeedAfterNeedDataMultipleTimes) {
 }
 
 TEST_F(ParserTest, FeedAfterNeedDataInArray) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Array header
@@ -222,7 +222,7 @@ TEST_F(ParserTest, FeedAfterNeedDataInArray) {
 }
 
 TEST_F(ParserTest, FeedAfterNeedDataMultipleMessages) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Feed 3 messages with need_data states in between
@@ -252,7 +252,7 @@ TEST_F(ParserTest, FeedAfterNeedDataMultipleMessages) {
 // === Security Tests ===
 
 TEST_F(ParserTest, DepthLimitEnforcement) {
-  redisus::resp3::parser p(8192, 3);
+  xz::redis::resp3::parser p(8192, 3);
   auto gen = p.parse();
 
   // Exceed max depth of 3
@@ -263,11 +263,11 @@ TEST_F(ParserTest, DepthLimitEnforcement) {
     if (!result) continue;
   }
 
-  EXPECT_EQ(p.error(), redisus::error::exceeeds_max_nested_depth);
+  EXPECT_EQ(p.error(), xz::redis::error::exceeeds_max_nested_depth);
 }
 
 TEST_F(ParserTest, AggregateOverflowProtection) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Map with size that causes overflow
@@ -278,11 +278,11 @@ TEST_F(ParserTest, AggregateOverflowProtection) {
     if (!result) continue;
   }
 
-  EXPECT_EQ(p.error(), redisus::error::aggregate_size_overflow);
+  EXPECT_EQ(p.error(), xz::redis::error::aggregate_size_overflow);
 }
 
 TEST_F(ParserTest, InvalidNumberFormat) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Number with invalid characters
@@ -293,11 +293,11 @@ TEST_F(ParserTest, InvalidNumberFormat) {
     if (!result) continue;
   }
 
-  EXPECT_EQ(p.error(), redisus::error::invalid_number_format);
+  EXPECT_EQ(p.error(), xz::redis::error::invalid_number_format);
 }
 
 TEST_F(ParserTest, StreamedStringHandling) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Streamed string with multiple parts
@@ -312,7 +312,7 @@ TEST_F(ParserTest, StreamedStringHandling) {
 }
 
 TEST_F(ParserTest, EmptyAggregates) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Empty array followed by empty map
@@ -334,7 +334,7 @@ TEST_F(ParserTest, EmptyAggregates) {
 // === Lifetime Tests ===
 
 TEST_F(ParserTest, StringViewLifetimeBetweenMessages) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   // Parse first message
@@ -366,7 +366,7 @@ TEST_F(ParserTest, StringViewLifetimeBetweenMessages) {
 }
 
 TEST_F(ParserTest, ConvertToOwningNode) {
-  redisus::resp3::parser p;
+  xz::redis::resp3::parser p;
   auto gen = p.parse();
 
   p.feed("$7\r\ntesting\r\n");
@@ -375,7 +375,7 @@ TEST_F(ParserTest, ConvertToOwningNode) {
   ASSERT_TRUE(result.has_value());
 
   // Convert to owning node
-  auto owning = redisus::resp3::to_owning_nodes(*result);
+  auto owning = xz::redis::resp3::to_owning_nodes(*result);
   EXPECT_EQ(owning.size(), 1);
   EXPECT_EQ(owning[0].value(), "testing");
 

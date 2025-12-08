@@ -8,7 +8,7 @@
 
 #include <ios>
 
-namespace redisus {
+namespace xz::redis {
 
 /// Generic errors.
 enum class error {
@@ -110,11 +110,11 @@ enum class error {
  */
 auto make_error_code(error e) -> std::error_code;
 
-}  // namespace redisus
+}  // namespace xz::redis
 
 namespace std {
 
 template <>
-struct is_error_code_enum<::redisus::error> : std::true_type {};
+struct is_error_code_enum<::xz::redis::error> : std::true_type {};
 
 }  // namespace std

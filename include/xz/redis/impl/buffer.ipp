@@ -4,9 +4,9 @@
  * accompanying file LICENSE.txt)
  */
 
-#include <redisus/buffer.hpp>
+#include <xz/redis/buffer.hpp>
 
-namespace redisus {
+namespace xz::redis {
 
 void buffer::compact() {
   if (read_pos_ == 0) return;
@@ -39,4 +39,4 @@ void buffer::ensure_writable(std::size_t n) {
   }
 }
 
-}  // namespace redisus
+}  // namespace xz::redis

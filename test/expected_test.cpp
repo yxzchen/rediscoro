@@ -1,10 +1,10 @@
-#include <redisus/expected.hpp>
+#include <xz/redis/expected.hpp>
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace redisus;
+using namespace xz::redis;
 
 TEST(ExpectedTest, DefaultConstruction) {
   expected<int, std::string> e;
@@ -114,12 +114,4 @@ TEST(ExpectedTest, ArrowOperator) {
   expected<std::string, int> e("hello");
   EXPECT_EQ(e->size(), 5);
   EXPECT_EQ(e->length(), 5);
-}
-
-TEST(ExpectedTest, pointer) {
-  char* c = "error";
-  unexpected e(c);
-  EXPECT_EQ(c, e.error());
-  std::cout << (void*)c << std::endl;
-  std::cout << (void*)e.error() << std::endl;
 }

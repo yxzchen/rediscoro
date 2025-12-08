@@ -9,7 +9,7 @@
 #include <coroutine>
 #include <exception>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 // Generator for C++20 coroutines
 template <typename T>
@@ -73,4 +73,4 @@ class generator {
   handle_type handle_;
 };
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

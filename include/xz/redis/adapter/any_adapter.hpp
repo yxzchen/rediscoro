@@ -1,14 +1,14 @@
 #pragma once
 
-#include <redisus/resp3/node.hpp>
-#include <redisus/adapter/detail/response_traits.hpp>
+#include <xz/redis/resp3/node.hpp>
+#include <xz/redis/adapter/detail/response_traits.hpp>
 
 #include <cstddef>
 #include <functional>
 #include <string_view>
 #include <type_traits>
 
-namespace redisus::adapter {
+namespace xz::redis::adapter {
 
 class any_adapter {
  public:
@@ -31,4 +31,4 @@ class any_adapter {
   impl_t impl_;
 };
 
-}  // namespace redisus::adapter
+}  // namespace xz::redis::adapter

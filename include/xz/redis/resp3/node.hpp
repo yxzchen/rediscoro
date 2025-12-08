@@ -7,10 +7,10 @@
 #pragma once
 
 #include <cstddef>
-#include <redisus/resp3/type.hpp>
+#include <xz/redis/resp3/type.hpp>
 #include <variant>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 /** @brief A node in the response tree.
  *
@@ -98,4 +98,4 @@ inline auto to_owning_nodes(std::vector<node_view> const& views) -> std::vector<
   return result;
 }
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

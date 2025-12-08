@@ -1,16 +1,16 @@
-#include <redisus/adapter/any_adapter.hpp>
-#include <redisus/adapter/detail/impl.hpp>
-#include <redisus/adapter/detail/result_traits.hpp>
-#include <redisus/adapter/result.hpp>
-#include <redisus/resp3/node.hpp>
-#include <redisus/response.hpp>
+#include <xz/redis/adapter/any_adapter.hpp>
+#include <xz/redis/adapter/detail/impl.hpp>
+#include <xz/redis/adapter/detail/result_traits.hpp>
+#include <xz/redis/adapter/result.hpp>
+#include <xz/redis/resp3/node.hpp>
+#include <xz/redis/response.hpp>
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace redisus;
-using namespace redisus::adapter;
+using namespace xz::redis;
+using namespace xz::redis::adapter;
 
 class AdapterTest : public ::testing::Test {
  protected:

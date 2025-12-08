@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <redisus/assert.hpp>
+#include <xz/redis/assert.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace redisus {
+namespace xz::redis {
 
 // Dynamic buffer for feeding and consuming data
 // Provides both feed() for string data and prepare()/commit() for direct I/O
@@ -68,4 +68,4 @@ class buffer {
   void ensure_writable(std::size_t n);
 };
 
-}  // namespace redisus
+}  // namespace xz::redis

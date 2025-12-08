@@ -6,18 +6,18 @@
 
 #pragma once
 
-#include <redisus/resp3/parser.hpp>
-#include <redisus/resp3/type.hpp>
+#include <xz/redis/resp3/parser.hpp>
+#include <xz/redis/resp3/type.hpp>
 
-#include <redisus/assert.hpp>
+#include <xz/redis/assert.hpp>
 
 #include <string>
 #include <tuple>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 void add_header(std::string& payload, type3 type, std::size_t size);
 void add_blob(std::string& payload, std::string_view blob);
 void add_separator(std::string& payload);
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

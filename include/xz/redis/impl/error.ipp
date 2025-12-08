@@ -4,10 +4,10 @@
  * accompanying file LICENSE.txt)
  */
 
-#include <redisus/assert.hpp>
-#include <redisus/error.hpp>
+#include <xz/redis/assert.hpp>
+#include <xz/redis/error.hpp>
 
-namespace redisus {
+namespace xz::redis {
 namespace detail {
 
 struct error_category_impl : std::error_category {
@@ -75,4 +75,4 @@ auto make_error_code(error e) -> std::error_code {
   return std::error_code{static_cast<int>(e), detail::category()};
 }
 
-}  // namespace redisus
+}  // namespace xz::redis

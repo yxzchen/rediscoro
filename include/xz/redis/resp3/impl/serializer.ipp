@@ -4,10 +4,10 @@
  * accompanying file LICENSE.txt)
  */
 
-#include <redisus/resp3/parser.hpp>
-#include <redisus/resp3/serializer.hpp>
+#include <xz/redis/resp3/parser.hpp>
+#include <xz/redis/resp3/serializer.hpp>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 void add_header(std::string& payload, type3 type, std::size_t size) {
   auto const str = std::to_string(size);
@@ -24,4 +24,4 @@ void add_blob(std::string& payload, std::string_view blob) {
 
 void add_separator(std::string& payload) { payload += parser::sep; }
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

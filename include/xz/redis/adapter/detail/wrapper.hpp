@@ -1,11 +1,11 @@
 #pragma once
 
-#include <redisus/adapter/result.hpp>
-#include <redisus/resp3/node.hpp>
+#include <xz/redis/adapter/result.hpp>
+#include <xz/redis/resp3/node.hpp>
 
 #include <optional>
 
-namespace redisus::adapter::detail {
+namespace xz::redis::adapter::detail {
 
 template <class T>
 struct impl_map;
@@ -67,4 +67,4 @@ class wrapper<result<std::optional<T>>> {
   }
 };
 
-}  // namespace redisus::adapter::detail
+}  // namespace xz::redis::adapter::detail

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <redisus/adapter/detail/convert.hpp>
-#include <redisus/error.hpp>
-#include <redisus/resp3/node.hpp>
+#include <xz/redis/adapter/detail/convert.hpp>
+#include <xz/redis/error.hpp>
+#include <xz/redis/resp3/node.hpp>
 
 #include <array>
 #include <charconv>
@@ -19,31 +19,29 @@
 #include <unordered_set>
 #include <vector>
 
-namespace redisus::adapter::detail {
+namespace xz::redis::adapter::detail {
 
-// Helper function to validate aggregate header and size
 inline bool validate_aggregate(resp3::msg_view const& msg, std::size_t expected_element_count, std::error_code& ec) {
   auto const& header = msg.front();
 
   if (!is_aggregate(header.data_type)) {
-    ec = redisus::error::expects_resp3_aggregate;
+    ec = xz::redis::error::expects_resp3_aggregate;
     return false;
   }
 
   auto multiplier = element_multiplicity(header.data_type);
   if (msg.size() != header.aggregate_size() * multiplier + 1) {
-    ec = redisus::error::incompatible_size;
+    ec = xz::redis::error::incompatible_size;
     return false;
   }
 
   return true;
 }
 
-// Helper function to check if any elements in range are nested aggregates
 inline bool has_nested_aggregates(resp3::msg_view const& msg, std::size_t start_idx, std::error_code& ec) {
   for (std::size_t i = start_idx; i < msg.size(); ++i) {
     if (msg[i].is_aggregate_node()) {
-      ec = redisus::error::nested_aggregate_not_supported;
+      ec = xz::redis::error::nested_aggregate_not_supported;
       return true;
     }
   }
@@ -72,12 +70,12 @@ class simple_impl {
  public:
   void on_msg(Result& result, resp3::msg_view const& msg, std::error_code& ec) {
     if (msg.size() > 1) {
-      ec = redisus::error::expects_resp3_simple_type;
+      ec = xz::redis::error::expects_resp3_simple_type;
       return;
     }
 
     if (is_aggregate(msg.front().data_type)) {
-      ec = redisus::error::expects_resp3_simple_type;
+      ec = xz::redis::error::expects_resp3_simple_type;
       return;
     }
 
@@ -92,12 +90,12 @@ class set_impl {
     auto const& header = msg.front();
 
     if (header.data_type != resp3::type3::set) {
-      ec = redisus::error::expects_resp3_set;
+      ec = xz::redis::error::expects_resp3_set;
       return;
     }
 
     if (msg.size() != header.aggregate_size() + 1) {
-      ec = redisus::error::incompatible_size;
+      ec = xz::redis::error::incompatible_size;
       return;
     }
 
@@ -120,12 +118,12 @@ class map_impl {
     auto const& header = msg.front();
 
     if (!is_map_like(header.data_type)) {
-      ec = redisus::error::expects_resp3_map;
+      ec = xz::redis::error::expects_resp3_map;
       return;
     }
 
     if (msg.size() != header.aggregate_size() * 2 + 1) {
-      ec = redisus::error::incompatible_size;
+      ec = xz::redis::error::incompatible_size;
       return;
     }
 
@@ -153,12 +151,12 @@ class vector_impl {
     auto const& header = msg.front();
 
     if (!is_array_like(header.data_type)) {
-      ec = redisus::error::expects_resp3_aggregate;
+      ec = xz::redis::error::expects_resp3_aggregate;
       return;
     }
 
     if (msg.size() != header.aggregate_size() + 1) {
-      ec = redisus::error::incompatible_size;
+      ec = xz::redis::error::incompatible_size;
       return;
     }
 
@@ -181,13 +179,13 @@ class array_impl {
     auto const& header = msg.front();
 
     if (header.data_type != resp3::type3::array) {
-      ec = redisus::error::expects_resp3_aggregate;
+      ec = xz::redis::error::expects_resp3_aggregate;
       return;
     }
 
     auto expected_count = header.aggregate_size();
     if (msg.size() != expected_count + 1 || result.size() != expected_count) {
-      ec = redisus::error::incompatible_size;
+      ec = xz::redis::error::incompatible_size;
       return;
     }
 
@@ -206,12 +204,12 @@ struct list_impl {
     auto const& header = msg.front();
 
     if (!is_array_like(header.data_type)) {
-      ec = redisus::error::expects_resp3_aggregate;
+      ec = xz::redis::error::expects_resp3_aggregate;
       return;
     }
 
     if (msg.size() != header.aggregate_size() + 1) {
-      ec = redisus::error::incompatible_size;
+      ec = xz::redis::error::incompatible_size;
       return;
     }
 
@@ -291,4 +289,4 @@ struct impl_map<std::deque<T, Allocator>> {
   using type = list_impl<std::deque<T, Allocator>>;
 };
 
-}  // namespace redisus::adapter::detail
+}  // namespace xz::redis::adapter::detail

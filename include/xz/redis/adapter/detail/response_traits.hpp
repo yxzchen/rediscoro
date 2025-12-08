@@ -1,17 +1,17 @@
 #pragma once
 
-#include <redisus/adapter/detail/impl.hpp>
-#include <redisus/adapter/detail/result_traits.hpp>
-#include <redisus/ignore.hpp>
-#include <redisus/resp3/node.hpp>
-#include <redisus/response.hpp>
+#include <xz/redis/adapter/detail/impl.hpp>
+#include <xz/redis/adapter/detail/result_traits.hpp>
+#include <xz/redis/ignore.hpp>
+#include <xz/redis/resp3/node.hpp>
+#include <xz/redis/response.hpp>
 
 #include <limits>
 #include <string_view>
 #include <tuple>
 #include <variant>
 
-namespace redisus::adapter::detail {
+namespace xz::redis::adapter::detail {
 
 template <template <class> class Adapter, typename Tuple>
 struct transform_tuple;
@@ -106,4 +106,4 @@ struct response_traits<response<Ts...>> {
   static auto adapt(response_type& r) noexcept { return adapter_type{r}; }
 };
 
-}  // namespace redisus::adapter::detail
+}  // namespace xz::redis::adapter::detail

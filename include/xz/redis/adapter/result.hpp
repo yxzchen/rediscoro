@@ -1,12 +1,12 @@
 #pragma once
 
-#include <redisus/error.hpp>
-#include <redisus/expected.hpp>
-#include <redisus/resp3/type.hpp>
+#include <xz/redis/error.hpp>
+#include <xz/redis/expected.hpp>
+#include <xz/redis/resp3/type.hpp>
 
 #include <string>
 
-namespace redisus::adapter {
+namespace xz::redis::adapter {
 
 struct error {
   resp3::type3 data_type = resp3::type3::invalid;
@@ -17,4 +17,4 @@ struct error {
 template <typename T>
 using result = expected<T, error>;
 
-}  // namespace redisus::adapter
+}  // namespace xz::redis::adapter

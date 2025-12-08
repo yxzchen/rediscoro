@@ -6,13 +6,13 @@
 
 #pragma once
 
-#include <redisus/assert.hpp>
+#include <xz/redis/assert.hpp>
 
 #include <ostream>
 #include <string>
 #include <vector>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 /** @brief RESP3 data types.
 
@@ -173,4 +173,4 @@ constexpr auto to_type(char c) noexcept -> type3 {
   }
 }
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

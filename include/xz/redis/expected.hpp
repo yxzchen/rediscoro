@@ -12,7 +12,7 @@
 #include <utility>
 #include <variant>
 
-namespace redisus {
+namespace xz::redis {
 
 template <class E>
 class unexpected {
@@ -321,4 +321,4 @@ constexpr bool operator!=(unexpected<G> const& e, expected<T, E> const& x) {
   return !(x == e);
 }
 
-}  // namespace redisus
+}  // namespace xz::redis

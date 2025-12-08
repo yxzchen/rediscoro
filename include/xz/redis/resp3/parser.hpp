@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include <redisus/buffer.hpp>
-#include <redisus/resp3/generator.hpp>
-#include <redisus/resp3/node.hpp>
+#include <xz/redis/buffer.hpp>
+#include <xz/redis/resp3/generator.hpp>
+#include <xz/redis/resp3/node.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -17,7 +17,7 @@
 #include <stack>
 #include <string_view>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 class parser {
  public:
@@ -73,4 +73,4 @@ class parser {
   void commit_elem() noexcept;
 };
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3

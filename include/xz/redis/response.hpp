@@ -1,12 +1,12 @@
 #pragma once
 
-#include <redisus/adapter/result.hpp>
+#include <xz/redis/adapter/result.hpp>
 
-namespace redisus {
+namespace xz::redis {
 
 template <class... Ts>
 using response = std::tuple<adapter::result<Ts>...>;
 
 using generic_response = adapter::result<std::vector<resp3::node>>;
 
-}  // namespace redisus
+}  // namespace xz::redis

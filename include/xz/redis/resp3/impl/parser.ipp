@@ -4,16 +4,16 @@
  * accompanying file LICENSE.txt)
  */
 
-#include <redisus/assert.hpp>
-#include <redisus/error.hpp>
-#include <redisus/resp3/parser.hpp>
+#include <xz/redis/assert.hpp>
+#include <xz/redis/error.hpp>
+#include <xz/redis/resp3/parser.hpp>
 
 #include <charconv>
 #include <cstddef>
 #include <limits>
 #include <vector>
 
-namespace redisus::resp3 {
+namespace xz::redis::resp3 {
 
 void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
   auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), i);
@@ -234,4 +234,4 @@ auto parser::parse() -> generator<std::optional<msg_view>> {
   }
 }
 
-}  // namespace redisus::resp3
+}  // namespace xz::redis::resp3
