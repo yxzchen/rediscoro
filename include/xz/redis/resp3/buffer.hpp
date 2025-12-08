@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace xz::redis {
+namespace xz::redis::resp3 {
 
 // Dynamic buffer for feeding and consuming data
 // Provides both feed() for string data and prepare()/commit() for direct I/O

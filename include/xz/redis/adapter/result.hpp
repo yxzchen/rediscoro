@@ -10,8 +10,7 @@ namespace xz::redis::adapter {
 
 struct error {
   resp3::type3 data_type = resp3::type3::invalid;
-
-  std::string diagnostic;
+  std::string msg;
 };
 
 template <typename T>

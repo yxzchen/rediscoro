@@ -1,6 +1,6 @@
 #pragma once
 
-#include <xz/redis/buffer.hpp>
+#include <xz/redis/resp3/buffer.hpp>
 #include <xz/redis/resp3/generator.hpp>
 #include <xz/redis/resp3/node.hpp>
 

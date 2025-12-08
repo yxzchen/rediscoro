@@ -1,6 +1,6 @@
-#include <xz/redis/buffer.hpp>
+#include <xz/redis/resp3/buffer.hpp>
 
-namespace xz::redis {
+namespace xz::redis::resp3 {
 
 void buffer::compact() {
   if (read_pos_ == 0) return;
