@@ -17,8 +17,8 @@ class any_adapter {
   template <class T>
   static auto create_impl(T& resp) -> impl_t {
     using namespace redisus::adapter;
-    return [adapter2 = adapt_resp(resp)](resp3::msg_view const& msg, std::error_code& ec) mutable {
-      adapter2.on_msg(msg, ec);
+    return [adapter = adapt_resp(resp)](resp3::msg_view const& msg, std::error_code& ec) mutable {
+      adapter.on_msg(msg, ec);
     };
   }
 

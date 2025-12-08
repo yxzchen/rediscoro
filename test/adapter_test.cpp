@@ -1,3 +1,4 @@
+#include <redisus/adapter/adapt.hpp>
 #include <redisus/adapter/any_adapter.hpp>
 #include <redisus/adapter/detail/impl.hpp>
 #include <redisus/adapter/detail/result_traits.hpp>
@@ -244,4 +245,38 @@ TEST_F(AdapterTest, ArrayOfInts) {
   EXPECT_EQ(arr[0], 5);
   EXPECT_EQ(arr[1], 10);
   EXPECT_EQ(arr[2], 15);
+}
+
+TEST_F(AdapterTest, GeneralAggregateDeepCopy) {
+  generic_response res;
+  any_adapter adapter(res);
+  std::error_code ec;
+
+  // Create a message with aggregate and simple nodes
+  auto msg = make_aggregate_msg(resp3::type3::array, 2,
+                                  resp3::node_view{resp3::type3::blob_string, "hello"},
+                                  resp3::node_view{resp3::type3::number, "42"});
+  adapter.on_msg(msg, ec);
+
+  EXPECT_FALSE(ec);
+  EXPECT_TRUE(res.has_value());
+  auto const& nodes = res.value();
+
+  // Should have 3 nodes: 1 aggregate header + 2 elements
+  ASSERT_EQ(nodes.size(), 3);
+
+  // First node: array header
+  EXPECT_EQ(nodes[0].data_type, resp3::type3::array);
+  EXPECT_TRUE(nodes[0].is_aggregate_node());
+  EXPECT_EQ(nodes[0].aggregate_size(), 2);
+
+  // Second node: string value
+  EXPECT_EQ(nodes[1].data_type, resp3::type3::blob_string);
+  EXPECT_FALSE(nodes[1].is_aggregate_node());
+  EXPECT_EQ(nodes[1].value(), "hello");
+
+  // Third node: number value
+  EXPECT_EQ(nodes[2].data_type, resp3::type3::number);
+  EXPECT_FALSE(nodes[2].is_aggregate_node());
+  EXPECT_EQ(nodes[2].value(), "42");
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <redisus/adapter/detail/impl.hpp>
 #include <redisus/adapter/detail/result_traits.hpp>
 #include <redisus/resp3/node.hpp>
 #include <redisus/response.hpp>
@@ -79,6 +80,14 @@ class static_adapter {
 
 template <class>
 struct response_traits;
+
+template <class String, class Allocator>
+struct response_traits<result<std::vector<resp3::basic_node<String>, Allocator>>> {
+   using response_type = result<std::vector<resp3::basic_node<String>, Allocator>>;
+   using adapter_type = general_aggregate<response_type>;
+
+   static auto adapt(response_type& v) noexcept { return adapter_type{&v}; }
+};
 
 template <class... Ts>
 struct response_traits<response<Ts...>> {

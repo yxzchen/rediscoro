@@ -1,6 +1,7 @@
 #pragma once
 
 #include <redisus/adapter/detail/convert.hpp>
+#include <redisus/resp3/node.hpp>
 
 #include <array>
 #include <charconv>
@@ -19,62 +20,22 @@
 
 namespace redisus::adapter::detail {
 
-// template <class Result>
-// class general_aggregate {
-//  private:
-//   Result* result_;
+template <class Result>
+class general_aggregate {
+ private:
+  Result* result_;
 
-//  public:
-//   explicit general_aggregate(Result* c = nullptr) : result_(c) {}
+ public:
+  explicit general_aggregate(Result* c = nullptr) : result_(c) {}
 
-//
-//
-
-//   template <class String>
-//   void on_msg(resp3::msg_view const& msg, system::error_code&) {
-//     BOOST_ASSERT_MSG(!!result_, "Unexpected null pointer");
-//     switch (msg.front().data_type) {
-//       case resp3::type::blob_error:
-//       case resp3::type::simple_error:
-//         *result_ = error{msg.front().data_type, std::string{std::cbegin(msg.value), std::cend(msg.value)}};
-//         break;
-//       default:
-//         if (result_->has_value()) {
-//           (**result_).push_back(
-//               {msg.front().data_type, msg.aggregate_size, msg.depth, std::string{std::cbegin(msg.value),
-//               std::cend(msg.value)}});
-//         }
-//     }
-//   }
-// };
-
-// template <class Node>
-// class general_simple {
-//  private:
-//   Node* result_;
-
-//  public:
-//   explicit general_simple(Node* t = nullptr) : result_(t) {}
-
-//
-//
-
-//   template <class String>
-//   void on_msg(resp3::msg_view const& msg, system::error_code&) {
-//     BOOST_ASSERT_MSG(!!result_, "Unexpected null pointer");
-//     switch (msg.front().data_type) {
-//       case resp3::type::blob_error:
-//       case resp3::type::simple_error:
-//         *result_ = error{msg.front().data_type, std::string{std::cbegin(msg.value), std::cend(msg.value)}};
-//         break;
-//       default:
-//         result_->value().data_type = msg.front().data_type;
-//         result_->value().aggregate_size = msg.aggregate_size;
-//         result_->value().depth = msg.depth;
-//         result_->value().value.assign(msg.value.data(), msg.value.size());
-//     }
-//   }
-// };
+  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
+    auto& vec = result_->value();
+    vec.reserve(vec.size() + msg.size());
+    for (auto const& node_view : msg) {
+      vec.push_back(resp3::to_owning_node(node_view));
+    }
+  }
+};
 
 template <class Result>
 class simple_impl {
