@@ -1,14 +1,14 @@
 #pragma once
 
-#include <redisus/adapter/adapt.hpp>
 #include <redisus/resp3/node.hpp>
+#include <redisus/adapter/detail/response_traits.hpp>
 
 #include <cstddef>
 #include <functional>
 #include <string_view>
 #include <type_traits>
 
-namespace redisus {
+namespace redisus::adapter {
 
 class any_adapter {
  public:
@@ -16,10 +16,8 @@ class any_adapter {
 
   template <class T>
   static auto create_impl(T& resp) -> impl_t {
-    using namespace redisus::adapter;
-    return [adapter = adapt_resp(resp)](resp3::msg_view const& msg, std::error_code& ec) mutable {
-      adapter.on_msg(msg, ec);
-    };
+    return [adapter = detail::response_traits<T>::adapt(resp)](
+               resp3::msg_view const& msg, std::error_code& ec) mutable { adapter.on_msg(msg, ec); };
   }
 
   any_adapter(impl_t fn = [](resp3::msg_view const&, std::error_code&) {}) : impl_{std::move(fn)} {}

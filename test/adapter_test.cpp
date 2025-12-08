@@ -1,4 +1,3 @@
-#include <redisus/adapter/adapt.hpp>
 #include <redisus/adapter/any_adapter.hpp>
 #include <redisus/adapter/detail/impl.hpp>
 #include <redisus/adapter/detail/result_traits.hpp>
