@@ -3,9 +3,8 @@
 #include <coroutine>
 #include <exception>
 
-namespace xz::redis::resp3 {
+namespace xz::redis::resp3::detail {
 
-// Generator for C++20 coroutines
 template <typename T>
 class generator {
  public:
@@ -38,7 +37,6 @@ class generator {
     if (handle_) handle_.destroy();
   }
 
-  // Move only
   generator(const generator&) = delete;
   generator& operator=(const generator&) = delete;
   generator(generator&& other) noexcept : handle_(other.handle_) { other.handle_ = nullptr; }
@@ -67,4 +65,4 @@ class generator {
   handle_type handle_;
 };
 
-}  // namespace xz::redis::resp3
+}  // namespace xz::redis::resp3::detail

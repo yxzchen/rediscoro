@@ -1,7 +1,7 @@
 #pragma once
 
-#include <xz/redis/resp3/buffer.hpp>
-#include <xz/redis/resp3/generator.hpp>
+#include <xz/redis/resp3/detail/buffer.hpp>
+#include <xz/redis/resp3/detail/generator.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 #include <cstdint>
@@ -53,10 +53,10 @@ class parser {
    *
    *  @return A generator yielding optional vectors of node_views.
    */
-  auto parse() -> generator<std::optional<std::vector<node_view>>>;
+  auto parse() -> detail::generator<std::optional<std::vector<node_view>>>;
 
  private:
-  buffer buffer_;
+  detail::buffer buffer_;
   std::stack<size_t> pending_;
   std::error_code ec_;
   std::size_t max_depth_;

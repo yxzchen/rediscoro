@@ -1,6 +1,6 @@
-#include <xz/redis/resp3/buffer.hpp>
+#include <xz/redis/resp3/detail/buffer.hpp>
 
-namespace xz::redis::resp3 {
+namespace xz::redis::resp3::detail {
 
 void buffer::compact() {
   if (read_pos_ == 0) return;
@@ -33,4 +33,4 @@ void buffer::ensure_writable(std::size_t n) {
   }
 }
 
-}  // namespace xz::redis
+}  // namespace xz::redis::resp3::detail

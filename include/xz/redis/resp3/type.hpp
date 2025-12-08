@@ -35,7 +35,7 @@ enum class type3 {
   streamed_string,
   streamed_string_part,
 
-  invalid
+  invalid,
 };
 
 /** @brief Converts the data type to a string.

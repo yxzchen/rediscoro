@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace xz::redis::resp3 {
+namespace xz::redis::resp3::detail {
 
 // Dynamic buffer for feeding and consuming data
 // Provides both feed() for string data and prepare()/commit() for direct I/O
@@ -62,4 +62,4 @@ class buffer {
   void ensure_writable(std::size_t n);
 };
 
-}  // namespace xz::redis
+}  // namespace xz::redis::resp3::detail

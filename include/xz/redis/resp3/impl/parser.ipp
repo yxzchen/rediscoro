@@ -19,7 +19,6 @@ void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
 }
 
 // Cascades element completion upward through the stack
-// Example: in array of size 2, completing the 2nd element completes the array too
 void parser::commit_elem() noexcept {
   REDISXZ_ASSERT(!pending_.empty());
   if (pending_.empty()) return;
@@ -47,7 +46,6 @@ auto parser::read_until_separator() noexcept -> std::optional<std::string_view> 
 auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept -> std::optional<std::string_view> {
   auto view = buffer_.view();
 
-  // Check for overflow when adding 2 for \r\n
   if (length > std::numeric_limits<std::size_t>::max() - 2) {
     ec = error::invalid_data_type;
     return std::nullopt;
@@ -55,10 +53,9 @@ auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept ->
 
   auto const span = length + 2;
   if (view.length() < span) {
-    return std::nullopt;  // Need more data
+    return std::nullopt;
   }
 
-  // Validate CRLF terminator
   if (view[length] != '\r' || view[length + 1] != '\n') {
     ec = error::invalid_data_type;
     return std::nullopt;
@@ -69,9 +66,9 @@ auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept ->
   return result;
 }
 
-auto parser::parse() -> generator<std::optional<msg_view>> {
+auto parser::parse() -> detail::generator<std::optional<msg_view>> {
   msg_view msg;
-  msg.reserve(16);  // Reserve initial capacity to reduce reallocations
+  msg.reserve(16);
   std::optional<std::string_view> line;
   std::optional<std::string_view> bulk_data;
 
