@@ -109,6 +109,6 @@ auto make_error_code(error e) -> std::error_code;
 namespace std {
 
 template <>
-struct is_error_code_enum<::xz::redis::error> : std::true_type {};
+struct is_error_code_enum<xz::redis::error> : std::true_type {};
 
 }  // namespace std
