@@ -1,14 +1,8 @@
-/* Copyright (c) 2018-2024 Marcelo Zimbres Silva (mzimbres@gmail.com)
- *
- * Distributed under the Boost Software License, Version 1.0. (See
- * accompanying file LICENSE.txt)
- */
-
 #pragma once
 
 #include <cstddef>
-#include <xz/redis/resp3/type.hpp>
 #include <variant>
+#include <xz/redis/resp3/type.hpp>
 
 namespace xz::redis::resp3 {
 
@@ -16,9 +10,7 @@ namespace xz::redis::resp3 {
  *
  *  RESP3 can contain recursive data structures, like a map of sets of
  *  vectors. This class is called a node
- *  because it can be seen as the element of the response tree. It
- *  is a template so that users can use it with any string type, like
- *  `std::string` or `boost::static_string`.
+ *  because it can be seen as the element of the response tree.
  *
  *  The node uses std::variant to store either an aggregate size (for
  *  aggregate types like arrays, maps, sets) or a value (for simple types
@@ -52,22 +44,11 @@ struct basic_node {
   auto is_aggregate_node() const -> bool { return std::holds_alternative<std::size_t>(data); }
 };
 
-/// A node in the response tree that owns its data.
 using node = basic_node<std::string>;
-
-/// A node in the response tree that does not own its data.
 using node_view = basic_node<std::string_view>;
 
 using msg_view = std::vector<node_view>;
 
-/** @brief Converts a node_view to an owning node.
- *
- *  Creates a deep copy that owns its string data. Use this when you need
- *  to keep nodes beyond the lifetime of the parser's buffer.
- *
- *  @param view The node_view to convert.
- *  @return An owning node with copied string data.
- */
 inline auto to_owning_node(node_view const& view) -> node {
   node result;
   result.data_type = view.data_type;
@@ -81,14 +62,6 @@ inline auto to_owning_node(node_view const& view) -> node {
   return result;
 }
 
-/** @brief Converts a vector of node_views to owning nodes.
- *
- *  Creates deep copies of all nodes. Use this when you need to keep
- *  a complete message beyond the lifetime of the parser's buffer.
- *
- *  @param views The node_views to convert.
- *  @return A vector of owning nodes with copied string data.
- */
 inline auto to_owning_nodes(std::vector<node_view> const& views) -> std::vector<node> {
   std::vector<node> result;
   result.reserve(views.size());
