@@ -14,7 +14,7 @@ struct error_category_impl : std::error_category {
   virtual ~error_category_impl() = default;
 
   auto name() const noexcept -> char const* override {
-    return "redisus";
+    return "redisxz";
   }
 
   auto message(int ev) const -> std::string override {
@@ -58,7 +58,7 @@ struct error_category_impl : std::error_category {
                "buffer.";
       case error::write_timeout:
         return "Timeout while writing data to the server.";
-      default: REDISUS_ASSERT(false); return "Redisus error.";
+      default: REDISXZ_ASSERT(false); return "redisxz error.";
     }
     // clang-format on
   }

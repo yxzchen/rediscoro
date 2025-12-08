@@ -143,7 +143,7 @@ constexpr auto to_code(type3 type) noexcept -> char {
     case type3::attribute:            return '|';
     case type3::map:                  return '%';
 
-     default: REDISUS_ASSERT(false); return ' ';
+     default: REDISXZ_ASSERT(false); return ' ';
       // clang-format on
   }
 }

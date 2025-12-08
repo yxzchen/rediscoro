@@ -27,7 +27,7 @@ void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
 // Cascades element completion upward through the stack
 // Example: in array of size 2, completing the 2nd element completes the array too
 void parser::commit_elem() noexcept {
-  REDISUS_ASSERT(!pending_.empty());
+  REDISXZ_ASSERT(!pending_.empty());
   if (pending_.empty()) return;
 
   pending_.top()--;
@@ -93,7 +93,7 @@ auto parser::parse() -> generator<std::optional<msg_view>> {
     }
 
     // === Parse header ===
-    REDISUS_ASSERT(!pending_.empty());
+    REDISXZ_ASSERT(!pending_.empty());
     if (line->empty()) {
       ec_ = error::invalid_data_type;
       co_return;

@@ -8,11 +8,11 @@
 
 #include <cassert>
 
-// REDISUS_ASSERT is disabled by default
-// Define REDISUS_ENABLE_ASSERTS to enable assertions
+// REDISXZ_ASSERT is disabled by default
+// Define REDISXZ_ENABLE_ASSERTS to enable assertions
 // This can be controlled via CMake option
-#ifdef REDISUS_ENABLE_ASSERTS
-#define REDISUS_ASSERT(expr) assert(expr)
+#ifdef REDISXZ_ENABLE_ASSERTS
+#define REDISXZ_ASSERT(expr) assert(expr)
 #else
-#define REDISUS_ASSERT(expr) ((void)0)
+#define REDISXZ_ASSERT(expr) ((void)0)
 #endif

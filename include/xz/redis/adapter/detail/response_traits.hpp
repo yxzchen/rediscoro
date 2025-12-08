@@ -67,7 +67,7 @@ class static_adapter {
 
   // clang-format off
   void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
-    REDISUS_ASSERT(i_ < adapters_.size());
+    REDISXZ_ASSERT(i_ < adapters_.size());
     std::visit(
       [&](auto& arg) {
          arg.on_msg(msg, ec);

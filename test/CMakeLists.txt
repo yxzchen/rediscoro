@@ -1,13 +1,13 @@
 # Find Google Test
 find_package(GTest REQUIRED)
 
-add_library(redisus_src STATIC redisus.cpp)
-target_link_libraries(redisus_src PUBLIC redisus)
+add_library(redisxz_src STATIC redisxz.cpp)
+target_link_libraries(redisxz_src PUBLIC redisxz)
 
 macro(make_test TEST_NAME)
   add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
   target_link_libraries(${TEST_NAME} PRIVATE
-    redisus_src
+    redisxz_src
     GTest::gtest
     GTest::gtest_main
   )

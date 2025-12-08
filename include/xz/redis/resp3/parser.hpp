@@ -55,7 +55,7 @@ class parser {
    *
    *  Call compact() when you're done with all views to reclaim buffer memory.
    *  For long-term storage, use to_owning_node() or to_owning_nodes() from
-   *  <redisus/resp3/node.hpp> to create deep copies.
+   *  <xz/redis/resp3/node.hpp> to create deep copies.
    *
    *  @return A generator yielding optional vectors of node_views.
    */

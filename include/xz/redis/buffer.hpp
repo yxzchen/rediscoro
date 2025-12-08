@@ -36,11 +36,11 @@ class buffer {
   }
 
   void commit(std::size_t n) {
-    REDISUS_ASSERT(write_pos_ + n <= data_.size());
+    REDISXZ_ASSERT(write_pos_ + n <= data_.size());
     write_pos_ += n;
   }
   void consume(std::size_t n) {
-    REDISUS_ASSERT(read_pos_ + n <= write_pos_);
+    REDISXZ_ASSERT(read_pos_ + n <= write_pos_);
     read_pos_ += n;
   }
 
