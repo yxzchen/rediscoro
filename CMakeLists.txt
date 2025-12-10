@@ -18,6 +18,21 @@ target_include_directories(redisxz INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
+# Fetch external dependencies
+include(FetchContent)
+
+FetchContent_Declare(
+    ioxz
+    GIT_REPOSITORY https://github.com/yxzchen/ioxz.git
+    GIT_TAG dev
+)
+
+FetchContent_MakeAvailable(ioxz)
+
+# Link dependencies
+target_link_libraries(redisxz INTERFACE ioxz)
+target_compile_options(redisxz INTERFACE -fcoroutines)
+
 # Apply assertion enable flag if option is enabled
 if(REDISXZ_ENABLE_ASSERTS)
     target_compile_definitions(redisxz INTERFACE REDISXZ_ENABLE_ASSERTS)
