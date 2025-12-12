@@ -6,7 +6,6 @@
 #include <xz/io/tcp_socket.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/detail/connection_fsm.hpp>
-#include <xz/redis/detail/pipeline.hpp>
 #include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/response.hpp>
@@ -46,6 +45,7 @@ class connection {
     adapter::any_adapter adapter;
     std::size_t expected_count;
     std::size_t received_count = 0;
+    std::chrono::steady_clock::time_point deadline;
     std::error_code error;
   };
 
@@ -58,7 +58,6 @@ class connection {
   config cfg_;
   io::tcp_socket socket_;
   connection_fsm fsm_;
-  pipeline pipeline_;
   resp3::parser parser_;
   xz::redis::resp3::generator_type gen_;
 
@@ -66,6 +65,7 @@ class connection {
   bool connected_ = false;
   bool read_loop_running_ = false;
   std::optional<io::detail::timer_handle> timeout_timer_;
+  std::optional<io::task<void>> read_loop_task_;
 };
 
 template <class Response>
@@ -80,11 +80,11 @@ auto connection::exec(request const& req, Response& resp) -> io::task<void> {
 
   auto expected = req.expected_responses();
   co_await write_data(req.payload());
-  pipeline_.push(expected, cfg_.request_timeout);
 
   pending_operation op;
   op.adapter = adapter::any_adapter{resp};
   op.expected_count = expected;
+  op.deadline = std::chrono::steady_clock::now() + cfg_.request_timeout;
 
   struct awaitable {
     pending_operation* op_;
@@ -110,10 +110,8 @@ auto connection::exec(request const& req, Response& resp) -> io::task<void> {
 
   if (!read_loop_running_) {
     read_loop_running_ = true;
-    ctx_.post([this]() {
-      auto t = read_loop();
-      t.resume();
-    });
+    read_loop_task_ = read_loop();
+    read_loop_task_->resume();
   }
 
   co_await awaitable{&op, &pending_ops_};

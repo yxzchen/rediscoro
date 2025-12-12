@@ -84,7 +84,7 @@ auto connection::read_loop() -> io::task<void> {
           break;
         }
 
-        if (pending_ops_.empty() || pipeline_.empty()) {
+        if (pending_ops_.empty()) {
           continue;
         }
 
@@ -94,20 +94,22 @@ auto connection::read_loop() -> io::task<void> {
 
         if (ec) {
           pending.error = ec;
-          pipeline_.pop();
           if (pending.awaiter) {
             auto h = std::exchange(pending.awaiter, {});
-            h.resume();
+            ctx_.post([h]() mutable {
+              h.resume();
+            });
           }
           continue;
         }
 
         pending.received_count++;
         if (pending.received_count >= pending.expected_count) {
-          pipeline_.pop();
           if (pending.awaiter) {
             auto h = std::exchange(pending.awaiter, {});
-            h.resume();
+            ctx_.post([h]() mutable {
+              h.resume();
+            });
           }
         }
       }
@@ -123,6 +125,7 @@ auto connection::read_loop() -> io::task<void> {
   }
 
   read_loop_running_ = false;
+  read_loop_task_.reset();
 }
 
 void connection::complete_pending(std::error_code ec) {
@@ -133,13 +136,17 @@ void connection::complete_pending(std::error_code ec) {
       h.resume();
     }
   }
-  pipeline_.clear();
 }
 
 void connection::check_timeouts() {
+  if (pending_ops_.empty()) {
+    return;
+  }
+
   auto now = std::chrono::steady_clock::now();
-  auto timed_out = pipeline_.find_timed_out(now);
-  if (timed_out.has_value()) {
+  auto& front = pending_ops_.front();
+
+  if (now >= front.deadline) {
     complete_pending(make_error_code(error::pong_timeout));
     connected_ = false;
     socket_.close();
@@ -151,6 +158,7 @@ void connection::close() {
     connected_ = false;
     complete_pending(io::error::operation_aborted);
     socket_.close();
+    read_loop_task_.reset();
   }
 }
 
