@@ -87,7 +87,7 @@ class connection_fsm {
         ok = gen.next();
       } catch (...) {
         change_state(connection_state::failed, out);
-        out.push(fsm_action::connection_failed{make_error_code(error::resp3_protocol), "parser threw exception"});
+        out.push(fsm_action::connection_failed{error::resp3_protocol, "parser threw exception"});
         return out;
       }
 
@@ -187,104 +187,80 @@ class connection_fsm {
     return out;
   }
 
-  auto handle_hello_response(std::vector<resp3::node_view> const& msg) -> fsm_output {
+  auto validate_response(std::vector<resp3::node_view> const& msg, error err_code, std::string_view operation)
+      -> std::optional<fsm_output> {
     if (msg.empty()) {
-      return fail(make_error_code(error::resp3_protocol), "empty HELLO");
+      return fail(error::resp3_protocol, std::string("empty ") + std::string(operation));
     }
-
     if (is_error(msg[0])) {
-      return fail(make_error_code(error::resp3_hello), "HELLO returned error");
+      return fail(err_code, std::string(operation) + " returned error");
     }
+    return std::nullopt;
+  }
 
+  auto complete_setup_after_hello() -> fsm_output {
     if (needs_auth()) {
       fsm_output out;
       change_state(connection_state::authenticating, out);
       out.push(fsm_action::send_data{make_auth_payload(cfg_)});
       return out;
     }
+    return complete_setup_after_auth();
+  }
 
+  auto complete_setup_after_auth() -> fsm_output {
     if (cfg_.database != 0) {
       fsm_output out;
       change_state(connection_state::selecting_db, out);
       out.push(fsm_action::send_data{make_select_payload(cfg_.database)});
       return out;
     }
+    return complete_setup_after_select();
+  }
 
+  auto complete_setup_after_select() -> fsm_output {
     if (cfg_.client_name) {
       fsm_output out;
       change_state(connection_state::setting_clientname, out);
       out.push(fsm_action::send_data{make_clientname_payload(*cfg_.client_name)});
       return out;
     }
+    return complete_setup_after_setname();
+  }
 
+  auto complete_setup_after_setname() -> fsm_output {
     fsm_output out;
     change_state(connection_state::ready, out);
     out.push(fsm_action::connection_ready{});
     return out;
+  }
+
+  auto handle_hello_response(std::vector<resp3::node_view> const& msg) -> fsm_output {
+    if (auto err = validate_response(msg, error::resp3_hello, "HELLO")) {
+      return *err;
+    }
+    return complete_setup_after_hello();
   }
 
   auto handle_auth_response(std::vector<resp3::node_view> const& msg) -> fsm_output {
-    if (msg.empty()) {
-      return fail(make_error_code(error::resp3_protocol), "empty AUTH");
+    if (auto err = validate_response(msg, error::auth_failed, "AUTH")) {
+      return *err;
     }
-
-    if (is_error(msg[0])) {
-      return fail(make_error_code(error::auth_failed), "AUTH failed");
-    }
-
-    if (cfg_.database != 0) {
-      fsm_output out;
-      change_state(connection_state::selecting_db, out);
-      out.push(fsm_action::send_data{make_select_payload(cfg_.database)});
-      return out;
-    }
-
-    if (cfg_.client_name) {
-      fsm_output out;
-      change_state(connection_state::setting_clientname, out);
-      out.push(fsm_action::send_data{make_clientname_payload(*cfg_.client_name)});
-      return out;
-    }
-
-    fsm_output out;
-    change_state(connection_state::ready, out);
-    out.push(fsm_action::connection_ready{});
-    return out;
+    return complete_setup_after_auth();
   }
 
   auto handle_select_response(std::vector<resp3::node_view> const& msg) -> fsm_output {
-    if (msg.empty()) {
-      return fail(make_error_code(error::resp3_protocol), "empty SELECT");
+    if (auto err = validate_response(msg, error::select_db_failed, "SELECT")) {
+      return *err;
     }
-    if (is_error(msg[0])) {
-      return fail(make_error_code(error::select_db_failed), "SELECT failed");
-    }
-
-    if (cfg_.client_name) {
-      fsm_output out;
-      change_state(connection_state::setting_clientname, out);
-      out.push(fsm_action::send_data{make_clientname_payload(*cfg_.client_name)});
-      return out;
-    }
-
-    fsm_output out;
-    change_state(connection_state::ready, out);
-    out.push(fsm_action::connection_ready{});
-    return out;
+    return complete_setup_after_select();
   }
 
   auto handle_clientname_response(std::vector<resp3::node_view> const& msg) -> fsm_output {
-    if (msg.empty()) {
-      return fail(make_error_code(error::resp3_protocol), "empty CLIENT SETNAME");
+    if (auto err = validate_response(msg, error::client_setname_failed, "CLIENT SETNAME")) {
+      return *err;
     }
-    if (is_error(msg[0])) {
-      return fail(make_error_code(error::client_setname_failed), "CLIENT SETNAME failed");
-    }
-
-    fsm_output out;
-    change_state(connection_state::ready, out);
-    out.push(fsm_action::connection_ready{});
-    return out;
+    return complete_setup_after_setname();
   }
 
   auto needs_auth() const noexcept -> bool { return cfg_.password.has_value(); }
