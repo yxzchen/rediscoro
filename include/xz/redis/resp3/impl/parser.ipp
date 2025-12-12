@@ -19,7 +19,6 @@ void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
 // Cascades element completion upward through the stack
 void parser::commit_elem() noexcept {
   REDISXZ_ASSERT(!pending_.empty());
-  if (pending_.empty()) return;
 
   pending_.top()--;
   while (pending_.top() == 0) {
@@ -82,7 +81,6 @@ auto parser::parse() -> detail::generator<std::optional<msg_view>> {
     }
 
     // === Parse header ===
-    REDISXZ_ASSERT(!pending_.empty());
     if (line->empty()) {
       ec_ = error::invalid_data_type;
       co_return;
