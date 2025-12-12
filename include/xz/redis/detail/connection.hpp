@@ -7,6 +7,7 @@
 #include <xz/redis/config.hpp>
 #include <xz/redis/detail/connection_fsm.hpp>
 #include <xz/redis/detail/pipeline.hpp>
+#include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/response.hpp>
 #include <xz/redis/resp3/parser.hpp>
@@ -32,15 +33,19 @@ class connection {
   auto operator=(connection&&) -> connection& = delete;
 
   auto connect() -> io::task<void>;
-  auto execute(request const& req) -> io::task<generic_response>;
+
+  template <class Response>
+  auto exec(request const& req, Response& resp) -> io::task<void>;
+
   void close();
   auto is_connected() const -> bool;
 
  private:
   struct pending_operation {
     std::coroutine_handle<> awaiter;
-    std::vector<resp3::node> responses;
+    adapter::any_adapter adapter;
     std::size_t expected_count;
+    std::size_t received_count = 0;
     std::error_code error;
   };
 
@@ -55,12 +60,63 @@ class connection {
   connection_fsm fsm_;
   pipeline pipeline_;
   resp3::parser parser_;
-  std::optional<xz::redis::resp3::generator_type> gen;
+  xz::redis::resp3::generator_type gen_;
 
   std::deque<pending_operation> pending_ops_;
   bool connected_ = false;
   bool read_loop_running_ = false;
   std::optional<io::detail::timer_handle> timeout_timer_;
 };
+
+template <class Response>
+auto connection::exec(request const& req, Response& resp) -> io::task<void> {
+  if (!connected_) {
+    throw std::system_error(make_error_code(error::not_connected));
+  }
+
+  if (req.expected_responses() == 0) {
+    co_return;
+  }
+
+  auto expected = req.expected_responses();
+  co_await write_data(req.payload());
+  pipeline_.push(expected, cfg_.request_timeout);
+
+  pending_operation op;
+  op.adapter = adapter::any_adapter{resp};
+  op.expected_count = expected;
+
+  struct awaitable {
+    pending_operation* op_;
+    std::deque<pending_operation>* pending_ops_;
+
+    auto await_ready() const noexcept -> bool { return false; }
+
+    void await_suspend(std::coroutine_handle<> h) {
+      op_->awaiter = h;
+      pending_ops_->push_back(std::move(*op_));
+    }
+
+    auto await_resume() -> void {
+      auto& completed = pending_ops_->front();
+      if (completed.error) {
+        auto ec = completed.error;
+        pending_ops_->pop_front();
+        throw std::system_error(ec);
+      }
+      pending_ops_->pop_front();
+    }
+  };
+
+  if (!read_loop_running_) {
+    read_loop_running_ = true;
+    ctx_.post([this]() {
+      auto t = read_loop();
+      t.resume();
+    });
+  }
+
+  co_await awaitable{&op, &pending_ops_};
+}
 
 }  // namespace xz::redis::detail

@@ -8,9 +8,8 @@
 
 namespace xz::redis::detail {
 
-connection::connection(io::io_context& ctx, config cfg) : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, fsm_{cfg_} {
-  gen = parser_.parse();
-}
+connection::connection(io::io_context& ctx, config cfg)
+    : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, fsm_{cfg_}, gen_{parser_.parse()} {}
 
 connection::~connection() { close(); }
 
@@ -36,8 +35,8 @@ auto connection::connect() -> io::task<void> {
     auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, cfg_.connect_timeout);
     parser_.commit(n);
 
-    while (gen->next()) {
-      auto msg_opt = gen->value();
+    while (gen_.next()) {
+      auto msg_opt = gen_.value();
       if (!msg_opt || msg_opt->empty()) {
         break;
       }
@@ -64,54 +63,6 @@ auto connection::write_data(std::string_view data) -> io::task<void> {
   co_await io::async_write(socket_, std::span<char const>{data.data(), data.size()}, cfg_.request_timeout);
 }
 
-auto connection::execute(request const& req) -> io::task<generic_response> {
-  if (!connected_) {
-    throw std::system_error(make_error_code(error::not_connected));
-  }
-
-  if (req.expected_responses() == 0) {
-    co_return generic_response{std::vector<resp3::node>{}};
-  }
-
-  auto expected = req.expected_responses();
-  co_await write_data(req.payload());
-  pipeline_.push(expected, cfg_.request_timeout);
-
-  pending_operation op;
-  op.expected_count = expected;
-
-  struct awaitable {
-    pending_operation* op_;
-    std::deque<pending_operation>* pending_ops_;
-
-    auto await_ready() const noexcept -> bool { return false; }
-
-    void await_suspend(std::coroutine_handle<> h) {
-      op_->awaiter = h;
-      pending_ops_->push_back(std::move(*op_));
-    }
-
-    auto await_resume() -> generic_response {
-      auto& completed = pending_ops_->front();
-      if (completed.error) {
-        auto ec = completed.error;
-        auto msg = ec.message();
-        pending_ops_->pop_front();
-        throw std::system_error(ec, msg);
-      }
-      auto responses = std::move(completed.responses);
-      pending_ops_->pop_front();
-      return generic_response{std::move(responses)};
-    }
-  };
-
-  if (!read_loop_running_) {
-    read_loop_running_ = true;
-    ctx_.post([this]() { read_loop(); });
-  }
-
-  co_return co_await awaitable{&op, &pending_ops_};
-}
 
 auto connection::read_loop() -> io::task<void> {
   try {
@@ -127,8 +78,8 @@ auto connection::read_loop() -> io::task<void> {
 
       parser_.commit(n);
 
-      while (gen->next()) {
-        auto msg_opt = gen->value();
+      while (gen_.next()) {
+        auto msg_opt = gen_.value();
         if (!msg_opt || msg_opt->empty()) {
           break;
         }
@@ -138,11 +89,21 @@ auto connection::read_loop() -> io::task<void> {
         }
 
         auto& pending = pending_ops_.front();
-        for (auto const& node : *msg_opt) {
-          pending.responses.push_back(resp3::to_owning_node(node));
+        std::error_code ec;
+        pending.adapter.on_msg(*msg_opt, ec);
+
+        if (ec) {
+          pending.error = ec;
+          pipeline_.pop();
+          if (pending.awaiter) {
+            auto h = std::exchange(pending.awaiter, {});
+            h.resume();
+          }
+          continue;
         }
 
-        if (pending.responses.size() >= pending.expected_count) {
+        pending.received_count++;
+        if (pending.received_count >= pending.expected_count) {
           pipeline_.pop();
           if (pending.awaiter) {
             auto h = std::exchange(pending.awaiter, {});
