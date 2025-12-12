@@ -65,9 +65,9 @@ class logger {
     }
   }
 
-  void set_min_level(log_level level) { min_level_.store(level, std::memory_order_relaxed); }
+  void set_log_level(log_level level) { min_level_.store(level, std::memory_order_relaxed); }
 
-  auto get_min_level() const -> log_level { return min_level_.load(std::memory_order_relaxed); }
+  auto get_log_level() const -> log_level { return min_level_.load(std::memory_order_relaxed); }
 
   void log(log_level level, std::string_view message, std::string_view file, int line) {
     if (level < min_level_.load(std::memory_order_relaxed)) {
@@ -133,7 +133,7 @@ inline auto get_logger() -> logger& { return logger::instance(); }
 // IMPORTANT: Must be called before any logging operations
 inline void set_log_function(log_function fn) { logger::instance().set_log_function(std::move(fn)); }
 
-inline void set_min_log_level(log_level level) { logger::instance().set_min_level(level); }
+inline void set_log_level(log_level level) { logger::instance().set_log_level(level); }
 
 }  // namespace xz::redis
 

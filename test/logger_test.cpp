@@ -10,7 +10,7 @@ class LoggerTest : public ::testing::Test {
   void SetUp() override {
     // Reset logger to default state before each test
     xz::redis::logger::instance().set_log_function(nullptr);
-    xz::redis::logger::instance().set_min_level(xz::redis::log_level::info);
+    xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
 
     // Clear captured logs
     captured_logs_.clear();
@@ -19,7 +19,7 @@ class LoggerTest : public ::testing::Test {
   void TearDown() override {
     // Reset logger after each test
     xz::redis::logger::instance().set_log_function(nullptr);
-    xz::redis::logger::instance().set_min_level(xz::redis::log_level::info);
+    xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
   }
 
   // Helper to capture log messages (thread-safe for concurrent tests)
@@ -44,7 +44,7 @@ class LoggerTest : public ::testing::Test {
 
 TEST_F(LoggerTest, LogDebugMessage) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::debug);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
 
   REDIS_LOG_DEBUG("Debug message");
 
@@ -127,7 +127,7 @@ TEST_F(LoggerTest, FormatWithNamedArgs) {
 
 TEST_F(LoggerTest, MinLevelFilteringInfo) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::info);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
 
   REDIS_LOG_DEBUG("Should not appear");
   REDIS_LOG_INFO("Should appear");
@@ -142,7 +142,7 @@ TEST_F(LoggerTest, MinLevelFilteringInfo) {
 
 TEST_F(LoggerTest, MinLevelFilteringWarning) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::warning);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::warning);
 
   REDIS_LOG_DEBUG("Should not appear");
   REDIS_LOG_INFO("Should not appear");
@@ -156,7 +156,7 @@ TEST_F(LoggerTest, MinLevelFilteringWarning) {
 
 TEST_F(LoggerTest, MinLevelFilteringError) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::error);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::error);
 
   REDIS_LOG_DEBUG("Should not appear");
   REDIS_LOG_INFO("Should not appear");
@@ -169,7 +169,7 @@ TEST_F(LoggerTest, MinLevelFilteringError) {
 
 TEST_F(LoggerTest, MinLevelFilteringDebug) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::debug);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
 
   REDIS_LOG_DEBUG("Should appear");
   REDIS_LOG_INFO("Should appear");
@@ -238,7 +238,7 @@ TEST_F(LoggerTest, LogLevelToString) {
 
 TEST_F(LoggerTest, ConcurrentLogging) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::debug);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
 
   constexpr int num_threads = 10;
   constexpr int logs_per_thread = 100;
@@ -268,8 +268,8 @@ TEST_F(LoggerTest, ConcurrentLogLevelChanges) {
   // Thread that changes log level (lock-free atomic operations)
   threads.emplace_back([]() {
     for (int i = 0; i < 100; ++i) {
-      xz::redis::logger::instance().set_min_level(xz::redis::log_level::debug);
-      xz::redis::logger::instance().set_min_level(xz::redis::log_level::info);
+      xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
+      xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
     }
   });
 
@@ -296,7 +296,7 @@ TEST_F(LoggerTest, ConcurrentLogLevelChanges) {
 TEST_F(LoggerTest, SetMinLogLevelConvenience) {
   setup_capture_logger();
 
-  xz::redis::set_min_log_level(xz::redis::log_level::warning);
+  xz::redis::set_log_level(xz::redis::log_level::warning);
 
   REDIS_LOG_INFO("Should not appear");
   REDIS_LOG_WARNING("Should appear");
@@ -306,9 +306,9 @@ TEST_F(LoggerTest, SetMinLogLevelConvenience) {
 }
 
 TEST_F(LoggerTest, GetMinLogLevel) {
-  xz::redis::logger::instance().set_min_level(xz::redis::log_level::warning);
+  xz::redis::logger::instance().set_log_level(xz::redis::log_level::warning);
 
-  auto level = xz::redis::logger::instance().get_min_level();
+  auto level = xz::redis::logger::instance().get_log_level();
   EXPECT_EQ(level, xz::redis::log_level::warning);
 }
 
