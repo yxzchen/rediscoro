@@ -4,7 +4,7 @@
 #include <deque>
 #include <optional>
 
-namespace xz::redis {
+namespace xz::redis::detail {
 
 struct pending_request {
   std::size_t expected_responses;
@@ -59,4 +59,4 @@ class pipeline {
   std::deque<pending_request> requests_;
 };
 
-}  // namespace xz::redis
+}  // namespace xz::redis::detail
