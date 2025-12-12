@@ -25,6 +25,7 @@ class parser {
 
   void feed(std::string_view data) { buffer_.feed(data); }
   std::span<char> prepare(std::size_t n) { return buffer_.prepare(n); }
+  void commit(std::size_t n) { return buffer_.commit(n); }
 
   /** @brief Manually compact the internal buffer.
    *

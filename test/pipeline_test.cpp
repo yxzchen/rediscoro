@@ -3,6 +3,7 @@
 #include <thread>
 
 using namespace xz::redis;
+using namespace xz::redis::detail;
 using namespace std::chrono_literals;
 
 class PipelineTest : public ::testing::Test {};
