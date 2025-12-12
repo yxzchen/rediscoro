@@ -41,16 +41,6 @@ else()
     message(STATUS "redisxz: Assertions are DISABLED")
 endif()
 
-# Handle format library selection
-if(REDISXZ_USE_STDFMT)
-    target_compile_definitions(redisxz INTERFACE REDISXZ_USE_STDFMT)
-    message(STATUS "redisxz: Using std::format for formatting")
-else()
-    find_package(fmt REQUIRED)
-    target_link_libraries(redisxz INTERFACE fmt::fmt)
-    message(STATUS "redisxz: Using libfmt for formatting")
-endif()
-
 # Tests
 if(REDISXZ_BUILD_TESTS)
     enable_testing()

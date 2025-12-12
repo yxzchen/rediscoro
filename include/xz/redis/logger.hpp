@@ -7,13 +7,12 @@
 #include <string>
 #include <string_view>
 
-#ifdef REDISXZ_USE_STDFMT
+#if defined(__cpp_lib_format) && __has_include(<format>)
 #include <format>
 namespace xz::redis {
 namespace format_impl = std;
 #else
 #include <fmt/format.h>
-#include <fmt/chrono.h>
 namespace xz::redis {
 namespace format_impl = fmt;
 #endif
