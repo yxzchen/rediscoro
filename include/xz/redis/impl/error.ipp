@@ -19,6 +19,7 @@ struct error_category_impl : std::error_category {
         return "Can't convert string to number (maybe forgot to upgrade to RESP3?).";
       case error::exceeeds_max_nested_depth:
         return "Exceeds the maximum number of nested responses.";
+      case error::aggregate_size_overflow:        return "Aggregate size would cause integer overflow.";
       case error::unexpected_bool_value:          return "Unexpected bool value.";
       case error::empty_field:                    return "Expected field value is empty.";
       case error::expects_resp3_simple_type:      return "Expects a resp3 simple type.";

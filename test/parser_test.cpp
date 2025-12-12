@@ -293,7 +293,7 @@ TEST_F(ParserTest, InvalidNumberFormat) {
     if (!result) continue;
   }
 
-  EXPECT_EQ(p.error(), xz::redis::error::invalid_number_format);
+  EXPECT_EQ(p.error(), xz::redis::error::not_a_number);
 }
 
 TEST_F(ParserTest, StreamedStringHandling) {

@@ -11,10 +11,8 @@ namespace xz::redis::resp3 {
 
 void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
   auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), i);
-  if (res.ec != std::errc()) {
+  if (res.ec != std::errc() || res.ptr != sv.data() + sv.size()) {
     ec = error::not_a_number;
-  } else if (res.ptr != sv.data() + sv.size()) {
-    ec = error::invalid_number_format;
   }
 }
 

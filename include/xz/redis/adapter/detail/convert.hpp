@@ -27,10 +27,8 @@ struct converter<T, true> {
   static void apply(T& i, resp3::node_view const& node, std::error_code& ec) {
     auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), i);
-    if (res.ec != std::errc()) {
+    if (res.ec != std::errc() || res.ptr != view.data() + view.size()) {
       ec = xz::redis::error::not_a_number;
-    } else if (res.ptr != view.data() + view.size()) {
-      ec = xz::redis::error::invalid_number_format;
     }
   }
 };
@@ -45,10 +43,8 @@ struct converter<double, false> {
   static void apply(double& d, resp3::node_view const& node, std::error_code& ec) {
     auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), d);
-    if (res.ec != std::errc()) {
+    if (res.ec != std::errc() || res.ptr != view.data() + view.size()) {
       ec = xz::redis::error::not_a_double;
-    } else if (res.ptr != view.data() + view.size()) {
-      ec = xz::redis::error::invalid_double_format;
     }
   }
 };

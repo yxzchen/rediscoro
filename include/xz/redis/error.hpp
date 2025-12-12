@@ -13,9 +13,6 @@ enum class error {
   /// Can't parse the string as a number.
   not_a_number,
 
-  /// Number parsing consumed only part of the input.
-  invalid_number_format,
-
   /// The maximum depth of a nested response was exceeded.
   exceeeds_max_nested_depth,
 
@@ -54,9 +51,6 @@ enum class error {
 
   /// Not a double
   not_a_double,
-
-  /// Double parsing consumed only part of the input.
-  invalid_double_format,
 
   /// Got RESP3 null.
   resp3_null,
