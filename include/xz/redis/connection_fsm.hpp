@@ -85,9 +85,13 @@ class connection_fsm {
       bool ok = false;
       try {
         ok = gen.next();
+      } catch (std::exception const& e) {
+        change_state(connection_state::failed, out);
+        out.push(fsm_action::connection_failed{error::resp3_protocol, std::string("parser exception: ") + e.what()});
+        return out;
       } catch (...) {
         change_state(connection_state::failed, out);
-        out.push(fsm_action::connection_failed{error::resp3_protocol, "parser threw exception"});
+        out.push(fsm_action::connection_failed{error::resp3_protocol, "parser threw unknown exception"});
         return out;
       }
 
@@ -134,8 +138,8 @@ class connection_fsm {
 
  private:
   static void append_output(fsm_output& dst, fsm_output const& src) {
-    for (auto const& a : src.actions) {
-      dst.actions.push_back(a);
+    for (auto& a : src.actions) {
+      dst.actions.emplace_back(std::move(a));
     }
   }
 
@@ -193,7 +197,11 @@ class connection_fsm {
       return fail(error::resp3_protocol, std::string("empty ") + std::string(operation));
     }
     if (is_error(msg[0])) {
-      return fail(err_code, std::string(operation) + " returned error");
+      std::string reason = std::string(operation) + " failed";
+      if (!msg[0].value().empty()) {
+        reason += ": " + std::string(msg[0].value());
+      }
+      return fail(err_code, reason);
     }
     return std::nullopt;
   }
