@@ -64,7 +64,6 @@ class connection {
   std::deque<pending_operation> pending_ops_;
   bool connected_ = false;
   bool read_loop_running_ = false;
-  std::optional<io::detail::timer_handle> timeout_timer_;
   std::optional<io::task<void>> read_loop_task_;
 };
 

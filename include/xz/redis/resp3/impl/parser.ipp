@@ -216,7 +216,6 @@ auto parser::parse() -> generator_type {
     // === Yield complete message ===
     if (pending_.empty()) {
       co_yield std::optional<msg_view>{std::move(msg)};
-      msg.clear();
     }
   }
 }

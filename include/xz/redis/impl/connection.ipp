@@ -159,6 +159,7 @@ void connection::close() {
     complete_pending(io::error::operation_aborted);
     socket_.close();
     read_loop_task_.reset();
+    fsm_.reset();
   }
 }
 
