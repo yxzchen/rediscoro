@@ -63,7 +63,7 @@ auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept ->
   return result;
 }
 
-auto parser::parse() -> detail::generator<std::optional<msg_view>> {
+auto parser::parse() -> generator_type {
   msg_view msg;
   msg.reserve(16);
   std::optional<std::string_view> line;

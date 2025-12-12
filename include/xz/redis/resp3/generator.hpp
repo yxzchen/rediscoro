@@ -3,7 +3,7 @@
 #include <coroutine>
 #include <exception>
 
-namespace xz::redis::resp3::detail {
+namespace xz::redis::resp3 {
 
 template <typename T>
 class generator {
@@ -60,4 +60,4 @@ class generator {
   handle_type handle_;
 };
 
-}  // namespace xz::redis::resp3::detail
+}  // namespace xz::redis::resp3

@@ -78,7 +78,7 @@ class connection_fsm {
     return out;
   }
 
-  auto on_data_received(resp3::detail::generator<std::optional<std::vector<resp3::node_view>>>& gen) -> fsm_output {
+  auto on_data_received(resp3::generator_type& gen) -> fsm_output {
     fsm_output out;
 
     while (true) {
