@@ -90,6 +90,18 @@ enum class error {
 
   /// Timeout while writing data to the server.
   write_timeout,
+
+  /// RESP3 protocol error.
+  resp3_protocol,
+
+  /// Authentication failed.
+  auth_failed,
+
+  /// SELECT database command failed.
+  select_db_failed,
+
+  /// CLIENT SETNAME command failed.
+  client_setname_failed,
 };
 
 /**

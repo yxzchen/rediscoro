@@ -53,6 +53,14 @@ struct error_category_impl : std::error_category {
                "buffer.";
       case error::write_timeout:
         return "Timeout while writing data to the server.";
+      case error::resp3_protocol:
+        return "RESP3 protocol error.";
+      case error::auth_failed:
+        return "Authentication failed.";
+      case error::select_db_failed:
+        return "SELECT database command failed.";
+      case error::client_setname_failed:
+        return "CLIENT SETNAME command failed.";
       default: REDISXZ_ASSERT(false); return "redisxz error.";
     }
     // clang-format on
