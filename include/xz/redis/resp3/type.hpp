@@ -1,6 +1,6 @@
 #pragma once
 
-#include <xz/redis/assert.hpp>
+#include <xz/redis/detail/assert.hpp>
 
 #include <ostream>
 #include <string>

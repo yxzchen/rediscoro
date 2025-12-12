@@ -1,4 +1,4 @@
-#include <xz/redis/assert.hpp>
+#include <xz/redis/detail/assert.hpp>
 #include <xz/redis/error.hpp>
 
 namespace xz::redis {

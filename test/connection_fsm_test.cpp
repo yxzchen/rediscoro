@@ -1,4 +1,4 @@
-#include <xz/redis/connection_fsm.hpp>
+#include <xz/redis/detail/connection_fsm.hpp>
 #include <gtest/gtest.h>
 
 using namespace xz::redis;
