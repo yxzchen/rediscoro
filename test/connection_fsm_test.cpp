@@ -42,7 +42,21 @@ class ConnectionFsmTest : public ::testing::Test {
     resp3::parser parser;
     parser.feed(data);
     auto gen = parser.parse();
-    return fsm.on_data_received(gen);
+
+    fsm_output combined;
+    while (gen.next()) {
+      auto msg_opt = gen.value();
+      if (!msg_opt) {
+        break;
+      }
+      if (!msg_opt->empty()) {
+        auto out = fsm.on_data_received(*msg_opt);
+        for (auto& action : out.actions) {
+          combined.actions.emplace_back(std::move(action));
+        }
+      }
+    }
+    return combined;
   }
 };
 

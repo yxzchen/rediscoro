@@ -78,71 +78,24 @@ class connection_fsm {
     return out;
   }
 
-  auto on_data_received(resp3::generator_type& gen) -> fsm_output {
-    fsm_output out;
-
-    while (true) {
-      bool ok = false;
-      try {
-        ok = gen.next();
-      } catch (std::exception const& e) {
-        change_state(connection_state::failed, out);
-        out.push(fsm_action::connection_failed{error::resp3_protocol, std::string("parser exception: ") + e.what()});
-        return out;
-      } catch (...) {
-        change_state(connection_state::failed, out);
-        out.push(fsm_action::connection_failed{error::resp3_protocol, "parser threw unknown exception"});
-        return out;
-      }
-
-      if (!ok) {
-        break;
-      }
-
-      auto msg_opt = gen.value();
-      if (!msg_opt) {
-        break;
-      }
-
-      auto& msg = *msg_opt;
-      if (msg.empty()) {
-        continue;
-      }
-
-      switch (state_) {
-        case connection_state::handshaking:
-          append_output(out, handle_hello_response(msg));
-          break;
-        case connection_state::authenticating:
-          append_output(out, handle_auth_response(msg));
-          break;
-        case connection_state::selecting_db:
-          append_output(out, handle_select_response(msg));
-          break;
-        case connection_state::setting_clientname:
-          append_output(out, handle_clientname_response(msg));
-          break;
-        default:
-          break;
-      }
-
-      if (state_ == connection_state::failed) {
-        break;
-      }
+  auto on_data_received(std::vector<resp3::node_view> const& msg) -> fsm_output {
+    switch (state_) {
+      case connection_state::handshaking:
+        return handle_hello_response(msg);
+      case connection_state::authenticating:
+        return handle_auth_response(msg);
+      case connection_state::selecting_db:
+        return handle_select_response(msg);
+      case connection_state::setting_clientname:
+        return handle_clientname_response(msg);
+      default:
+        return {};
     }
-
-    return out;
   }
 
   void reset() noexcept { state_ = connection_state::disconnected; }
 
  private:
-  static void append_output(fsm_output& dst, fsm_output&& src) {
-    for (auto& action : src.actions) {
-      dst.actions.emplace_back(std::move(action));
-    }
-  }
-
   void change_state(connection_state s, fsm_output& out) {
     if (state_ == s) {
       return;
