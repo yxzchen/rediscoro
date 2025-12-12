@@ -137,9 +137,9 @@ class connection_fsm {
   void reset() noexcept { state_ = connection_state::disconnected; }
 
  private:
-  static void append_output(fsm_output& dst, fsm_output const& src) {
-    for (auto& a : src.actions) {
-      dst.actions.emplace_back(std::move(a));
+  static void append_output(fsm_output& dst, fsm_output&& src) {
+    for (auto& action : src.actions) {
+      dst.actions.emplace_back(std::move(action));
     }
   }
 
