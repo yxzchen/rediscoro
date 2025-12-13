@@ -115,6 +115,17 @@ class connection {
   void cancel_connect_timer();
   void fail_connection(std::error_code ec);
 
+ private:
+  // Awaitable for wait_fsm_ready
+  // Defined as a nested class to avoid linkage issues with local structs
+  struct wait_fsm_ready_awaitable {
+    connection* conn;
+
+    auto await_ready() const noexcept -> bool;
+    void await_suspend(std::coroutine_handle<> h);
+    auto await_resume() -> void;
+  };
+
   // === Members ===
   io::io_context& ctx_;
   config cfg_;

@@ -289,34 +289,30 @@ auto connection::write_data(std::string data) -> io::task<void> {
   co_await io::async_write(socket_, std::span<char const>{data.data(), data.size()}, cfg_.request_timeout);
 }
 
+auto connection::wait_fsm_ready_awaitable::await_ready() const noexcept -> bool {
+  return conn->fsm_.current_state() == connection_state::ready || conn->connect_error_;
+}
+
+void connection::wait_fsm_ready_awaitable::await_suspend(std::coroutine_handle<> h) {
+  // Check again to avoid race condition
+  if (conn->fsm_.current_state() == connection_state::ready || conn->connect_error_) {
+    // Already ready, resume immediately
+    h.resume();
+  } else {
+    // Not ready yet, store awaiter
+    conn->connect_awaiter_ = h;
+  }
+}
+
+auto connection::wait_fsm_ready_awaitable::await_resume() -> void {
+  if (conn->connect_error_) {
+    auto ec = std::exchange(conn->connect_error_, {});
+    throw std::system_error(ec);
+  }
+}
+
 auto connection::wait_fsm_ready() -> io::task<void> {
-  struct awaitable {
-    connection* conn;
-
-    auto await_ready() const noexcept -> bool {
-      return conn->fsm_.current_state() == connection_state::ready || conn->connect_error_;
-    }
-
-    void await_suspend(std::coroutine_handle<> h) {
-      // Check again to avoid race condition
-      if (conn->fsm_.current_state() == connection_state::ready || conn->connect_error_) {
-        // Already ready, resume immediately
-        h.resume();
-      } else {
-        // Not ready yet, store awaiter
-        conn->connect_awaiter_ = h;
-      }
-    }
-
-    auto await_resume() -> void {
-      if (conn->connect_error_) {
-        auto ec = std::exchange(conn->connect_error_, {});
-        throw std::system_error(ec);
-      }
-    }
-  };
-
-  co_await awaitable{this};
+  co_await wait_fsm_ready_awaitable{this};
 }
 
 void connection::setup_connect_timer() {
