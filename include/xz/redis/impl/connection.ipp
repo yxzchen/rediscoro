@@ -70,7 +70,8 @@ auto connection::read_loop() -> io::task<void> {
     auto gen = parser_.parse();
     while (connected_) {
       auto span = parser_.prepare(4096);
-      auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, {});
+      auto timeout = pending_ops_.empty() ? std::chrono::milliseconds{} : cfg_.request_timeout;
+      auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, timeout);
 
       if (n == 0) {
         complete_pending(io::error::eof);
@@ -115,8 +116,6 @@ auto connection::read_loop() -> io::task<void> {
           }
         }
       }
-
-      check_timeouts();
     }
   } catch (std::system_error const& e) {
     complete_pending(e.code());
@@ -137,21 +136,6 @@ void connection::complete_pending(std::error_code ec) {
       auto h = std::exchange(op.awaiter, {});
       h.resume();
     }
-  }
-}
-
-void connection::check_timeouts() {
-  if (pending_ops_.empty()) {
-    return;
-  }
-
-  auto now = std::chrono::steady_clock::now();
-  auto& front = pending_ops_.front();
-
-  if (now >= front.deadline) {
-    complete_pending(make_error_code(error::pong_timeout));
-    connected_ = false;
-    socket_.close();
   }
 }
 

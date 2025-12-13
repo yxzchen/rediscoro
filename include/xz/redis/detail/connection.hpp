@@ -45,14 +45,12 @@ class connection {
     adapter::any_adapter adapter;
     std::size_t expected_count;
     std::size_t received_count = 0;
-    std::chrono::steady_clock::time_point deadline;
     std::error_code error;
   };
 
   auto read_loop() -> io::task<void>;
   auto write_data(std::string_view data) -> io::task<void>;
   void complete_pending(std::error_code ec);
-  void check_timeouts();
 
   io::io_context& ctx_;
   config cfg_;
@@ -82,7 +80,6 @@ auto connection::exec(request const& req, Response& resp) -> io::task<void> {
   pending_operation op;
   op.adapter = adapter::any_adapter{resp};
   op.expected_count = expected;
-  op.deadline = std::chrono::steady_clock::now() + cfg_.request_timeout;
 
   struct awaitable {
     pending_operation* op_;

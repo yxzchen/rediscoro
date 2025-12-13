@@ -5,6 +5,7 @@ project(redisxz VERSION 1.0.0 LANGUAGES CXX)
 option(REDISXZ_ENABLE_ASSERTS "Enable assertions in redisxz library" OFF)
 option(REDISXZ_BUILD_TESTS "Build tests" ON)
 option(REDISXZ_USE_STDFMT "Use std::format instead of libfmt" OFF)
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 # Create interface library (header-only)
 add_library(redisxz INTERFACE)
@@ -45,4 +46,16 @@ endif()
 if(REDISXZ_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if (ENABLE_ASAN)
+  target_compile_options(redisxz INTERFACE
+    -g
+    -fno-omit-frame-pointer
+    -fsanitize=address
+  )  
+    target_link_options(redisxz INTERFACE
+    -fsanitize=address
+  )
+  message(STATUS "redisxz: AddressSanitizer is ENABLED")
 endif()
