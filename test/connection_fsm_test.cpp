@@ -4,11 +4,12 @@
 using namespace xz::redis;
 
 // Helper to convert config to handshake_plan for testing
-static auto make_plan(config const& cfg) -> handshake_plan {
+static auto make_plan(config const& cfg, bool needs_hello = true) -> handshake_plan {
   return handshake_plan{
+      .needs_hello = needs_hello,
       .needs_auth = cfg.password.has_value(),
-      .database = cfg.database,
-      .set_clientname = cfg.client_name.has_value(),
+      .needs_select_db = cfg.database != 0,
+      .needs_set_clientname = cfg.client_name.has_value(),
   };
 }
 
@@ -49,14 +50,14 @@ class ConnectionFsmTest : public ::testing::Test {
 };
 
 TEST_F(ConnectionFsmTest, InitialStateIsDisconnected) {
-  handshake_plan plan{.needs_auth = false, .database = 0, .set_clientname = false};
+  handshake_plan plan{.needs_hello = true, .needs_auth = false, .needs_select_db = false, .needs_set_clientname = false};
   connection_fsm fsm{plan};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 }
 
 TEST_F(ConnectionFsmTest, OnConnectedSendsHelloAndTransitionsToHandshaking) {
-  handshake_plan plan{.needs_auth = false, .database = 0, .set_clientname = false};
+  handshake_plan plan{.needs_hello = true, .needs_auth = false, .needs_select_db = false, .needs_set_clientname = false};
   connection_fsm fsm{plan};
 
   auto output = fsm.on_connected();
@@ -299,6 +300,34 @@ TEST_F(ConnectionFsmTest, CompleteFlowWithAllOptions) {
 // In debug builds, wrong-state events trigger assertions to catch logic errors.
 // In release builds, they are silently ignored for defensive robustness.
 // This is by design - assertions help catch bugs during development.
+
+TEST_F(ConnectionFsmTest, Resp2ModeSkipsHandshakingState) {
+  config cfg;
+  connection_fsm fsm{make_plan(cfg, false)};  // needs_hello = false for RESP2
+
+  EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
+
+  auto output = fsm.on_connected();
+
+  // Should skip handshaking and go directly to ready (no auth, no db, no clientname)
+  EXPECT_EQ(fsm.current_state(), connection_state::ready);
+  EXPECT_TRUE(has_action(output, "state_change"));
+  EXPECT_TRUE(has_action(output, "connection_ready"));
+  EXPECT_FALSE(has_action(output, "send_hello"));  // No HELLO in RESP2
+}
+
+TEST_F(ConnectionFsmTest, Resp2WithAuthGoesToAuthenticating) {
+  config cfg{.password = "secret"};
+  connection_fsm fsm{make_plan(cfg, false)};  // needs_hello = false for RESP2
+
+  auto output = fsm.on_connected();
+
+  // Should skip handshaking and go to authenticating
+  EXPECT_EQ(fsm.current_state(), connection_state::authenticating);
+  EXPECT_TRUE(has_action(output, "state_change"));
+  EXPECT_TRUE(has_action(output, "send_auth"));
+  EXPECT_FALSE(has_action(output, "send_hello"));  // No HELLO in RESP2
+}
 
 TEST_F(ConnectionFsmTest, IoErrorCanHappenInAnyState) {
   config cfg{.password = "secret"};
