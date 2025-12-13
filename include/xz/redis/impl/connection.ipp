@@ -200,33 +200,78 @@ void connection::execute_actions(fsm_output const& actions) {
             // State changed - FSM owns this, connection just observes
             // No action needed here - we could add logging if desired
           } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            // Queue write for sequential execution
-            // Write queue processor will handle errors and report to FSM
+            // Spawn write coroutine directly with ctx_.post for proper scheduling
+            // FSM ensures ordering - co_await in coroutine provides sequential execution
             auto req = build_hello_request();
             auto data = std::string{req.payload()};
-            queue_write(std::move(data));
+            auto self = this;
+            ctx_.post([self, data = std::move(data)]() mutable {
+              auto task = [self, data = std::move(data)]() -> io::task<void> {
+                try {
+                  co_await self->write_data(std::move(data));
+                } catch (std::system_error const& e) {
+                  // Write failed, report to FSM
+                  auto actions = self->fsm_.on_io_error(e.code());
+                  self->execute_actions(actions);
+                }
+              };
+              auto t = task();
+              t.resume();
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
             auto req = build_auth_request();
             auto data = std::string{req.payload()};
-            queue_write(std::move(data));
+            auto self = this;
+            ctx_.post([self, data = std::move(data)]() mutable {
+              auto task = [self, data = std::move(data)]() -> io::task<void> {
+                try {
+                  co_await self->write_data(std::move(data));
+                } catch (std::system_error const& e) {
+                  auto actions = self->fsm_.on_io_error(e.code());
+                  self->execute_actions(actions);
+                }
+              };
+              auto t = task();
+              t.resume();
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
             auto req = build_select_request();
             auto data = std::string{req.payload()};
-            queue_write(std::move(data));
+            auto self = this;
+            ctx_.post([self, data = std::move(data)]() mutable {
+              auto task = [self, data = std::move(data)]() -> io::task<void> {
+                try {
+                  co_await self->write_data(std::move(data));
+                } catch (std::system_error const& e) {
+                  auto actions = self->fsm_.on_io_error(e.code());
+                  self->execute_actions(actions);
+                }
+              };
+              auto t = task();
+              t.resume();
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
             auto req = build_clientname_request();
             auto data = std::string{req.payload()};
-            queue_write(std::move(data));
+            auto self = this;
+            ctx_.post([self, data = std::move(data)]() mutable {
+              auto task = [self, data = std::move(data)]() -> io::task<void> {
+                try {
+                  co_await self->write_data(std::move(data));
+                } catch (std::system_error const& e) {
+                  auto actions = self->fsm_.on_io_error(e.code());
+                  self->execute_actions(actions);
+                }
+              };
+              auto t = task();
+              t.resume();
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
-            // Handshake complete, clear pending writes and write queue
-            pending_writes_.clear();
-            write_queue_.clear();
-            write_queue_task_.reset();
-            write_queue_running_ = false;
+            // Handshake complete
             cancel_connect_timer();
             if (connect_awaiter_) {
               auto h = std::exchange(connect_awaiter_, {});
@@ -234,10 +279,6 @@ void connection::execute_actions(fsm_output const& actions) {
             }
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
-            // Connection failed, clear write queue
-            write_queue_.clear();
-            write_queue_task_.reset();
-            write_queue_running_ = false;
             fail_connection(a.ec);
           }
         },
@@ -340,11 +381,6 @@ void connection::close() {
     read_loop_task_.reset();
     cancel_connect_timer();
 
-    // Clear write queue
-    write_queue_.clear();
-    write_queue_task_.reset();
-    write_queue_running_ = false;
-
     // Clear connect awaiter if still waiting
     if (connect_awaiter_) {
       connect_error_ = io::error::operation_aborted;
@@ -356,42 +392,6 @@ void connection::close() {
 
 auto connection::is_connected() const -> bool {
   return fsm_.current_state() == connection_state::ready;
-}
-
-void connection::queue_write(std::string data) {
-  write_queue_.push_back({std::move(data), std::promise<std::error_code>{}});
-
-  // Start the queue processor if not already running
-  if (!write_queue_running_) {
-    write_queue_running_ = true;
-    write_queue_task_ = write_queue_processor();
-    write_queue_task_->resume();
-  }
-}
-
-auto connection::write_queue_processor() -> io::task<void> {
-  while (!write_queue_.empty()) {
-    // Get the next write from the queue
-    auto entry = std::move(write_queue_.front());
-    write_queue_.erase(write_queue_.begin());
-
-    try {
-      // Perform the write
-      co_await write_data(entry.data);
-      entry.result.set_value({});
-    } catch (std::system_error const& e) {
-      // Write failed, report to FSM
-      entry.result.set_value(e.code());
-      auto actions = fsm_.on_io_error(e.code());
-      execute_actions(actions);
-    }
-
-    // Continue processing the queue
-    // If execute_actions() added more items, they'll be processed in the next iteration
-  }
-
-  // Queue is empty, stop the processor
-  write_queue_running_ = false;
 }
 
 }  // namespace xz::redis::detail
