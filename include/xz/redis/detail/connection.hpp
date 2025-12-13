@@ -66,6 +66,11 @@ class connection {
    * Post-condition:
    * - On success: connection is ready to accept user requests
    * - On failure: exception is thrown with error code
+   *
+   * Constraints:
+   * - This is a SINGLE-WAITER operation
+   * - Do not call connect() concurrently on the same connection
+   * - wait_fsm_ready() supports only one awaiting coroutine
    */
   auto connect() -> io::task<void>;
 
@@ -143,10 +148,8 @@ class connection {
   // Connect timeout timer
   io::detail::timer_handle connect_timer_;
 
-  // Pending handshake writes (for proper cleanup during handshake phase only)
-  // These are used to keep write tasks alive and ensure proper cleanup.
-  // Cleared when handshake completes (connection_ready action).
-  // NOT used for steady-state writes (pipeline layer will handle those).
+  // Pending write tasks during handshake (for lifetime management only)
+  // Tasks are spawned synchronously but managed here to prevent UAF
   std::vector<io::task<void>> pending_writes_;
 };
 

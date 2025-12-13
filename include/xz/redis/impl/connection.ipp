@@ -95,17 +95,37 @@ auto connection::read_loop() -> io::task<void> {
 
 void connection::interpret_response(resp3::msg_view const& msg) {
   // Determine which FSM event to trigger based on current FSM state
+  // FSM state is the ONLY source of truth - connection does NOT track state
   auto current_state = fsm_.current_state();
+
+  // Note: RESP3 handshake protocol assumes:
+  // - No attribute frames during handshake
+  // - No push messages during handshake
+  // - First semantic node is the actual response
+  //
+  // For robustness, we extract the first non-attribute node.
+  // If all nodes are attributes, we use the first node.
+  auto get_first_semantic_node = [&msg]() -> resp3::node_view const& {
+    for (auto const& node : msg) {
+      if (node.data_type != resp3::type3::attribute) {
+        return node;
+      }
+    }
+    // Fallback to first node if all are attributes
+    return msg[0];
+  };
+
+  auto const& semantic_node = get_first_semantic_node();
 
   // Helper to check if response indicates success
   // HELLO returns a map, AUTH/SELECT/CLIENTNAME return simple_string "OK"
-  auto is_success = [&msg]() -> bool {
-    auto t = msg[0].data_type;
+  auto is_success = [&semantic_node]() -> bool {
+    auto t = semantic_node.data_type;
     return t == resp3::type3::simple_string || t == resp3::type3::map;
   };
 
-  auto is_error = [&msg]() -> bool {
-    auto t = msg[0].data_type;
+  auto is_error = [&semantic_node]() -> bool {
+    auto t = semantic_node.data_type;
     return t == resp3::type3::simple_error || t == resp3::type3::blob_error;
   };
 
@@ -180,7 +200,8 @@ void connection::execute_actions(fsm_output const& actions) {
             // State changed - FSM owns this, connection just observes
             // No action needed here - we could add logging if desired
           } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            // Proper fire-and-forget with lifetime management and error handling
+            // Spawn write coroutine with proper lifetime management
+            // Write errors are caught and reported to FSM
             auto req = build_hello_request();
             auto data = std::string{req.payload()};
             ctx_.post([this, data = std::move(data)]() mutable {
