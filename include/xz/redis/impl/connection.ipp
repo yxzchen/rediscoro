@@ -95,8 +95,9 @@ auto connection::read_loop() -> io::task<void> {
 }
 
 void connection::interpret_response(resp3::msg_view const& msg) {
-  // Interpret RESP response based on current handshake step
-  fsm_output actions;
+  // Determine which FSM event to trigger based on current FSM state
+  // FSM state is the ONLY source of truth - connection does NOT track state
+  auto current_state = fsm_.current_state();
 
   // Helper to check if response indicates success
   // HELLO returns a map, AUTH/SELECT/CLIENTNAME return simple_string "OK"
@@ -110,8 +111,18 @@ void connection::interpret_response(resp3::msg_view const& msg) {
     return t == resp3::type3::simple_error || t == resp3::type3::blob_error;
   };
 
-  switch (current_step_) {
-    case handshake_step::hello: {
+  // Only interpret responses during handshake
+  // Once FSM reaches 'ready', responses go to pipeline/scheduler
+  if (current_state == connection_state::ready || current_state == connection_state::disconnected ||
+      current_state == connection_state::failed) {
+    return;  // Not in handshake, ignore
+  }
+
+  fsm_output actions;
+
+  // Map FSM state to the appropriate command response
+  switch (current_state) {
+    case connection_state::handshaking: {
       // HELLO response: map with server info, or error
       if (is_success()) {
         actions = fsm_.on_hello_ok();
@@ -121,7 +132,7 @@ void connection::interpret_response(resp3::msg_view const& msg) {
       break;
     }
 
-    case handshake_step::auth: {
+    case connection_state::authenticating: {
       // AUTH response: simple-string "OK" or error
       if (is_success()) {
         actions = fsm_.on_auth_ok();
@@ -131,7 +142,7 @@ void connection::interpret_response(resp3::msg_view const& msg) {
       break;
     }
 
-    case handshake_step::select_db: {
+    case connection_state::selecting_db: {
       // SELECT response: simple-string "OK" or error
       if (is_success()) {
         actions = fsm_.on_select_ok();
@@ -141,7 +152,7 @@ void connection::interpret_response(resp3::msg_view const& msg) {
       break;
     }
 
-    case handshake_step::clientname: {
+    case connection_state::setting_clientname: {
       // CLIENT SETNAME response: simple-string "OK" or error
       if (is_success()) {
         actions = fsm_.on_clientname_ok();
@@ -151,8 +162,10 @@ void connection::interpret_response(resp3::msg_view const& msg) {
       break;
     }
 
-    case handshake_step::none:
-      // Not in handshake, ignore (will be handled by pipeline/scheduler)
+    case connection_state::ready:
+    case connection_state::disconnected:
+    case connection_state::failed:
+      // Already handled above - should not reach here
       return;
   }
 
@@ -166,33 +179,32 @@ void connection::execute_actions(fsm_output const& actions) {
           using T = std::decay_t<decltype(a)>;
 
           if constexpr (std::is_same_v<T, fsm_action::state_change>) {
-            // State changed, just log or track if needed
+            // State changed - FSM owns this, connection just observes
+            // No action needed here - we could add logging if desired
           } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            current_step_ = handshake_step::hello;
+            // Synchronous write - handshake must be sequential
             auto req = build_hello_request();
-            write_tasks_.push_back(write_data(std::string{req.payload()}));
-            write_tasks_.back().resume();
+            auto task = write_data(std::string{req.payload()});
+            task.resume();
+            // We do NOT await here - write is fire-and-forget for now
+            // (handshake phase uses background writes)
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
-            current_step_ = handshake_step::auth;
             auto req = build_auth_request();
-            write_tasks_.push_back(write_data(std::string{req.payload()}));
-            write_tasks_.back().resume();
+            auto task = write_data(std::string{req.payload()});
+            task.resume();
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
-            current_step_ = handshake_step::select_db;
             auto req = build_select_request();
-            write_tasks_.push_back(write_data(std::string{req.payload()}));
-            write_tasks_.back().resume();
+            auto task = write_data(std::string{req.payload()});
+            task.resume();
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
-            current_step_ = handshake_step::clientname;
             auto req = build_clientname_request();
-            write_tasks_.push_back(write_data(std::string{req.payload()}));
-            write_tasks_.back().resume();
+            auto task = write_data(std::string{req.payload()});
+            task.resume();
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
-            current_step_ = handshake_step::none;
             cancel_connect_timer();
             if (connect_awaiter_) {
               auto h = std::exchange(connect_awaiter_, {});
@@ -200,7 +212,6 @@ void connection::execute_actions(fsm_output const& actions) {
             }
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
-            current_step_ = handshake_step::none;
             fail_connection(a.ec);
           }
         },
@@ -298,7 +309,6 @@ void connection::close() {
     parser_.reset();
     read_loop_task_.reset();
     cancel_connect_timer();
-    write_tasks_.clear();
 
     // Clear connect awaiter if still waiting
     if (connect_awaiter_) {

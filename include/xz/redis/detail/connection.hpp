@@ -13,12 +13,16 @@
 #include <optional>
 #include <string>
 #include <system_error>
-#include <vector>
 
 namespace xz::redis::detail {
 
 /**
  * @brief Connection handles TCP, RESP, and handshake orchestration
+ *
+ * Design principles:
+ * - FSM (connection_fsm) is the ONLY source of truth for handshake state
+ * - connection is responsible for execution (I/O, parsing, command serialization)
+ * - connection does NOT track handshake state - FSM owns that
  *
  * Responsibilities:
  * - TCP connection management
@@ -27,9 +31,17 @@ namespace xz::redis::detail {
  * - Semantic event interpretation (RESP → FSM events)
  * - Timeout handling
  *
+ * Post-condition of connect():
+ * When connect() coroutine returns successfully:
+ * - socket is connected and active
+ * - handshake FSM has reached 'ready' state
+ * - read_loop is running in background
+ * - All errors are propagated as exceptions
+ *
  * Does NOT handle:
  * - User request queueing (handled by pipeline/scheduler)
  * - Response dispatching (handled by pipeline/scheduler)
+ * - Concurrent writes during handshake (handshake writes are sequential)
  */
 class connection {
  public:
@@ -46,9 +58,13 @@ class connection {
    *
    * Steps:
    * 1. TCP connect
-   * 2. Start read loop
+   * 2. Start read loop (background)
    * 3. Execute handshake sequence (HELLO/AUTH/SELECT/CLIENT SETNAME)
    * 4. Wait for FSM to reach ready state
+   *
+   * Post-condition:
+   * - On success: connection is ready to accept user requests
+   * - On failure: exception is thrown with error code
    */
   auto connect() -> io::task<void>;
 
@@ -56,21 +72,33 @@ class connection {
   auto is_connected() const -> bool;
 
  private:
-  // === Handshake state tracking ===
-  enum class handshake_step {
-    none,
-    hello,
-    auth,
-    select_db,
-    clientname,
-  };
-
   // === Core coroutines ===
   auto read_loop() -> io::task<void>;
   auto write_data(std::string data) -> io::task<void>;
 
   // === FSM integration ===
+  /**
+   * @brief Execute FSM actions
+   *
+   * FSM actions are authoritative and describe WHAT to do.
+   * This function executes them (HOW to do it).
+   *
+   * This does NOT track handshake state - FSM owns that.
+   * This only performs I/O operations and invokes callbacks.
+   */
   void execute_actions(fsm_output const& actions);
+
+  /**
+   * @brief Interpret RESP3 response and convert to FSM events
+   *
+   * This function:
+   * - Does NOT do RESP parsing (already done by parser)
+   * - Does NOT do I/O
+   * - Does interpret the semantic meaning of responses
+   * - Converts success/error to appropriate FSM callbacks
+   *
+   * Responsibility: Map RESP3 message → FSM event
+   */
   void interpret_response(resp3::msg_view const& msg);
 
   // === Command building (using request class) ===
@@ -97,18 +125,12 @@ class connection {
   std::optional<io::task<void>> read_loop_task_;
   bool read_loop_running_ = false;
 
-  // Handshake tracking
-  handshake_step current_step_ = handshake_step::none;
-
   // For wait_fsm_ready
   std::coroutine_handle<> connect_awaiter_;
   std::error_code connect_error_;
 
   // Connect timeout timer
   io::detail::timer_handle connect_timer_;
-
-  // Pending write tasks
-  std::vector<io::task<void>> write_tasks_;
 };
 
 }  // namespace xz::redis::detail
