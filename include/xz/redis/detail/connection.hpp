@@ -92,6 +92,10 @@ auto connection::exec(request const& req, Response& resp) -> io::task<void> {
         break;
       }
     }
+
+    if (auto ec = parser_.error()) {
+      throw std::system_error(ec);
+    }
   }
 }
 

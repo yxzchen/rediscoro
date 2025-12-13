@@ -62,6 +62,10 @@ auto connection::connect() -> io::task<void> {
         }
       }
     }
+
+    if (auto ec = parser_.error()) {
+      throw std::system_error(ec);
+    }
   }
 
   connected_ = true;
