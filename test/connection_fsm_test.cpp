@@ -9,10 +9,14 @@ class ConnectionFsmTest : public ::testing::Test {
     return std::visit(
         [](auto const& a) -> std::string {
           using T = std::decay_t<decltype(a)>;
-          if constexpr (std::is_same_v<T, fsm_action::send_data>) {
-            return "send_data";
-          } else if constexpr (std::is_same_v<T, fsm_action::state_changed>) {
-            return "state_changed";
+          if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
+            return "send_hello";
+          } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
+            return "send_auth";
+          } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
+            return "send_select";
+          } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
+            return "send_clientname";
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
             return "connection_ready";
           } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
@@ -23,40 +27,13 @@ class ConnectionFsmTest : public ::testing::Test {
         action);
   }
 
-  auto make_ok_response() -> std::string { return "+OK\r\n"; }
-
-  auto make_map_response() -> std::string {
-    return "%7\r\n"
-           "+server\r\n+redis\r\n"
-           "+version\r\n+7.0.0\r\n"
-           "+proto\r\n:3\r\n"
-           "+id\r\n:1\r\n"
-           "+mode\r\n+standalone\r\n"
-           "+role\r\n+master\r\n"
-           "+modules\r\n*0\r\n";
-  }
-
-  auto make_error_response() -> std::string { return "-ERR unknown command\r\n"; }
-
-  auto process_data(connection_fsm& fsm, std::string const& data) -> fsm_output {
-    resp3::parser parser;
-    parser.feed(data);
-    auto gen = parser.parse();
-
-    fsm_output combined;
-    while (gen.next()) {
-      auto msg_opt = gen.value();
-      if (!msg_opt) {
-        break;
-      }
-      if (!msg_opt->empty()) {
-        auto out = fsm.on_data_received(*msg_opt);
-        for (auto& action : out.actions) {
-          combined.actions.emplace_back(std::move(action));
-        }
+  auto has_action(fsm_output const& out, std::string const& type) -> bool {
+    for (auto const& action : out.actions) {
+      if (get_action_type(action) == type) {
+        return true;
       }
     }
-    return combined;
+    return false;
   }
 };
 
@@ -67,72 +44,39 @@ TEST_F(ConnectionFsmTest, InitialStateIsDisconnected) {
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 }
 
-TEST_F(ConnectionFsmTest, OnConnectedSendsHelloCommand) {
+TEST_F(ConnectionFsmTest, OnConnectedSendsHelloAndTransitionsToHandshaking) {
   config cfg;
   connection_fsm fsm{cfg};
 
   auto output = fsm.on_connected();
 
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
-  ASSERT_GE(output.actions.size(), 1);
-
-  bool found_send = false;
-  for (auto const& action : output.actions) {
-    if (get_action_type(action) == "send_data") {
-      auto const& send = std::get<fsm_action::send_data>(action);
-      EXPECT_TRUE(send.data.find("HELLO") != std::string::npos);
-      EXPECT_TRUE(send.data.find("3") != std::string::npos);
-      found_send = true;
-    }
-  }
-  EXPECT_TRUE(found_send);
+  EXPECT_TRUE(has_action(output, "send_hello"));
 }
 
-TEST_F(ConnectionFsmTest, HelloResponseWithoutAuthGoesToReady) {
+TEST_F(ConnectionFsmTest, HelloOkWithoutAuthGoesToReady) {
   config cfg;
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-
-  auto hello_response = make_map_response();
-  auto output = process_data(fsm, hello_response);
+  auto output = fsm.on_hello_ok();
 
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
-  bool found_ready = false;
-  for (auto const& action : output.actions) {
-    if (get_action_type(action) == "connection_ready") {
-      found_ready = true;
-    }
-  }
-  EXPECT_TRUE(found_ready);
+  EXPECT_TRUE(has_action(output, "connection_ready"));
 }
 
-TEST_F(ConnectionFsmTest, HelloResponseWithAuthGoesToAuthenticating) {
-  config cfg{
-      .password = "secret",
-  };
+TEST_F(ConnectionFsmTest, HelloOkWithAuthGoesToAuthenticating) {
+  config cfg{.password = "secret"};
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-
-  auto hello_response = make_map_response();
-  auto output = process_data(fsm, hello_response);
+  auto output = fsm.on_hello_ok();
 
   EXPECT_EQ(fsm.current_state(), connection_state::authenticating);
-
-  bool found_send = false;
-  for (auto const& action : output.actions) {
-    if (get_action_type(action) == "send_data") {
-      auto const& send = std::get<fsm_action::send_data>(action);
-      EXPECT_TRUE(send.data.find("AUTH") != std::string::npos);
-      EXPECT_TRUE(send.data.find("secret") != std::string::npos);
-      found_send = true;
-    }
-  }
-  EXPECT_TRUE(found_send);
+  EXPECT_TRUE(has_action(output, "send_auth"));
 }
 
-TEST_F(ConnectionFsmTest, HelloResponseWithUsernamePasswordAuth) {
+TEST_F(ConnectionFsmTest, HelloOkWithUsernamePasswordAuth) {
   config cfg{
       .username = "admin",
       .password = "secret",
@@ -140,106 +84,69 @@ TEST_F(ConnectionFsmTest, HelloResponseWithUsernamePasswordAuth) {
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-
-  auto hello_response = make_map_response();
-  auto output = process_data(fsm, hello_response);
+  auto output = fsm.on_hello_ok();
 
   EXPECT_EQ(fsm.current_state(), connection_state::authenticating);
-
-  bool found_send = false;
-  for (auto const& action : output.actions) {
-    if (get_action_type(action) == "send_data") {
-      auto const& send = std::get<fsm_action::send_data>(action);
-      EXPECT_TRUE(send.data.find("AUTH") != std::string::npos);
-      EXPECT_TRUE(send.data.find("admin") != std::string::npos);
-      EXPECT_TRUE(send.data.find("secret") != std::string::npos);
-      found_send = true;
-    }
-  }
-  EXPECT_TRUE(found_send);
+  EXPECT_TRUE(has_action(output, "send_auth"));
 }
 
-TEST_F(ConnectionFsmTest, AuthResponseGoesToReady) {
-  config cfg{
-      .password = "secret",
-  };
+TEST_F(ConnectionFsmTest, AuthOkGoesToReady) {
+  config cfg{.password = "secret"};
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-  auto hello_response = make_map_response();
-  process_data(fsm, hello_response);
-
-  auto auth_response = make_ok_response();
-  auto output = process_data(fsm, auth_response);
+  fsm.on_hello_ok();
+  auto output = fsm.on_auth_ok();
 
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
-  bool found_ready = false;
-  for (auto const& action : output.actions) {
-    if (get_action_type(action) == "connection_ready") {
-      found_ready = true;
-    }
-  }
-  EXPECT_TRUE(found_ready);
+  EXPECT_TRUE(has_action(output, "connection_ready"));
 }
 
-TEST_F(ConnectionFsmTest, HelloErrorResponseGoesToFailed) {
+TEST_F(ConnectionFsmTest, HelloErrorGoesToFailed) {
   config cfg;
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-
-  auto error_response = make_error_response();
-  auto output = process_data(fsm, error_response);
+  auto output = fsm.on_hello_error(make_error_code(error::resp3_hello));
 
   EXPECT_EQ(fsm.current_state(), connection_state::failed);
-  bool found_failed = false;
+  EXPECT_TRUE(has_action(output, "connection_failed"));
+
+  // Check error code is preserved
   for (auto const& action : output.actions) {
-    if (get_action_type(action) == "connection_failed") {
-      found_failed = true;
+    if (auto* failed = std::get_if<fsm_action::connection_failed>(&action)) {
+      EXPECT_EQ(failed->ec, make_error_code(error::resp3_hello));
     }
   }
-  EXPECT_TRUE(found_failed);
 }
 
-TEST_F(ConnectionFsmTest, AuthErrorResponseGoesToFailed) {
-  config cfg{
-      .password = "wrong-password",
-  };
+TEST_F(ConnectionFsmTest, AuthErrorGoesToFailed) {
+  config cfg{.password = "wrong-password"};
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-  auto hello_response = make_map_response();
-  process_data(fsm, hello_response);
-
-  auto error_response = make_error_response();
-  auto output = process_data(fsm, error_response);
+  fsm.on_hello_ok();
+  auto output = fsm.on_auth_error(make_error_code(error::auth_failed));
 
   EXPECT_EQ(fsm.current_state(), connection_state::failed);
-  bool found_failed = false;
-  for (auto const& action : output.actions) {
-    if (get_action_type(action) == "connection_failed") {
-      found_failed = true;
-    }
-  }
-  EXPECT_TRUE(found_failed);
+  EXPECT_TRUE(has_action(output, "connection_failed"));
 }
 
-TEST_F(ConnectionFsmTest, OnConnectionFailedGoesToFailed) {
+TEST_F(ConnectionFsmTest, IoErrorGoesToFailed) {
   config cfg;
   connection_fsm fsm{cfg};
 
-  auto output = fsm.on_connection_failed(make_error_code(error::connect_timeout));
+  auto output = fsm.on_io_error(make_error_code(error::connect_timeout));
 
   EXPECT_EQ(fsm.current_state(), connection_state::failed);
-  bool found_failed = false;
+  EXPECT_TRUE(has_action(output, "connection_failed"));
+
+  // Check error code is preserved
   for (auto const& action : output.actions) {
-    if (get_action_type(action) == "connection_failed") {
-      auto const& failed = std::get<fsm_action::connection_failed>(action);
-      EXPECT_EQ(failed.ec, make_error_code(error::connect_timeout));
-      found_failed = true;
+    if (auto* failed = std::get_if<fsm_action::connection_failed>(&action)) {
+      EXPECT_EQ(failed->ec, make_error_code(error::connect_timeout));
     }
   }
-  EXPECT_TRUE(found_failed);
 }
 
 TEST_F(ConnectionFsmTest, ResetBringsBackToDisconnected) {
@@ -261,33 +168,29 @@ TEST_F(ConnectionFsmTest, FullSuccessfulFlowWithoutAuth) {
 
   auto out1 = fsm.on_connected();
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
-  EXPECT_GE(out1.actions.size(), 1);
+  EXPECT_TRUE(has_action(out1, "send_hello"));
 
-  auto hello_response = make_map_response();
-  auto out2 = process_data(fsm, hello_response);
+  auto out2 = fsm.on_hello_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
-  EXPECT_GE(out2.actions.size(), 1);
+  EXPECT_TRUE(has_action(out2, "connection_ready"));
 }
 
 TEST_F(ConnectionFsmTest, FullSuccessfulFlowWithAuth) {
-  config cfg{
-      .password = "secret",
-  };
+  config cfg{.password = "secret"};
   connection_fsm fsm{cfg};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 
-  auto out1 = fsm.on_connected();
+  fsm.on_connected();
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
 
-  auto hello_response = make_map_response();
-  auto out2 = process_data(fsm, hello_response);
+  auto out2 = fsm.on_hello_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::authenticating);
+  EXPECT_TRUE(has_action(out2, "send_auth"));
 
-  auto auth_response = make_ok_response();
-  auto out3 = process_data(fsm, auth_response);
+  auto out3 = fsm.on_auth_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
-  EXPECT_GE(out3.actions.size(), 1);
+  EXPECT_TRUE(has_action(out3, "connection_ready"));
 }
 
 TEST_F(ConnectionFsmTest, OnConnectedFromNonDisconnectedStateDoesNothing) {
@@ -303,59 +206,57 @@ TEST_F(ConnectionFsmTest, OnConnectedFromNonDisconnectedStateDoesNothing) {
 }
 
 TEST_F(ConnectionFsmTest, SelectDatabaseFlow) {
-  config cfg{
-      .database = 2,
-  };
+  config cfg{.database = 2};
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-  auto hello_response = make_map_response();
-  auto out1 = process_data(fsm, hello_response);
+  auto out1 = fsm.on_hello_ok();
 
   EXPECT_EQ(fsm.current_state(), connection_state::selecting_db);
+  EXPECT_TRUE(has_action(out1, "send_select"));
 
-  bool found_select = false;
-  for (auto const& action : out1.actions) {
-    if (get_action_type(action) == "send_data") {
-      auto const& send = std::get<fsm_action::send_data>(action);
-      if (send.data.find("SELECT") != std::string::npos) {
-        found_select = true;
-      }
-    }
-  }
-  EXPECT_TRUE(found_select);
-
-  auto select_response = make_ok_response();
-  auto out2 = process_data(fsm, select_response);
+  auto out2 = fsm.on_select_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
+  EXPECT_TRUE(has_action(out2, "connection_ready"));
+}
+
+TEST_F(ConnectionFsmTest, SelectErrorGoesToFailed) {
+  config cfg{.database = 999};
+  connection_fsm fsm{cfg};
+
+  fsm.on_connected();
+  fsm.on_hello_ok();
+  auto output = fsm.on_select_error(make_error_code(error::select_db_failed));
+
+  EXPECT_EQ(fsm.current_state(), connection_state::failed);
+  EXPECT_TRUE(has_action(output, "connection_failed"));
 }
 
 TEST_F(ConnectionFsmTest, SetClientNameFlow) {
-  config cfg{
-      .client_name = "my-app",
-  };
+  config cfg{.client_name = "my-app"};
   connection_fsm fsm{cfg};
 
   fsm.on_connected();
-  auto hello_response = make_map_response();
-  auto out1 = process_data(fsm, hello_response);
+  auto out1 = fsm.on_hello_ok();
 
   EXPECT_EQ(fsm.current_state(), connection_state::setting_clientname);
+  EXPECT_TRUE(has_action(out1, "send_clientname"));
 
-  bool found_setname = false;
-  for (auto const& action : out1.actions) {
-    if (get_action_type(action) == "send_data") {
-      auto const& send = std::get<fsm_action::send_data>(action);
-      if (send.data.find("CLIENT") != std::string::npos && send.data.find("SETNAME") != std::string::npos) {
-        found_setname = true;
-      }
-    }
-  }
-  EXPECT_TRUE(found_setname);
-
-  auto setname_response = make_ok_response();
-  auto out2 = process_data(fsm, setname_response);
+  auto out2 = fsm.on_clientname_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
+  EXPECT_TRUE(has_action(out2, "connection_ready"));
+}
+
+TEST_F(ConnectionFsmTest, ClientnameErrorGoesToFailed) {
+  config cfg{.client_name = "test"};
+  connection_fsm fsm{cfg};
+
+  fsm.on_connected();
+  fsm.on_hello_ok();
+  auto output = fsm.on_clientname_error(make_error_code(error::client_setname_failed));
+
+  EXPECT_EQ(fsm.current_state(), connection_state::failed);
+  EXPECT_TRUE(has_action(output, "connection_failed"));
 }
 
 TEST_F(ConnectionFsmTest, CompleteFlowWithAllOptions) {
@@ -369,21 +270,92 @@ TEST_F(ConnectionFsmTest, CompleteFlowWithAllOptions) {
   fsm.on_connected();
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
 
-  auto hello_response = make_map_response();
-  process_data(fsm, hello_response);
+  fsm.on_hello_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::authenticating);
 
-  auto auth_response = make_ok_response();
-  process_data(fsm, auth_response);
+  fsm.on_auth_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::selecting_db);
 
-  auto select_response = make_ok_response();
-  process_data(fsm, select_response);
+  fsm.on_select_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::setting_clientname);
 
-  auto setname_response = make_ok_response();
-  process_data(fsm, setname_response);
+  auto final_out = fsm.on_clientname_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
+  EXPECT_TRUE(has_action(final_out, "connection_ready"));
+}
+
+TEST_F(ConnectionFsmTest, EventsInWrongStateAreIgnored) {
+  config cfg;
+  connection_fsm fsm{cfg};
+
+  // Call auth_ok before even connecting
+  auto output = fsm.on_auth_ok();
+  EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
+  EXPECT_EQ(output.actions.size(), 0);
+
+  // Now connect and try hello_ok in wrong state
+  fsm.on_connected();
+  fsm.on_hello_ok();
+  EXPECT_EQ(fsm.current_state(), connection_state::ready);
+
+  // Try auth_ok when already ready
+  auto output2 = fsm.on_auth_ok();
+  EXPECT_EQ(fsm.current_state(), connection_state::ready);
+  EXPECT_EQ(output2.actions.size(), 0);
+}
+
+TEST_F(ConnectionFsmTest, IoErrorCanHappenInAnyState) {
+  config cfg{.password = "secret"};
+  connection_fsm fsm{cfg};
+
+  // Error during handshaking
+  fsm.on_connected();
+  EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
+
+  auto output = fsm.on_io_error(make_error_code(error::pong_timeout));
+  EXPECT_EQ(fsm.current_state(), connection_state::failed);
+  EXPECT_TRUE(has_action(output, "connection_failed"));
+
+  // Reset and try error during auth
+  fsm.reset();
+  fsm.on_connected();
+  fsm.on_hello_ok();
+  EXPECT_EQ(fsm.current_state(), connection_state::authenticating);
+
+  auto output2 = fsm.on_io_error(make_error_code(error::pong_timeout));
+  EXPECT_EQ(fsm.current_state(), connection_state::failed);
+  EXPECT_TRUE(has_action(output2, "connection_failed"));
+}
+
+TEST_F(ConnectionFsmTest, ActionsAreDataFree) {
+  config cfg{
+      .username = "admin",
+      .password = "secret",
+      .database = 5,
+      .client_name = "my-app",
+  };
+  connection_fsm fsm{cfg};
+
+  // All actions should be data-free structs
+  auto out1 = fsm.on_connected();
+  ASSERT_EQ(out1.actions.size(), 1);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_hello>(out1.actions[0]));
+
+  auto out2 = fsm.on_hello_ok();
+  ASSERT_EQ(out2.actions.size(), 1);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_auth>(out2.actions[0]));
+
+  auto out3 = fsm.on_auth_ok();
+  ASSERT_EQ(out3.actions.size(), 1);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_select>(out3.actions[0]));
+
+  auto out4 = fsm.on_select_ok();
+  ASSERT_EQ(out4.actions.size(), 1);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_clientname>(out4.actions[0]));
+
+  auto out5 = fsm.on_clientname_ok();
+  ASSERT_EQ(out5.actions.size(), 1);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::connection_ready>(out5.actions[0]));
 }
 
 int main(int argc, char** argv) {

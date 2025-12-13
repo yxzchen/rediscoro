@@ -1,5 +1,6 @@
 
-#include <xz/redis/impl/connection.ipp>
+// Temporarily disabled - connection being refactored
+// #include <xz/redis/impl/connection.ipp>
 #include <xz/redis/impl/error.ipp>
 #include <xz/redis/impl/request.ipp>
 #include <xz/redis/resp3/impl/buffer.ipp>
