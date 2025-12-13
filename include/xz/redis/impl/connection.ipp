@@ -17,7 +17,6 @@ auto connection::connect() -> io::task<void> {
     co_return;
   }
 
-  fsm_.reset();
   auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
   co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
@@ -77,6 +76,7 @@ void connection::close() {
     connected_ = false;
     socket_.close();
     fsm_.reset();
+    parser_.reset();
   }
 }
 

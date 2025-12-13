@@ -38,6 +38,14 @@ class parser {
    */
   void compact() { buffer_.compact(); }
 
+  void reset() {
+    buffer_.clear();
+    while (!pending_.empty()) {
+      pending_.pop();
+    }
+    ec_ = {};
+  }
+
   std::error_code error() const { return ec_; }
 
   /** @brief Coroutine that yields parsed messages.
