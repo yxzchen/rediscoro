@@ -29,11 +29,12 @@ class connection {
 
   auto connect() -> io::task<void>;
 
-  auto exec(request const& req, adapter::any_adapter adapter) -> io::task<void>;
+  auto exec(request const& req, adapter::any_adapter& adapter) -> io::task<void>;
 
   template <class Response>
   auto exec(request const& req, Response& resp) -> io::task<void> {
-    return exec(req, adapter::any_adapter{resp});
+    adapter::any_adapter adapter{resp}
+    return exec(req, adapter);
   }
 
   void close();
