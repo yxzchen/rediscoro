@@ -3,15 +3,14 @@
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/node.hpp>
 
-#include <netdb.h>
-#include <cstring>
-
 namespace xz::redis::detail {
 
 connection::connection(io::io_context& ctx, config cfg)
-    : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, fsm_{cfg_} {}
+    : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, fsm_{cfg_}, parser_{} {}
 
-connection::~connection() { close(); }
+connection::~connection() {
+  close();
+}
 
 auto connection::connect() -> io::task<void> {
   if (connected_) {
@@ -22,6 +21,7 @@ auto connection::connect() -> io::task<void> {
   auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
   co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
+  // Handle connection handshake (HELLO, AUTH, etc.)
   auto fsm_output = fsm_.on_connected();
   for (auto& action : fsm_output.actions) {
     if (std::holds_alternative<fsm_action::send_data>(action)) {
@@ -30,10 +30,16 @@ auto connection::connect() -> io::task<void> {
     }
   }
 
+  // Read handshake responses
   auto gen = parser_.parse();
   while (fsm_.current_state() != connection_state::ready) {
     auto span = parser_.prepare(1024);
     auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, cfg_.connect_timeout);
+
+    if (n == 0) {
+      throw std::system_error(io::error::eof);
+    }
+
     parser_.commit(n);
 
     while (gen.next()) {
@@ -58,97 +64,24 @@ auto connection::connect() -> io::task<void> {
       }
     }
   }
+
+  connected_ = true;
 }
 
 auto connection::write_data(std::string_view data) -> io::task<void> {
   co_await io::async_write(socket_, std::span<char const>{data.data(), data.size()}, cfg_.request_timeout);
 }
 
-
-auto connection::read_loop() -> io::task<void> {
-  try {
-    auto gen = parser_.parse();
-    while (connected_) {
-      auto span = parser_.prepare(4096);
-      auto timeout = pending_ops_.empty() ? std::chrono::milliseconds{} : cfg_.request_timeout;
-      auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, timeout);
-
-      if (n == 0) {
-        complete_pending(io::error::eof);
-        connected_ = false;
-        break;
-      }
-
-      parser_.commit(n);
-
-      while (gen.next()) {
-        auto msg_opt = gen.value();
-        if (!msg_opt || msg_opt->empty()) {
-          break;
-        }
-
-        if (pending_ops_.empty()) {
-          continue;
-        }
-
-        auto& pending = pending_ops_.front();
-        std::error_code ec;
-        pending.adapter.on_msg(*msg_opt, ec);
-
-        if (ec) {
-          pending.error = ec;
-          if (pending.awaiter) {
-            auto h = std::exchange(pending.awaiter, {});
-            ctx_.post([h]() mutable {
-              h.resume();
-            });
-          }
-          continue;
-        }
-
-        pending.received_count++;
-        if (pending.received_count >= pending.expected_count) {
-          if (pending.awaiter) {
-            auto h = std::exchange(pending.awaiter, {});
-            ctx_.post([h]() mutable {
-              h.resume();
-            });
-          }
-        }
-      }
-    }
-  } catch (std::system_error const& e) {
-    complete_pending(e.code());
-    connected_ = false;
-  } catch (...) {
-    complete_pending(make_error_code(error::resp3_protocol));
-    connected_ = false;
-  }
-
-  read_loop_running_ = false;
-  read_loop_task_.reset();
-}
-
-void connection::complete_pending(std::error_code ec) {
-  for (auto& op : pending_ops_) {
-    op.error = ec;
-    if (op.awaiter) {
-      auto h = std::exchange(op.awaiter, {});
-      h.resume();
-    }
-  }
-}
-
 void connection::close() {
   if (connected_) {
     connected_ = false;
-    complete_pending(io::error::operation_aborted);
     socket_.close();
-    read_loop_task_.reset();
     fsm_.reset();
   }
 }
 
-auto connection::is_connected() const -> bool { return connected_; }
+auto connection::is_connected() const -> bool {
+  return connected_;
+}
 
 }  // namespace xz::redis::detail
