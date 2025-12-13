@@ -75,7 +75,7 @@ auto connection::write_data(std::string_view data) -> io::task<void> {
   co_await io::async_write(socket_, std::span<char const>{data.data(), data.size()}, cfg_.request_timeout);
 }
 
-auto connection::exec(request const& req, adapter::any_adapter& adapter) -> io::task<void> {
+auto connection::exec(request const& req, adapter::any_adapter adapter) -> io::task<void> {
   if (!connected_) {
     throw std::system_error(make_error_code(error::not_connected));
   }
