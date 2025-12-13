@@ -6,33 +6,31 @@
 #include <xz/io/tcp_socket.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/detail/connection_fsm.hpp>
-#include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/request.hpp>
-#include <xz/redis/response.hpp>
 #include <xz/redis/resp3/parser.hpp>
 
-#include <chrono>
 #include <coroutine>
-#include <deque>
 #include <optional>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace xz::redis::detail {
 
-// FSM events
-namespace fsm_event {
-struct connected {};
-struct disconnected {};
-struct io_error {
-  std::error_code ec;
-};
-struct msg_received {
-  std::vector<resp3::node_view> msg;
-};
-struct timeout {};
-}  // namespace fsm_event
-
+/**
+ * @brief Connection handles TCP, RESP, and handshake orchestration
+ *
+ * Responsibilities:
+ * - TCP connection management
+ * - RESP3 parsing
+ * - FSM action execution (command serialization via request class)
+ * - Semantic event interpretation (RESP → FSM events)
+ * - Timeout handling
+ *
+ * Does NOT handle:
+ * - User request queueing (handled by pipeline/scheduler)
+ * - Response dispatching (handled by pipeline/scheduler)
+ */
 class connection {
  public:
   connection(io::io_context& ctx, config cfg);
@@ -43,41 +41,52 @@ class connection {
   connection(connection&&) = delete;
   auto operator=(connection&&) -> connection& = delete;
 
+  /**
+   * @brief Connect and complete handshake
+   *
+   * Steps:
+   * 1. TCP connect
+   * 2. Start read loop
+   * 3. Execute handshake sequence (HELLO/AUTH/SELECT/CLIENT SETNAME)
+   * 4. Wait for FSM to reach ready state
+   */
   auto connect() -> io::task<void>;
-
-  auto exec(request const& req, adapter::any_adapter adapter) -> io::task<void>;
-
-  template <class Response>
-  auto exec(request const& req, Response& resp) -> io::task<void> {
-    return exec(req, adapter::any_adapter{resp});
-  }
 
   void close();
   auto is_connected() const -> bool;
 
  private:
-  struct pending_response {
-    std::coroutine_handle<> awaiter;
-    adapter::any_adapter adapter;
-    std::size_t expected_count;
-    std::size_t received_count = 0;
-    std::error_code error;
+  // === Handshake state tracking ===
+  enum class handshake_step {
+    none,
+    hello,
+    auth,
+    select_db,
+    clientname,
   };
 
+  // === Core coroutines ===
   auto read_loop() -> io::task<void>;
-  auto write_data(std::string_view data) -> io::task<void>;
+  auto write_data(std::string data) -> io::task<void>;
 
-  void start_read_loop_if_needed();
-  void dispatch(fsm_event::connected event);
-  void dispatch(fsm_event::io_error event);
-  void dispatch(fsm_event::msg_received event);
-  void dispatch(fsm_event::timeout event);
+  // === FSM integration ===
   void execute_actions(fsm_output const& actions);
+  void interpret_response(resp3::msg_view const& msg);
 
+  // === Command building (using request class) ===
+  auto build_hello_request() -> request;
+  auto build_auth_request() -> request;
+  auto build_select_request() -> request;
+  auto build_clientname_request() -> request;
+
+  // === Helpers ===
+  void start_read_loop_if_needed();
   auto wait_fsm_ready() -> io::task<void>;
   void setup_connect_timer();
   void cancel_connect_timer();
+  void fail_connection(std::error_code ec);
 
+  // === Members ===
   io::io_context& ctx_;
   config cfg_;
   io::tcp_socket socket_;
@@ -88,12 +97,12 @@ class connection {
   std::optional<io::task<void>> read_loop_task_;
   bool read_loop_running_ = false;
 
+  // Handshake tracking
+  handshake_step current_step_ = handshake_step::none;
+
   // For wait_fsm_ready
   std::coroutine_handle<> connect_awaiter_;
   std::error_code connect_error_;
-
-  // For exec
-  std::deque<pending_response> pending_responses_;
 
   // Connect timeout timer
   io::detail::timer_handle connect_timer_;
