@@ -182,36 +182,75 @@ void connection::execute_actions(fsm_output const& actions) {
             // State changed - FSM owns this, connection just observes
             // No action needed here - we could add logging if desired
           } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            // Synchronous write - handshake must be sequential
+            // Proper fire-and-forget with lifetime management and error handling
             auto req = build_hello_request();
-            auto task = write_data(std::string{req.payload()});
-            task.resume();
-            // We do NOT await here - write is fire-and-forget for now
-            // (handshake phase uses background writes)
+            auto data = std::string{req.payload()};
+            ctx_.post([this, data = std::move(data)]() mutable {
+              try {
+                auto task = write_data(std::move(data));
+                pending_writes_.push_back(std::move(task));
+                pending_writes_.back().resume();
+              } catch (std::system_error const& e) {
+                // Write failed, report to FSM
+                auto actions = fsm_.on_io_error(e.code());
+                execute_actions(actions);
+              }
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
             auto req = build_auth_request();
-            auto task = write_data(std::string{req.payload()});
-            task.resume();
+            auto data = std::string{req.payload()};
+            ctx_.post([this, data = std::move(data)]() mutable {
+              try {
+                auto task = write_data(std::move(data));
+                pending_writes_.push_back(std::move(task));
+                pending_writes_.back().resume();
+              } catch (std::system_error const& e) {
+                auto actions = fsm_.on_io_error(e.code());
+                execute_actions(actions);
+              }
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
             auto req = build_select_request();
-            auto task = write_data(std::string{req.payload()});
-            task.resume();
+            auto data = std::string{req.payload()};
+            ctx_.post([this, data = std::move(data)]() mutable {
+              try {
+                auto task = write_data(std::move(data));
+                pending_writes_.push_back(std::move(task));
+                pending_writes_.back().resume();
+              } catch (std::system_error const& e) {
+                auto actions = fsm_.on_io_error(e.code());
+                execute_actions(actions);
+              }
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
             auto req = build_clientname_request();
-            auto task = write_data(std::string{req.payload()});
-            task.resume();
+            auto data = std::string{req.payload()};
+            ctx_.post([this, data = std::move(data)]() mutable {
+              try {
+                auto task = write_data(std::move(data));
+                pending_writes_.push_back(std::move(task));
+                pending_writes_.back().resume();
+              } catch (std::system_error const& e) {
+                auto actions = fsm_.on_io_error(e.code());
+                execute_actions(actions);
+              }
+            });
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
+            // Handshake complete, clear pending writes
+            pending_writes_.clear();
             cancel_connect_timer();
+            connected_ = true;  // Now officially connected
             if (connect_awaiter_) {
               auto h = std::exchange(connect_awaiter_, {});
               ctx_.post([h]() mutable { h.resume(); });
             }
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
+            connected_ = false;  // Mark as not connected on failure
             fail_connection(a.ec);
           }
         },
@@ -262,7 +301,16 @@ auto connection::wait_fsm_ready() -> io::task<void> {
       return conn->fsm_.current_state() == connection_state::ready || conn->connect_error_;
     }
 
-    void await_suspend(std::coroutine_handle<> h) { conn->connect_awaiter_ = h; }
+    void await_suspend(std::coroutine_handle<> h) {
+      // Check again to avoid race condition
+      if (conn->fsm_.current_state() == connection_state::ready || conn->connect_error_) {
+        // Already ready, resume immediately
+        h.resume();
+      } else {
+        // Not ready yet, store awaiter
+        conn->connect_awaiter_ = h;
+      }
+    }
 
     auto await_resume() -> void {
       if (conn->connect_error_) {
@@ -309,6 +357,7 @@ void connection::close() {
     parser_.reset();
     read_loop_task_.reset();
     cancel_connect_timer();
+    pending_writes_.clear();  // Cancel any pending writes
 
     // Clear connect awaiter if still waiting
     if (connect_awaiter_) {

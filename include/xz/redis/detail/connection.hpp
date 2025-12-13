@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace xz::redis::detail {
 
@@ -131,6 +132,12 @@ class connection {
 
   // Connect timeout timer
   io::detail::timer_handle connect_timer_;
+
+  // Pending handshake writes (for proper cleanup during handshake phase only)
+  // These are used to keep write tasks alive and ensure proper cleanup.
+  // Cleared when handshake completes (connection_ready action).
+  // NOT used for steady-state writes (pipeline layer will handle those).
+  std::vector<io::task<void>> pending_writes_;
 };
 
 }  // namespace xz::redis::detail
