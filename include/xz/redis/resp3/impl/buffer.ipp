@@ -20,17 +20,20 @@ void buffer::compact() {
 }
 
 void buffer::ensure_writable(std::size_t n) {
-  if (writable_size() < n) {
-    std::size_t needed = write_pos_ + n;
-    std::size_t new_capacity = data_.size();
+  if (writable_size() >= n) return;
 
-    if (new_capacity == 0) new_capacity = 1;
-    while (new_capacity < needed) {
-      new_capacity *= 2;
-    }
+  compact();
+  if (writable_size() >= n) return;
 
-    data_.resize(new_capacity);
+  std::size_t needed = write_pos_ + n;
+  std::size_t new_capacity = data_.size();
+
+  if (new_capacity == 0) new_capacity = 1;
+  while (new_capacity < needed) {
+    new_capacity *= 2;
   }
+
+  data_.resize(new_capacity);
 }
 
 }  // namespace xz::redis::resp3::detail

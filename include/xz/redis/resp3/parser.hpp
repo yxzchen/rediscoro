@@ -27,17 +27,6 @@ class parser {
   std::span<char> prepare(std::size_t n) { return buffer_.prepare(n); }
   void commit(std::size_t n) { return buffer_.commit(n); }
 
-  /** @brief Manually compact the internal buffer.
-   *
-   *  Call this when you're done with all node_views from previous messages
-   *  to reclaim memory consumed by parsed data. This invalidates ALL
-   *  previously returned node_views.
-   *
-   *  The buffer grows automatically but never shrinks or compacts automatically
-   *  to preserve string_view validity.
-   */
-  void compact() { buffer_.compact(); }
-
   void reset() {
     buffer_.clear();
     while (!pending_.empty()) {
