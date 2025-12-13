@@ -21,6 +21,10 @@ enum class connection_state {
 
 // FSM Actions: Data-free signals (FSM decides "what", Connection decides "how")
 namespace fsm_action {
+struct state_change {
+  connection_state old_state;
+  connection_state new_state;
+};
 struct send_hello {};
 struct send_auth {};
 struct send_select {};
@@ -31,14 +35,11 @@ struct connection_failed {
 };
 }  // namespace fsm_action
 
-using fsm_action_variant = std::variant<fsm_action::send_hello, fsm_action::send_auth, fsm_action::send_select,
-                                        fsm_action::send_clientname, fsm_action::connection_ready,
-                                        fsm_action::connection_failed>;
+using fsm_action_variant = std::variant<fsm_action::state_change, fsm_action::send_hello, fsm_action::send_auth,
+                                        fsm_action::send_select, fsm_action::send_clientname,
+                                        fsm_action::connection_ready, fsm_action::connection_failed>;
 
-struct fsm_output {
-  std::vector<fsm_action_variant> actions;
-  void push(fsm_action_variant&& a) { actions.emplace_back(std::move(a)); }
-};
+using fsm_output = std::vector<fsm_action_variant>;
 
 /**
  * @brief Pure state machine for Redis connection handshake
@@ -66,25 +67,32 @@ class connection_fsm {
     if (state_ != connection_state::disconnected) {
       return {};
     }
+    auto old_state = state_;
     state_ = connection_state::handshaking;
-    fsm_output out;
-    out.push(fsm_action::send_hello{});
-    return out;
+    return {fsm_action::state_change{old_state, state_}, fsm_action::send_hello{}};
   }
 
   /** Called when connection is explicitly closed */
   auto on_closed() -> fsm_output {
+    auto old_state = state_;
     state_ = connection_state::disconnected;
-    return {};
+    if (old_state == state_) {
+      return {};
+    }
+    return {fsm_action::state_change{old_state, state_}};
   }
 
   // === Transport Errors (not command-specific) ===
 
   /** Socket error, timeout, EOF, protocol framing error */
   auto on_io_error(std::error_code ec) -> fsm_output {
+    auto old_state = state_;
     state_ = connection_state::failed;
     fsm_output out;
-    out.push(fsm_action::connection_failed{ec});
+    if (old_state != state_) {
+      out.push_back(fsm_action::state_change{old_state, state_});
+    }
+    out.push_back(fsm_action::connection_failed{ec});
     return out;
   }
 
@@ -150,47 +158,47 @@ class connection_fsm {
 
  private:
   auto fail(std::error_code ec) -> fsm_output {
+    auto old_state = state_;
     state_ = connection_state::failed;
     fsm_output out;
-    out.push(fsm_action::connection_failed{ec});
+    if (old_state != state_) {
+      out.push_back(fsm_action::state_change{old_state, state_});
+    }
+    out.push_back(fsm_action::connection_failed{ec});
     return out;
   }
 
   auto advance_after_hello() -> fsm_output {
     if (needs_auth()) {
+      auto old_state = state_;
       state_ = connection_state::authenticating;
-      fsm_output out;
-      out.push(fsm_action::send_auth{});
-      return out;
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_auth{}};
     }
     return advance_after_auth();
   }
 
   auto advance_after_auth() -> fsm_output {
     if (cfg_.database != 0) {
+      auto old_state = state_;
       state_ = connection_state::selecting_db;
-      fsm_output out;
-      out.push(fsm_action::send_select{});
-      return out;
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_select{}};
     }
     return advance_after_select();
   }
 
   auto advance_after_select() -> fsm_output {
     if (cfg_.client_name.has_value()) {
+      auto old_state = state_;
       state_ = connection_state::setting_clientname;
-      fsm_output out;
-      out.push(fsm_action::send_clientname{});
-      return out;
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_clientname{}};
     }
     return advance_after_clientname();
   }
 
   auto advance_after_clientname() -> fsm_output {
+    auto old_state = state_;
     state_ = connection_state::ready;
-    fsm_output out;
-    out.push(fsm_action::connection_ready{});
-    return out;
+    return {fsm_action::state_change{old_state, state_}, fsm_action::connection_ready{}};
   }
 
   auto needs_auth() const noexcept -> bool { return cfg_.password.has_value(); }

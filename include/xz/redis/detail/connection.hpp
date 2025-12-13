@@ -72,7 +72,7 @@ class connection {
   void dispatch(fsm_event::io_error event);
   void dispatch(fsm_event::msg_received event);
   void dispatch(fsm_event::timeout event);
-  void execute_actions(fsm_output const& out);
+  void execute_actions(fsm_output const& actions);
 
   auto wait_fsm_ready() -> io::task<void>;
   void setup_connect_timer();

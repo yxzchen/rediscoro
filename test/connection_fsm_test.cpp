@@ -9,7 +9,9 @@ class ConnectionFsmTest : public ::testing::Test {
     return std::visit(
         [](auto const& a) -> std::string {
           using T = std::decay_t<decltype(a)>;
-          if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
+          if constexpr (std::is_same_v<T, fsm_action::state_change>) {
+            return "state_change";
+          } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
             return "send_hello";
           } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
             return "send_auth";
@@ -27,8 +29,8 @@ class ConnectionFsmTest : public ::testing::Test {
         action);
   }
 
-  auto has_action(fsm_output const& out, std::string const& type) -> bool {
-    for (auto const& action : out.actions) {
+  auto has_action(fsm_output const& actions, std::string const& type) -> bool {
+    for (auto const& action : actions) {
       if (get_action_type(action) == type) {
         return true;
       }
@@ -113,7 +115,7 @@ TEST_F(ConnectionFsmTest, HelloErrorGoesToFailed) {
   EXPECT_TRUE(has_action(output, "connection_failed"));
 
   // Check error code is preserved
-  for (auto const& action : output.actions) {
+  for (auto const& action : output) {
     if (auto* failed = std::get_if<fsm_action::connection_failed>(&action)) {
       EXPECT_EQ(failed->ec, make_error_code(error::resp3_hello));
     }
@@ -142,7 +144,7 @@ TEST_F(ConnectionFsmTest, IoErrorGoesToFailed) {
   EXPECT_TRUE(has_action(output, "connection_failed"));
 
   // Check error code is preserved
-  for (auto const& action : output.actions) {
+  for (auto const& action : output) {
     if (auto* failed = std::get_if<fsm_action::connection_failed>(&action)) {
       EXPECT_EQ(failed->ec, make_error_code(error::connect_timeout));
     }
@@ -201,7 +203,7 @@ TEST_F(ConnectionFsmTest, OnConnectedFromNonDisconnectedStateDoesNothing) {
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
 
   auto output = fsm.on_connected();
-  EXPECT_EQ(output.actions.size(), 0);
+  EXPECT_EQ(output.size(), 0);  // No state change, no actions
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
 }
 
@@ -291,7 +293,7 @@ TEST_F(ConnectionFsmTest, EventsInWrongStateAreIgnored) {
   // Call auth_ok before even connecting
   auto output = fsm.on_auth_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
-  EXPECT_EQ(output.actions.size(), 0);
+  EXPECT_EQ(output.size(), 0);  // No state change, no actions
 
   // Now connect and try hello_ok in wrong state
   fsm.on_connected();
@@ -301,7 +303,7 @@ TEST_F(ConnectionFsmTest, EventsInWrongStateAreIgnored) {
   // Try auth_ok when already ready
   auto output2 = fsm.on_auth_ok();
   EXPECT_EQ(fsm.current_state(), connection_state::ready);
-  EXPECT_EQ(output2.actions.size(), 0);
+  EXPECT_EQ(output2.size(), 0);  // No state change, no actions
 }
 
 TEST_F(ConnectionFsmTest, IoErrorCanHappenInAnyState) {
@@ -336,26 +338,46 @@ TEST_F(ConnectionFsmTest, ActionsAreDataFree) {
   };
   connection_fsm fsm{cfg};
 
-  // All actions should be data-free structs
+  // All actions should be data-free structs, state_change should have old/new states
   auto out1 = fsm.on_connected();
-  ASSERT_EQ(out1.actions.size(), 1);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_hello>(out1.actions[0]));
+  ASSERT_EQ(out1.size(), 2);  // state_change + send_hello
+  ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out1[0]));
+  auto sc1 = std::get<fsm_action::state_change>(out1[0]);
+  EXPECT_EQ(sc1.old_state, connection_state::disconnected);
+  EXPECT_EQ(sc1.new_state, connection_state::handshaking);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_hello>(out1[1]));
 
   auto out2 = fsm.on_hello_ok();
-  ASSERT_EQ(out2.actions.size(), 1);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_auth>(out2.actions[0]));
+  ASSERT_EQ(out2.size(), 2);  // state_change + send_auth
+  ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out2[0]));
+  auto sc2 = std::get<fsm_action::state_change>(out2[0]);
+  EXPECT_EQ(sc2.old_state, connection_state::handshaking);
+  EXPECT_EQ(sc2.new_state, connection_state::authenticating);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_auth>(out2[1]));
 
   auto out3 = fsm.on_auth_ok();
-  ASSERT_EQ(out3.actions.size(), 1);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_select>(out3.actions[0]));
+  ASSERT_EQ(out3.size(), 2);  // state_change + send_select
+  ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out3[0]));
+  auto sc3 = std::get<fsm_action::state_change>(out3[0]);
+  EXPECT_EQ(sc3.old_state, connection_state::authenticating);
+  EXPECT_EQ(sc3.new_state, connection_state::selecting_db);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_select>(out3[1]));
 
   auto out4 = fsm.on_select_ok();
-  ASSERT_EQ(out4.actions.size(), 1);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_clientname>(out4.actions[0]));
+  ASSERT_EQ(out4.size(), 2);  // state_change + send_clientname
+  ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out4[0]));
+  auto sc4 = std::get<fsm_action::state_change>(out4[0]);
+  EXPECT_EQ(sc4.old_state, connection_state::selecting_db);
+  EXPECT_EQ(sc4.new_state, connection_state::setting_clientname);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_clientname>(out4[1]));
 
   auto out5 = fsm.on_clientname_ok();
-  ASSERT_EQ(out5.actions.size(), 1);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::connection_ready>(out5.actions[0]));
+  ASSERT_EQ(out5.size(), 2);  // state_change + connection_ready
+  ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out5[0]));
+  auto sc5 = std::get<fsm_action::state_change>(out5[0]);
+  EXPECT_EQ(sc5.old_state, connection_state::setting_clientname);
+  EXPECT_EQ(sc5.new_state, connection_state::ready);
+  EXPECT_TRUE(std::holds_alternative<fsm_action::connection_ready>(out5[1]));
 }
 
 int main(int argc, char** argv) {

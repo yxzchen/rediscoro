@@ -166,8 +166,8 @@ void connection::dispatch(fsm_event::timeout event) {
   }
 }
 
-void connection::execute_actions(fsm_output const& out) {
-  for (auto const& action : out.actions) {
+void connection::execute_actions(fsm_output const& actions) {
+  for (auto const& action : actions) {
     if (std::holds_alternative<fsm_action::send_data>(action)) {
       std::cerr << "execute_actions: send_data\n";
       auto const& send = std::get<fsm_action::send_data>(action);
