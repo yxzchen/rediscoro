@@ -3,6 +3,7 @@
 #include <xz/redis/config.hpp>
 #include <xz/redis/error.hpp>
 
+#include <cassert>
 #include <system_error>
 #include <variant>
 #include <vector>
@@ -17,6 +18,18 @@ enum class connection_state {
   setting_clientname,
   ready,
   failed,
+};
+
+/**
+ * @brief Handshake plan extracted from config
+ *
+ * FSM does not hold config reference to avoid lifetime coupling.
+ * Connection layer extracts decision parameters once.
+ */
+struct handshake_plan {
+  bool needs_auth;
+  int database;
+  bool set_clientname;
 };
 
 // FSM Actions: Data-free signals (FSM decides "what", Connection decides "how")
@@ -49,14 +62,19 @@ using fsm_output = std::vector<fsm_action_variant>;
  * - FSM knows only state transitions, not protocol details
  * - FSM outputs semantic actions (what to do), not serialized commands (how to do)
  * - Connection layer handles RESP semantics and command serialization
+ * - FSM does not hold config reference to avoid lifetime coupling
  *
  * Assumptions (RESP3 handshake):
  * - HELLO/AUTH/SELECT/CLIENT SETNAME are single-response commands
  * - Each command receives exactly one semantic result (ok/error)
+ *
+ * Invariants:
+ * - failed is a terminal state: only reset() can transition out
+ * - All events except reset() are no-op in failed state
  */
 class connection_fsm {
  public:
-  explicit connection_fsm(config const& cfg) noexcept : cfg_(cfg), state_(connection_state::disconnected) {}
+  explicit connection_fsm(handshake_plan plan) noexcept : plan_(plan), state_(connection_state::disconnected) {}
 
   auto current_state() const noexcept -> connection_state { return state_; }
 
@@ -64,6 +82,10 @@ class connection_fsm {
 
   /** Called after TCP connection established */
   auto on_connected() -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
     if (state_ != connection_state::disconnected) {
       return {};
     }
@@ -72,20 +94,19 @@ class connection_fsm {
     return {fsm_action::state_change{old_state, state_}, fsm_action::send_hello{}};
   }
 
-  /** Called when connection is explicitly closed */
-  auto on_closed() -> fsm_output {
-    auto old_state = state_;
-    state_ = connection_state::disconnected;
-    if (old_state == state_) {
-      return {};
-    }
-    return {fsm_action::state_change{old_state, state_}};
-  }
-
   // === Transport Errors (not command-specific) ===
 
-  /** Socket error, timeout, EOF, protocol framing error */
+  /**
+   * @brief Socket error, timeout, EOF, RST, or user-initiated close
+   *
+   * All connection failures go through this single error path.
+   * No separate on_closed() to avoid failed → disconnected state swallowing.
+   */
   auto on_io_error(std::error_code ec) -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
     auto old_state = state_;
     state_ = connection_state::failed;
     fsm_output out;
@@ -99,6 +120,17 @@ class connection_fsm {
   // === Semantic Events (command responses) ===
 
   auto on_hello_ok() -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    // In debug mode, assert correct state usage
+    if (state_ != connection_state::handshaking) {
+      // Logic error: received hello_ok in wrong state
+      assert(false && "on_hello_ok() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::handshaking) {
       return {};
     }
@@ -106,6 +138,15 @@ class connection_fsm {
   }
 
   auto on_hello_error(std::error_code ec) -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::handshaking) {
+      assert(false && "on_hello_error() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::handshaking) {
       return {};
     }
@@ -113,6 +154,15 @@ class connection_fsm {
   }
 
   auto on_auth_ok() -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::authenticating) {
+      assert(false && "on_auth_ok() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::authenticating) {
       return {};
     }
@@ -120,6 +170,15 @@ class connection_fsm {
   }
 
   auto on_auth_error(std::error_code ec) -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::authenticating) {
+      assert(false && "on_auth_error() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::authenticating) {
       return {};
     }
@@ -127,6 +186,15 @@ class connection_fsm {
   }
 
   auto on_select_ok() -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::selecting_db) {
+      assert(false && "on_select_ok() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::selecting_db) {
       return {};
     }
@@ -134,6 +202,15 @@ class connection_fsm {
   }
 
   auto on_select_error(std::error_code ec) -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::selecting_db) {
+      assert(false && "on_select_error() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::selecting_db) {
       return {};
     }
@@ -141,6 +218,15 @@ class connection_fsm {
   }
 
   auto on_clientname_ok() -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::setting_clientname) {
+      assert(false && "on_clientname_ok() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::setting_clientname) {
       return {};
     }
@@ -148,6 +234,15 @@ class connection_fsm {
   }
 
   auto on_clientname_error(std::error_code ec) -> fsm_output {
+    // failed is terminal state
+    if (state_ == connection_state::failed) {
+      return {};
+    }
+#ifndef NDEBUG
+    if (state_ != connection_state::setting_clientname) {
+      assert(false && "on_clientname_error() called in wrong state");
+    }
+#endif
     if (state_ != connection_state::setting_clientname) {
       return {};
     }
@@ -169,7 +264,7 @@ class connection_fsm {
   }
 
   auto advance_after_hello() -> fsm_output {
-    if (needs_auth()) {
+    if (plan_.needs_auth) {
       auto old_state = state_;
       state_ = connection_state::authenticating;
       return {fsm_action::state_change{old_state, state_}, fsm_action::send_auth{}};
@@ -178,7 +273,7 @@ class connection_fsm {
   }
 
   auto advance_after_auth() -> fsm_output {
-    if (cfg_.database != 0) {
+    if (plan_.database != 0) {
       auto old_state = state_;
       state_ = connection_state::selecting_db;
       return {fsm_action::state_change{old_state, state_}, fsm_action::send_select{}};
@@ -187,7 +282,7 @@ class connection_fsm {
   }
 
   auto advance_after_select() -> fsm_output {
-    if (cfg_.client_name.has_value()) {
+    if (plan_.set_clientname) {
       auto old_state = state_;
       state_ = connection_state::setting_clientname;
       return {fsm_action::state_change{old_state, state_}, fsm_action::send_clientname{}};
@@ -201,9 +296,7 @@ class connection_fsm {
     return {fsm_action::state_change{old_state, state_}, fsm_action::connection_ready{}};
   }
 
-  auto needs_auth() const noexcept -> bool { return cfg_.password.has_value(); }
-
-  config const& cfg_;
+  handshake_plan plan_;
   connection_state state_;
 };
 
