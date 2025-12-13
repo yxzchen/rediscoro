@@ -122,7 +122,6 @@ class connection {
   connection_fsm fsm_;
   resp3::parser parser_;
 
-  bool connected_ = false;
   std::optional<io::task<void>> read_loop_task_;
   bool read_loop_running_ = false;
 

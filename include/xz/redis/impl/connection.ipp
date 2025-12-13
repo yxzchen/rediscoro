@@ -22,7 +22,8 @@ connection::~connection() {
 }
 
 auto connection::connect() -> io::task<void> {
-  if (connected_) {
+  // Check if already connected by checking FSM state
+  if (fsm_.current_state() == connection_state::ready) {
     co_return;
   }
 
@@ -45,8 +46,6 @@ auto connection::connect() -> io::task<void> {
 
   // 5. Wait for ready or error
   co_await wait_fsm_ready();
-
-  connected_ = true;
 }
 
 void connection::start_read_loop_if_needed() {
@@ -96,7 +95,6 @@ auto connection::read_loop() -> io::task<void> {
 
 void connection::interpret_response(resp3::msg_view const& msg) {
   // Determine which FSM event to trigger based on current FSM state
-  // FSM state is the ONLY source of truth - connection does NOT track state
   auto current_state = fsm_.current_state();
 
   // Helper to check if response indicates success
@@ -243,14 +241,12 @@ void connection::execute_actions(fsm_output const& actions) {
             // Handshake complete, clear pending writes
             pending_writes_.clear();
             cancel_connect_timer();
-            connected_ = true;  // Now officially connected
             if (connect_awaiter_) {
               auto h = std::exchange(connect_awaiter_, {});
               ctx_.post([h]() mutable { h.resume(); });
             }
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
-            connected_ = false;  // Mark as not connected on failure
             fail_connection(a.ec);
           }
         },
@@ -349,8 +345,7 @@ void connection::fail_connection(std::error_code ec) {
 }
 
 void connection::close() {
-  if (connected_ || read_loop_running_) {
-    connected_ = false;
+  if (read_loop_running_) {
     read_loop_running_ = false;
     socket_.close();
     fsm_.reset();
@@ -369,7 +364,7 @@ void connection::close() {
 }
 
 auto connection::is_connected() const -> bool {
-  return connected_;
+  return fsm_.current_state() == connection_state::ready;
 }
 
 }  // namespace xz::redis::detail
