@@ -4,12 +4,14 @@
 #include <xz/io/ip.hpp>
 #include <xz/io/task.hpp>
 #include <xz/io/tcp_socket.hpp>
+#include <xz/io/co_spawn.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/detail/connection_fsm.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/resp3/parser.hpp>
 
 #include <coroutine>
+#include <future>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -120,6 +122,10 @@ class connection {
   void cancel_connect_timer();
   void fail_connection(std::error_code ec);
 
+  // === Write queue for sequential writes ===
+  void queue_write(std::string data);
+  auto write_queue_processor() -> io::task<void>;
+
  private:
   // Awaitable for wait_fsm_ready
   // Defined as a nested class to avoid linkage issues with local structs
@@ -148,8 +154,17 @@ class connection {
   // Connect timeout timer
   io::detail::timer_handle connect_timer_;
 
+  // Write queue for sequential writes during handshake
+  struct write_queue_entry {
+    std::string data;
+    std::promise<std::error_code> result;
+  };
+  std::vector<write_queue_entry> write_queue_;
+  std::optional<io::task<void>> write_queue_task_;
+  bool write_queue_running_ = false;
+
   // Pending write tasks during handshake (for lifetime management only)
-  // Tasks are spawned synchronously but managed here to prevent UAF
+  // Write tasks are spawned via co_spawn but kept here to prevent UAF
   std::vector<io::task<void>> pending_writes_;
 };
 
