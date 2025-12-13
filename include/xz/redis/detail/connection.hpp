@@ -29,8 +29,12 @@ class connection {
 
   auto connect() -> io::task<void>;
 
+  auto exec(request const& req, adapter::any_adapter adapter) -> io::task<void>;
+
   template <class Response>
-  auto exec(request const& req, Response& resp) -> io::task<void>;
+  auto exec(request const& req, Response& resp) -> io::task<void> {
+    return exec(req, adapter::any_adapter{resp});
+  }
 
   void close();
   auto is_connected() const -> bool;
@@ -46,57 +50,5 @@ class connection {
 
   bool connected_ = false;
 };
-
-template <class Response>
-auto connection::exec(request const& req, Response& resp) -> io::task<void> {
-  if (!connected_) {
-    throw std::system_error(make_error_code(error::not_connected));
-  }
-
-  if (req.expected_responses() == 0) {
-    co_return;
-  }
-
-  // Write request
-  co_await write_data(req.payload());
-
-  // Read responses
-  auto gen = parser_.parse();
-  adapter::any_adapter adapter{resp};
-  std::size_t received = 0;
-
-  while (received < req.expected_responses()) {
-    auto span = parser_.prepare(4096);
-    auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, cfg_.request_timeout);
-
-    if (n == 0) {
-      throw std::system_error(io::error::eof);
-    }
-
-    parser_.commit(n);
-
-    while (gen.next()) {
-      auto msg_opt = gen.value();
-      if (!msg_opt || msg_opt->empty()) {
-        break;
-      }
-
-      std::error_code ec;
-      adapter.on_msg(*msg_opt, ec);
-      if (ec) {
-        throw std::system_error(ec);
-      }
-
-      received++;
-      if (received >= req.expected_responses()) {
-        break;
-      }
-    }
-
-    if (auto ec = parser_.error()) {
-      throw std::system_error(ec);
-    }
-  }
-}
 
 }  // namespace xz::redis::detail
