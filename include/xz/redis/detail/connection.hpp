@@ -41,6 +41,16 @@ namespace xz::redis::detail {
  * - read_loop is running in background
  * - All errors are propagated as exceptions
  *
+ * Thread Safety:
+ * - connection is NOT thread-safe
+ * - All public methods must be called from the same io_context thread
+ * - This ensures thread-safe access to write_queue_ and FSM state
+ *
+ * FSM Contract for Handshake:
+ * - Responses are assumed to arrive in request order
+ * - No interleaved push messages or ACL warnings are expected during handshake
+ * - Once FSM enters 'failed' state, no more writes or handshake actions are allowed
+ *
  * Does NOT handle:
  * - User request queueing (handled by pipeline/scheduler)
  * - Response dispatching (handled by pipeline/scheduler)
@@ -93,6 +103,10 @@ class connection {
    *
    * This does NOT track handshake state - FSM owns that.
    * This only performs I/O operations and invokes callbacks.
+   *
+   * FSM may output multiple send_* actions in sequence.
+   * These are queued for sequential execution (pipelining is safe for handshake).
+   * Responses are assumed to arrive in the same order as requests.
    */
   void execute_actions(fsm_output const& actions);
 
