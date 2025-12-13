@@ -59,7 +59,6 @@ class connection {
   io::tcp_socket socket_;
   connection_fsm fsm_;
   resp3::parser parser_;
-  xz::redis::resp3::generator_type gen_;
 
   std::deque<pending_operation> pending_ops_;
   bool connected_ = false;

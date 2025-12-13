@@ -9,7 +9,7 @@
 namespace xz::redis::detail {
 
 connection::connection(io::io_context& ctx, config cfg)
-    : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, fsm_{cfg_}, gen_{parser_.parse()} {}
+    : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, fsm_{cfg_} {}
 
 connection::~connection() { close(); }
 
@@ -30,13 +30,14 @@ auto connection::connect() -> io::task<void> {
     }
   }
 
+  auto gen = parser_.parse();
   while (fsm_.current_state() != connection_state::ready) {
     auto span = parser_.prepare(1024);
     auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, cfg_.connect_timeout);
     parser_.commit(n);
 
-    while (gen_.next()) {
-      auto msg_opt = gen_.value();
+    while (gen.next()) {
+      auto msg_opt = gen.value();
       if (!msg_opt || msg_opt->empty()) {
         break;
       }
@@ -66,6 +67,7 @@ auto connection::write_data(std::string_view data) -> io::task<void> {
 
 auto connection::read_loop() -> io::task<void> {
   try {
+    auto gen = parser_.parse();
     while (connected_) {
       auto span = parser_.prepare(4096);
       auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, {});
@@ -78,8 +80,8 @@ auto connection::read_loop() -> io::task<void> {
 
       parser_.commit(n);
 
-      while (gen_.next()) {
-        auto msg_opt = gen_.value();
+      while (gen.next()) {
+        auto msg_opt = gen.value();
         if (!msg_opt || msg_opt->empty()) {
           break;
         }
