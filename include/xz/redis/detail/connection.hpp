@@ -146,8 +146,7 @@ class connection {
   connection_fsm fsm_;
   resp3::parser parser_;
 
-  std::optional<io::awaitable<void>> read_loop_task_;
-  bool read_loop_running_ = false;
+  bool read_loop_started_ = false;  // Prevent double spawn of detached read_loop
 
   // For wait_fsm_ready
   std::coroutine_handle<> connect_awaiter_;

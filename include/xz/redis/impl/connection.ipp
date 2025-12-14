@@ -46,10 +46,8 @@ auto connection::connect() -> io::awaitable<void> {
 }
 
 void connection::start_read_loop_if_needed() {
-  if (!read_loop_running_) {
-    read_loop_running_ = true;
-    // read_loop_task_ = read_loop();
-    // read_loop_task_->resume();
+  if (!read_loop_started_) {
+    read_loop_started_ = true;
     io::co_spawn(ctx_, read_loop(), io::use_detached);
   }
 }
@@ -281,12 +279,11 @@ void connection::fail_connection(std::error_code ec) {
 }
 
 void connection::close() {
-  if (read_loop_running_) {
-    read_loop_running_ = false;
+  if (read_loop_started_) {
+    read_loop_started_ = false;
     socket_.close();
     fsm_.reset();
     parser_.reset();
-    read_loop_task_.reset();
     cancel_connect_timer();
 
     // Clear connect awaiter if still waiting
