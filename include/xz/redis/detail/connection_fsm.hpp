@@ -112,72 +112,48 @@ class connection_fsm {
   auto on_hello_ok() -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::handshaking, "on_hello_ok() called in wrong state");
 
-    if (state_ != connection_state::handshaking) {
-      return {};
-    }
     return advance_after_hello();
   }
 
   auto on_hello_error(std::error_code ec) -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::handshaking, "on_hello_error() called in wrong state");
 
-    if (state_ != connection_state::handshaking) {
-      return {};
-    }
     return fail(ec);
   }
 
   auto on_auth_ok() -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::authenticating, "on_auth_ok() called in wrong state");
 
-    if (state_ != connection_state::authenticating) {
-      return {};
-    }
     return advance_after_auth();
   }
 
   auto on_auth_error(std::error_code ec) -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::authenticating, "on_auth_error() called in wrong state");
 
-    if (state_ != connection_state::authenticating) {
-      return {};
-    }
     return fail(ec);
   }
 
   auto on_select_ok() -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::selecting_db, "on_select_ok() called in wrong state");
 
-    if (state_ != connection_state::selecting_db) {
-      return {};
-    }
     return advance_after_select();
   }
 
   auto on_select_error(std::error_code ec) -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::selecting_db, "on_select_error() called in wrong state");
 
-    if (state_ != connection_state::selecting_db) {
-      return {};
-    }
     return fail(ec);
   }
 
   auto on_clientname_ok() -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::setting_clientname, "on_clientname_ok() called in wrong state");
 
-    if (state_ != connection_state::setting_clientname) {
-      return {};
-    }
     return advance_after_clientname();
   }
 
   auto on_clientname_error(std::error_code ec) -> fsm_output {
     REDISXZ_ASSERT(state_ == connection_state::setting_clientname, "on_clientname_error() called in wrong state");
 
-    if (state_ != connection_state::setting_clientname) {
-      return {};
-    }
     return fail(ec);
   }
 
