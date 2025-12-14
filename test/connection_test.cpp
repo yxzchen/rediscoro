@@ -22,17 +22,17 @@ class ConnectionTest : public ::testing::Test {
   config cfg;
 };
 
-TEST_F(ConnectionTest, ConnectBasic) {
+TEST_F(ConnectionTest, RunBasic) {
   io_context ctx;
 
   auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
     try {
-      co_await conn.connect();
-      EXPECT_TRUE(conn.is_connected());
-      conn.close();
+      co_await conn.run();
+      EXPECT_TRUE(conn.is_running());
+      conn.stop();
     } catch (const std::exception& e) {
-      ADD_FAILURE() << "Connect failed: " << e.what();
+      ADD_FAILURE() << "Run failed: " << e.what();
     }
   };
 

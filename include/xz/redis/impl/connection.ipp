@@ -12,11 +12,11 @@ connection::connection(io::io_context& ctx, config cfg)
       parser_{} {}
 
 connection::~connection() {
-  close();
+  stop();
 }
 
-auto connection::connect() -> io::awaitable<void> {
-  if (connected_) {
+auto connection::run() -> io::awaitable<void> {
+  if (running_) {
     co_return;
   }
 
@@ -26,7 +26,7 @@ auto connection::connect() -> io::awaitable<void> {
   auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
   co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
-  connected_ = true;
+  running_ = true;
 
   // Start read loop
   start_read_loop_if_needed();
@@ -48,7 +48,7 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     if (n == 0) {
       // EOF
-      connected_ = false;
+      running_ = false;
       co_return;
     }
 
@@ -66,23 +66,23 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     // Check for parser error
     if (auto ec = parser_.error()) {
-      connected_ = false;
+      running_ = false;
       co_return;
     }
   }
 }
 
-void connection::close() {
+void connection::stop() {
   if (read_loop_started_) {
     read_loop_started_ = false;
-    connected_ = false;
+    running_ = false;
     socket_.close();
     parser_.reset();
   }
 }
 
-auto connection::is_connected() const -> bool {
-  return connected_;
+auto connection::is_running() const -> bool {
+  return running_;
 }
 
 }  // namespace xz::redis::detail

@@ -44,7 +44,7 @@ class connection {
   auto operator=(connection&&) -> connection& = delete;
 
   /**
-   * @brief Connect to Redis server
+   * @brief Start the connection (TCP connect + read loop)
    *
    * Steps:
    * 1. TCP connect
@@ -54,10 +54,10 @@ class connection {
    * - On success: TCP connection established and read loop running
    * - On failure: exception is thrown with error code
    */
-  auto connect() -> io::awaitable<void>;
+  auto run() -> io::awaitable<void>;
 
-  void close();
-  auto is_connected() const -> bool;
+  void stop();
+  auto is_running() const -> bool;
 
  private:
   auto read_loop() -> io::awaitable<void>;
@@ -69,7 +69,7 @@ class connection {
   io::tcp_socket socket_;
   resp3::parser parser_;
   bool read_loop_started_ = false;
-  bool connected_ = false;
+  bool running_ = false;
 };
 
 }  // namespace xz::redis::detail
