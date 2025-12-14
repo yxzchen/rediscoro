@@ -1,3 +1,4 @@
+#pragma once
 
 #include <xz/redis/impl/connection.ipp>
 #include <xz/redis/impl/error.ipp>
