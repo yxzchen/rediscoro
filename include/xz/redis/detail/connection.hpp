@@ -56,12 +56,11 @@ class connection {
    */
   auto run() -> io::awaitable<void>;
 
-  void stop();
+  void stop(std::error_code ec = {});
   auto is_running() const -> bool;
 
  private:
   auto read_loop() -> io::awaitable<void>;
-  void start_read_loop_if_needed();
 
  private:
   io::io_context& ctx_;
@@ -70,6 +69,7 @@ class connection {
   resp3::parser parser_;
   bool read_loop_started_ = false;
   bool running_ = false;
+  std::error_code error_;
 };
 
 }  // namespace xz::redis::detail

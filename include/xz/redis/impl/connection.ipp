@@ -21,6 +21,7 @@ auto connection::run() -> io::awaitable<void> {
   }
 
   parser_.reset();
+  error_ = {};
 
   // TCP connect
   auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
@@ -28,11 +29,7 @@ auto connection::run() -> io::awaitable<void> {
 
   running_ = true;
 
-  // Start read loop
-  start_read_loop_if_needed();
-}
-
-void connection::start_read_loop_if_needed() {
+  // Start read loop AFTER successful connect
   if (!read_loop_started_) {
     read_loop_started_ = true;
     io::co_spawn(ctx_, read_loop(), io::use_detached);
@@ -48,7 +45,7 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     if (n == 0) {
       // EOF
-      running_ = false;
+      stop(io::error::eof);
       co_return;
     }
 
@@ -66,19 +63,28 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     // Check for parser error
     if (auto ec = parser_.error()) {
-      running_ = false;
+      stop(ec);
       co_return;
     }
   }
 }
 
-void connection::stop() {
-  if (read_loop_started_) {
-    read_loop_started_ = false;
-    running_ = false;
-    socket_.close();
-    parser_.reset();
+void connection::stop(std::error_code ec) {
+  if (!running_ && !read_loop_started_) {
+    return;  // Already stopped
   }
+
+  // Store error code for diagnostics
+  if (ec) {
+    error_ = ec;
+    // TODO: Add logging here if needed
+    // logger_.error("Connection stopped with error: {}", ec.message());
+  }
+
+  read_loop_started_ = false;
+  running_ = false;
+  socket_.close();
+  parser_.reset();
 }
 
 auto connection::is_running() const -> bool {
