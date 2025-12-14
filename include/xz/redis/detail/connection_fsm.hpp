@@ -99,14 +99,7 @@ class connection_fsm {
     if (state_ == connection_state::failed) {
       return {};
     }
-    auto old_state = state_;
-    state_ = connection_state::failed;
-    fsm_output out;
-    if (old_state != state_) {
-      out.push_back(fsm_action::state_change{old_state, state_});
-    }
-    out.push_back(fsm_action::connection_failed{ec});
-    return out;
+    return fail(ec);
   }
 
   auto on_hello_ok() -> fsm_output {
