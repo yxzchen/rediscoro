@@ -75,7 +75,8 @@ class connection_fsm {
       return {};
     }
 
-    if (cfg_.needs_hello) {
+    // HELLO 3 (only needed for RESP3, not RESP2)
+    if (cfg_.version == resp_version::resp3) {
       auto old_state = state_;
       state_ = connection_state::handshaking;
       request req;
@@ -83,6 +84,7 @@ class connection_fsm {
       return {fsm_action::state_change{old_state, state_}, fsm_action::send_request{std::move(req)}};
     }
 
+    // RESP2 mode: Skip HELLO, go directly to next state
     return advance_after_hello();
   }
 

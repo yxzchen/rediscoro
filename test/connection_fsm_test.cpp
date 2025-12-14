@@ -297,7 +297,7 @@ TEST_F(ConnectionFsmTest, CompleteFlowWithAllOptions) {
 // This is by design - assertions help catch bugs during development.
 
 TEST_F(ConnectionFsmTest, Resp2ModeSkipsHandshakingState) {
-  config cfg{.needs_hello = false};  // RESP2 mode
+  config cfg{.version = resp_version::resp2};  // RESP2 mode
   connection_fsm fsm{cfg};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
@@ -312,7 +312,7 @@ TEST_F(ConnectionFsmTest, Resp2ModeSkipsHandshakingState) {
 }
 
 TEST_F(ConnectionFsmTest, Resp2WithAuthGoesToAuthenticating) {
-  config cfg{.password = "secret", .needs_hello = false};  // RESP2 mode
+  config cfg{.password = "secret", .version = resp_version::resp2};  // RESP2 mode
   connection_fsm fsm{cfg};
 
   auto output = fsm.on_connected();

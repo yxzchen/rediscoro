@@ -6,6 +6,11 @@
 
 namespace xz::redis {
 
+enum class resp_version {
+  resp2,
+  resp3,
+};
+
 struct config {
   std::string host = "localhost";
   std::uint16_t port = 6379;
@@ -19,7 +24,7 @@ struct config {
   std::optional<std::size_t> max_reconnect_attempts;
   std::chrono::milliseconds reconnect_delay{100};
   std::chrono::milliseconds max_reconnect_delay{30000};
-  bool needs_hello = true;  // RESP3 requires HELLO, RESP2 does not
+  resp_version version = resp_version::resp3;  // Default to RESP3
 };
 
 }  // namespace xz::redis
