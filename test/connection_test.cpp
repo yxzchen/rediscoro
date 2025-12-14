@@ -11,10 +11,12 @@ namespace redis_detail = xz::redis::detail;
 class ConnectionTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    // cfg.host = "153.3.238.127";
+    // cfg.port = 80;
     cfg.host = "127.0.0.1";
     cfg.port = 6379;
-    cfg.connect_timeout = std::chrono::milliseconds{50000000};
-    cfg.request_timeout = std::chrono::milliseconds{5000};
+    cfg.connect_timeout = std::chrono::milliseconds{1000};
+    cfg.request_timeout = std::chrono::milliseconds{1000};
   }
 
   config cfg;
@@ -25,12 +27,17 @@ TEST_F(ConnectionTest, ConnectBasic) {
 
   auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
-    co_await conn.connect();
-    EXPECT_TRUE(conn.is_connected());
-    conn.close();
+    try {
+      co_await conn.connect();
+      EXPECT_TRUE(conn.is_connected());
+      conn.close();
+    } catch (const std::exception& e) {
+      ADD_FAILURE() << "Connect failed: " << e.what();
+    }
   };
 
   co_spawn(ctx, test_task(), use_detached);
+  ctx.run();
 }
 
 TEST_F(ConnectionTest, ConnectWithClientName) {
@@ -39,12 +46,17 @@ TEST_F(ConnectionTest, ConnectWithClientName) {
 
   auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
-    co_await conn.connect();
-    EXPECT_TRUE(conn.is_connected());
-    conn.close();
+    try {
+      co_await conn.connect();
+      EXPECT_TRUE(conn.is_connected());
+      conn.close();
+    } catch (const std::exception& e) {
+      ADD_FAILURE() << "Connect failed: " << e.what();
+    }
   };
 
   co_spawn(ctx, test_task(), use_detached);
+  ctx.run();
 }
 
 TEST_F(ConnectionTest, ConnectWithDatabase) {
@@ -53,12 +65,17 @@ TEST_F(ConnectionTest, ConnectWithDatabase) {
 
   auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
-    co_await conn.connect();
-    EXPECT_TRUE(conn.is_connected());
-    conn.close();
+    try {
+      co_await conn.connect();
+      EXPECT_TRUE(conn.is_connected());
+      conn.close();
+    } catch (const std::exception& e) {
+      ADD_FAILURE() << "Connect failed: " << e.what();
+    }
   };
 
   co_spawn(ctx, test_task(), use_detached);
+  ctx.run();
 }
 
 TEST_F(ConnectionTest, ConnectWithAll) {
@@ -68,12 +85,17 @@ TEST_F(ConnectionTest, ConnectWithAll) {
 
   auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
-    co_await conn.connect();
-    EXPECT_TRUE(conn.is_connected());
-    conn.close();
+    try {
+      co_await conn.connect();
+      EXPECT_TRUE(conn.is_connected());
+      conn.close();
+    } catch (const std::exception& e) {
+      ADD_FAILURE() << "Connect failed: " << e.what();
+    }
   };
 
   co_spawn(ctx, test_task(), use_detached);
+  ctx.run();
 }
 
 int main(int argc, char** argv) {
