@@ -76,9 +76,6 @@ enum class error {
   /// Incompatible node depth.
   incompatible_node_depth,
 
-  /// The setup request sent during connection establishment failed (the name is historical).
-  resp3_hello,
-
   /// The configuration specified a UNIX socket address, but UNIX sockets are not supported by the system.
   unix_sockets_unsupported,
 
@@ -93,15 +90,6 @@ enum class error {
 
   /// RESP3 protocol error.
   resp3_protocol,
-
-  /// Authentication failed.
-  auth_failed,
-
-  /// SELECT database command failed.
-  select_db_failed,
-
-  /// CLIENT SETNAME command failed.
-  client_setname_failed,
 };
 
 /**

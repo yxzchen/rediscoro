@@ -40,64 +40,6 @@ TEST_F(ConnectionTest, ConnectBasic) {
   ctx.run();
 }
 
-TEST_F(ConnectionTest, ConnectWithClientName) {
-  io_context ctx;
-  cfg.client_name = "test-client";
-
-  auto test_task = [&]() -> awaitable<void> {
-    redis_detail::connection conn{ctx, cfg};
-    try {
-      co_await conn.connect();
-      EXPECT_TRUE(conn.is_connected());
-      conn.close();
-    } catch (const std::exception& e) {
-      ADD_FAILURE() << "Connect failed: " << e.what();
-    }
-  };
-
-  co_spawn(ctx, test_task(), use_detached);
-  ctx.run();
-}
-
-TEST_F(ConnectionTest, ConnectWithDatabase) {
-  io_context ctx;
-  cfg.database = 1;
-
-  auto test_task = [&]() -> awaitable<void> {
-    redis_detail::connection conn{ctx, cfg};
-    try {
-      co_await conn.connect();
-      EXPECT_TRUE(conn.is_connected());
-      conn.close();
-    } catch (const std::exception& e) {
-      ADD_FAILURE() << "Connect failed: " << e.what();
-    }
-  };
-
-  co_spawn(ctx, test_task(), use_detached);
-  ctx.run();
-}
-
-TEST_F(ConnectionTest, ConnectWithAll) {
-  io_context ctx;
-  cfg.database = 2;
-  cfg.client_name = "full-test-client";
-
-  auto test_task = [&]() -> awaitable<void> {
-    redis_detail::connection conn{ctx, cfg};
-    try {
-      co_await conn.connect();
-      EXPECT_TRUE(conn.is_connected());
-      conn.close();
-    } catch (const std::exception& e) {
-      ADD_FAILURE() << "Connect failed: " << e.what();
-    }
-  };
-
-  co_spawn(ctx, test_task(), use_detached);
-  ctx.run();
-}
-
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

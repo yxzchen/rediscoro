@@ -3,15 +3,12 @@
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/node.hpp>
 
-#include <iostream>
-
 namespace xz::redis::detail {
 
 connection::connection(io::io_context& ctx, config cfg)
     : ctx_{ctx},
       cfg_{std::move(cfg)},
       socket_{ctx_},
-      fsm_{cfg_},
       parser_{} {}
 
 connection::~connection() {
@@ -19,30 +16,20 @@ connection::~connection() {
 }
 
 auto connection::connect() -> io::awaitable<void> {
-  // Check if already connected by checking FSM state
-  if (fsm_.current_state() == connection_state::ready) {
+  if (connected_) {
     co_return;
   }
 
-  fsm_.reset();
   parser_.reset();
 
-  // 1. TCP connect
+  // TCP connect
   auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
   co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
-  // 2. Start read loop
+  connected_ = true;
+
+  // Start read loop
   start_read_loop_if_needed();
-
-  // 3. Execute handshake
-  auto actions = fsm_.on_connected();
-  execute_actions(actions);
-
-  // 4. Setup timeout
-  setup_connect_timer();
-
-  // 5. Wait for ready or error
-  co_await wait_fsm_ready();
 }
 
 void connection::start_read_loop_if_needed() {
@@ -61,8 +48,7 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     if (n == 0) {
       // EOF
-      auto actions = fsm_.on_io_error(io::error::eof);
-      execute_actions(actions);
+      connected_ = false;
       co_return;
     }
 
@@ -75,228 +61,28 @@ auto connection::read_loop() -> io::awaitable<void> {
         // Parser needs more data
         break;
       }
-      if (!msg_opt->empty()) {
-        interpret_response(*msg_opt);
-      }
+      // Messages will be handled by pipeline (to be implemented)
     }
 
     // Check for parser error
     if (auto ec = parser_.error()) {
-      auto actions = fsm_.on_io_error(ec);
-      execute_actions(actions);
+      connected_ = false;
       co_return;
     }
-  }
-}
-
-void connection::interpret_response(resp3::msg_view const& msg) {
-  // Determine which FSM event to trigger based on current FSM state
-  // FSM state is the ONLY source of truth - connection does NOT track state
-  auto current_state = fsm_.current_state();
-
-  // Note: RESP3 handshake protocol assumes:
-  // - No attribute frames during handshake
-  // - No push messages during handshake
-  // - First semantic node is the actual response
-  //
-  // For robustness, we extract the first non-attribute node.
-  // If all nodes are attributes, we use the first node.
-  auto get_first_semantic_node = [&msg]() -> resp3::node_view const& {
-    for (auto const& node : msg) {
-      if (node.data_type != resp3::type3::attribute) {
-        return node;
-      }
-    }
-    // Fallback to first node if all are attributes
-    return msg[0];
-  };
-
-  auto const& semantic_node = get_first_semantic_node();
-
-  // Helper to check if response indicates success
-  // HELLO returns a map, AUTH/SELECT/CLIENTNAME return simple_string "OK"
-  auto is_success = [&semantic_node]() -> bool {
-    auto t = semantic_node.data_type;
-    return t == resp3::type3::simple_string || t == resp3::type3::map;
-  };
-
-  auto is_error = [&semantic_node]() -> bool {
-    auto t = semantic_node.data_type;
-    return t == resp3::type3::simple_error || t == resp3::type3::blob_error;
-  };
-
-  // Only interpret responses during handshake
-  // Once FSM reaches 'ready', responses go to pipeline/scheduler
-  if (current_state == connection_state::ready || current_state == connection_state::disconnected ||
-      current_state == connection_state::failed) {
-    return;  // Not in handshake, ignore
-  }
-
-  fsm_output actions;
-
-  // Map FSM state to the appropriate command response
-  switch (current_state) {
-    case connection_state::handshaking: {
-      // HELLO response: map with server info, or error
-      if (is_success()) {
-        actions = fsm_.on_hello_ok();
-      } else if (is_error()) {
-        actions = fsm_.on_hello_error(make_error_code(error::resp3_hello));
-      }
-      break;
-    }
-
-    case connection_state::authenticating: {
-      // AUTH response: simple-string "OK" or error
-      if (is_success()) {
-        actions = fsm_.on_auth_ok();
-      } else if (is_error()) {
-        actions = fsm_.on_auth_error(make_error_code(error::auth_failed));
-      }
-      break;
-    }
-
-    case connection_state::selecting_db: {
-      // SELECT response: simple-string "OK" or error
-      if (is_success()) {
-        actions = fsm_.on_select_ok();
-      } else if (is_error()) {
-        actions = fsm_.on_select_error(make_error_code(error::select_db_failed));
-      }
-      break;
-    }
-
-    case connection_state::setting_clientname: {
-      // CLIENT SETNAME response: simple-string "OK" or error
-      if (is_success()) {
-        actions = fsm_.on_clientname_ok();
-      } else if (is_error()) {
-        actions = fsm_.on_clientname_error(make_error_code(error::client_setname_failed));
-      }
-      break;
-    }
-
-    case connection_state::ready:
-    case connection_state::disconnected:
-    case connection_state::failed:
-      // Already handled above - should not reach here
-      return;
-  }
-
-  execute_actions(actions);
-}
-
-void connection::execute_actions(fsm_output const& actions) {
-  for (auto const& action : actions) {
-    std::visit(
-        [this](auto const& a) {
-          using T = std::decay_t<decltype(a)>;
-
-          if constexpr (std::is_same_v<T, fsm_action::state_change>) {
-            // State changed - FSM owns this, connection just observes
-            // No action needed here - we could add logging if desired
-          } else if constexpr (std::is_same_v<T, fsm_action::send_request>) {
-            // FSM provides complete request, just send it!
-            auto data = std::string{a.req.payload()};
-            io::co_spawn(ctx_, [this, data = std::move(data)]() mutable -> io::awaitable<void> {
-              try {
-                co_await write_data(data);
-              } catch (std::system_error const& e) {
-                auto actions = fsm_.on_io_error(e.code());
-                execute_actions(actions);
-              }
-            }, io::use_detached);
-
-          } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
-            // Handshake complete
-            cancel_connect_timer();
-            if (connect_awaiter_) {
-              auto h = std::exchange(connect_awaiter_, {});
-              ctx_.post([h]() mutable { h.resume(); });
-            }
-
-          } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
-            fail_connection(a.ec);
-          }
-        },
-        action);
-  }
-}
-
-auto connection::write_data(std::string data) -> io::awaitable<void> {
-  co_await io::async_write(socket_, std::span<char const>{data.data(), data.size()}, cfg_.request_timeout);
-}
-
-auto connection::wait_fsm_ready_awaitable::await_ready() const noexcept -> bool {
-  return conn->fsm_.current_state() == connection_state::ready || conn->connect_error_;
-}
-
-void connection::wait_fsm_ready_awaitable::await_suspend(std::coroutine_handle<> h) {
-  // Check again to avoid race condition
-  if (conn->fsm_.current_state() == connection_state::ready || conn->connect_error_) {
-    // Already ready, resume immediately
-    h.resume();
-  } else {
-    // Not ready yet, store awaiter
-    conn->connect_awaiter_ = h;
-  }
-}
-
-auto connection::wait_fsm_ready_awaitable::await_resume() -> void {
-  if (conn->connect_error_) {
-    auto ec = std::exchange(conn->connect_error_, {});
-    throw std::system_error(ec);
-  }
-}
-
-auto connection::wait_fsm_ready() -> io::awaitable<void> {
-  co_await wait_fsm_ready_awaitable{this};
-}
-
-void connection::setup_connect_timer() {
-  if (cfg_.connect_timeout.count() > 0) {
-    connect_timer_ = ctx_.schedule_timer(cfg_.connect_timeout, [this]() {
-      auto actions = fsm_.on_io_error(make_error_code(error::connect_timeout));
-      execute_actions(actions);
-    });
-  }
-}
-
-void connection::cancel_connect_timer() {
-  if (connect_timer_) {
-    ctx_.cancel_timer(connect_timer_);
-    connect_timer_.reset();
-  }
-}
-
-void connection::fail_connection(std::error_code ec) {
-  cancel_connect_timer();
-  if (connect_awaiter_) {
-    connect_error_ = ec;
-    auto h = std::exchange(connect_awaiter_, {});
-    ctx_.post([h]() mutable { h.resume(); });
   }
 }
 
 void connection::close() {
   if (read_loop_started_) {
     read_loop_started_ = false;
+    connected_ = false;
     socket_.close();
-    fsm_.reset();
     parser_.reset();
-    cancel_connect_timer();
-
-    // Clear connect awaiter if still waiting
-    if (connect_awaiter_) {
-      connect_error_ = io::error::operation_aborted;
-      auto h = std::exchange(connect_awaiter_, {});
-      h.resume();
-    }
   }
 }
 
 auto connection::is_connected() const -> bool {
-  return fsm_.current_state() == connection_state::ready;
+  return connected_;
 }
 
 }  // namespace xz::redis::detail

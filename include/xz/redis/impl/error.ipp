@@ -40,9 +40,6 @@ struct error_category_impl : std::error_category {
       case error::sync_receive_push_failed:
         return "Can't receive server push synchronously without blocking.";
       case error::incompatible_node_depth: return "Incompatible node depth.";
-      case error::resp3_hello:
-        return "The server response to the setup request sent during connection establishment "
-               "contains an error.";
       case error::unix_sockets_unsupported:
         return "The configuration specified a UNIX socket address, but UNIX sockets are not "
                "supported by the system.";
@@ -55,12 +52,6 @@ struct error_category_impl : std::error_category {
         return "Timeout while writing data to the server.";
       case error::resp3_protocol:
         return "RESP3 protocol error.";
-      case error::auth_failed:
-        return "Authentication failed.";
-      case error::select_db_failed:
-        return "SELECT database command failed.";
-      case error::client_setname_failed:
-        return "CLIENT SETNAME command failed.";
       default: REDISXZ_ASSERT(false); return "redisxz error.";
     }
     // clang-format on
