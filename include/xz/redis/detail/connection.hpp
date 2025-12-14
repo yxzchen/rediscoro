@@ -56,11 +56,12 @@ class connection {
    */
   auto run() -> io::awaitable<void>;
 
-  void stop(std::error_code ec = {});
+  void stop();
   auto is_running() const -> bool;
 
  private:
   auto read_loop() -> io::awaitable<void>;
+  void fail(std::error_code ec);
 
  private:
   io::io_context& ctx_;

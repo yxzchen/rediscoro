@@ -45,7 +45,7 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     if (n == 0) {
       // EOF
-      stop(io::error::eof);
+      fail(io::error::eof);
       co_return;
     }
 
@@ -63,28 +63,33 @@ auto connection::read_loop() -> io::awaitable<void> {
 
     // Check for parser error
     if (auto ec = parser_.error()) {
-      stop(ec);
+      fail(ec);
       co_return;
     }
   }
 }
 
-void connection::stop(std::error_code ec) {
-  if (!running_ && !read_loop_started_) {
-    return;  // Already stopped
+void connection::fail(std::error_code ec) {
+  if (!running_) {
+    return;
   }
 
-  // Store error code for diagnostics
-  if (ec) {
-    error_ = ec;
-    // TODO: Add logging here if needed
-    // logger_.error("Connection stopped with error: {}", ec.message());
-  }
+  error_ = ec;
 
-  read_loop_started_ = false;
-  running_ = false;
-  socket_.close();
-  parser_.reset();
+  // TODO: Add logging here if needed
+  // logger_.error("Connection failed: {}", ec.message());
+
+  // Clean up resources
+  stop();
+}
+
+void connection::stop() {
+  if (read_loop_started_) {
+    read_loop_started_ = false;
+    running_ = false;
+    socket_.close();
+    parser_.reset();
+  }
 }
 
 auto connection::is_running() const -> bool {
