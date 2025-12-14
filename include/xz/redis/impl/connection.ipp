@@ -30,10 +30,7 @@ auto connection::run() -> io::awaitable<void> {
   running_ = true;
 
   // Start read loop AFTER successful connect
-  if (!read_loop_started_) {
-    read_loop_started_ = true;
-    io::co_spawn(ctx_, read_loop(), io::use_detached);
-  }
+  io::co_spawn(ctx_, read_loop(), io::use_detached);
 }
 
 auto connection::read_loop() -> io::awaitable<void> {
@@ -84,8 +81,7 @@ void connection::fail(std::error_code ec) {
 }
 
 void connection::stop() {
-  if (read_loop_started_) {
-    read_loop_started_ = false;
+  if (running_) {
     running_ = false;
     socket_.close();
     parser_.reset();

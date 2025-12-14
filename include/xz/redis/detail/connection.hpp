@@ -68,7 +68,6 @@ class connection {
   config cfg_;
   io::tcp_socket socket_;
   resp3::parser parser_;
-  bool read_loop_started_ = false;
   bool running_ = false;
   std::error_code error_;
 };
