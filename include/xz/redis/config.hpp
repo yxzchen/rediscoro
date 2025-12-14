@@ -19,6 +19,7 @@ struct config {
   std::optional<std::size_t> max_reconnect_attempts;
   std::chrono::milliseconds reconnect_delay{100};
   std::chrono::milliseconds max_reconnect_delay{30000};
+  bool needs_hello = true;  // RESP3 requires HELLO, RESP2 does not
 };
 
 }  // namespace xz::redis

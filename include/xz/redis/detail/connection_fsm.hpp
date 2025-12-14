@@ -3,8 +3,11 @@
 #include <xz/redis/config.hpp>
 #include <xz/redis/detail/assert.hpp>
 #include <xz/redis/error.hpp>
+#include <xz/redis/request.hpp>
 
 #include <cassert>
+#include <optional>
+#include <string>
 #include <system_error>
 #include <variant>
 #include <vector>
@@ -21,29 +24,14 @@ enum class connection_state {
   failed,
 };
 
-/**
- * @brief Handshake plan extracted from config
- *
- * FSM does not hold config reference to avoid lifetime coupling.
- * Connection layer extracts decision parameters once.
- */
-struct handshake_plan {
-  bool needs_hello;           // RESP3 requires HELLO, RESP2 does not
-  bool needs_auth;            // Password authentication required
-  bool needs_select_db;       // Non-zero database selection required
-  bool needs_set_clientname;  // Client name setting required
-};
-
-// FSM Actions: Data-free signals (FSM decides "what", Connection decides "how")
 namespace fsm_action {
 struct state_change {
   connection_state old_state;
   connection_state new_state;
 };
-struct send_hello {};
-struct send_auth {};
-struct send_select {};
-struct send_clientname {};
+struct send_request {
+  request req;
+};
 struct connection_ready {};
 struct connection_failed {
   std::error_code ec;
@@ -51,8 +39,8 @@ struct connection_failed {
 }  // namespace fsm_action
 
 using fsm_action_variant =
-    std::variant<fsm_action::state_change, fsm_action::send_hello, fsm_action::send_auth, fsm_action::send_select,
-                 fsm_action::send_clientname, fsm_action::connection_ready, fsm_action::connection_failed>;
+    std::variant<fsm_action::state_change, fsm_action::send_request, fsm_action::connection_ready,
+                 fsm_action::connection_failed>;
 
 using fsm_output = std::vector<fsm_action_variant>;
 
@@ -62,9 +50,8 @@ using fsm_output = std::vector<fsm_action_variant>;
  * Design principles:
  * - FSM is synchronous and non-reentrant
  * - FSM knows only state transitions, not protocol details
- * - FSM outputs semantic actions (what to do), not serialized commands (how to do)
- * - Connection layer handles RESP semantics and command serialization
- * - FSM does not hold config reference to avoid lifetime coupling
+ * - FSM outputs complete requests with actual data
+ * - Connection layer just executes the requests
  *
  * Assumptions (RESP3 handshake):
  * - HELLO/AUTH/SELECT/CLIENT SETNAME are single-response commands
@@ -76,7 +63,7 @@ using fsm_output = std::vector<fsm_action_variant>;
  */
 class connection_fsm {
  public:
-  explicit connection_fsm(handshake_plan plan) noexcept : plan_(plan), state_(connection_state::disconnected) {}
+  explicit connection_fsm(config const& cfg) noexcept : cfg_(cfg), state_(connection_state::disconnected) {}
 
   auto current_state() const noexcept -> connection_state { return state_; }
 
@@ -88,10 +75,12 @@ class connection_fsm {
       return {};
     }
 
-    if (plan_.needs_hello) {
+    if (cfg_.needs_hello) {
       auto old_state = state_;
       state_ = connection_state::handshaking;
-      return {fsm_action::state_change{old_state, state_}, fsm_action::send_hello{}};
+      request req;
+      req.push("HELLO", 3);
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_request{std::move(req)}};
     }
 
     return advance_after_hello();
@@ -205,28 +194,41 @@ class connection_fsm {
   }
 
   auto advance_after_hello() -> fsm_output {
-    if (plan_.needs_auth) {
+    if (cfg_.password.has_value()) {
       auto old_state = state_;
       state_ = connection_state::authenticating;
-      return {fsm_action::state_change{old_state, state_}, fsm_action::send_auth{}};
+      // AUTH with actual password
+      request req;
+      if (cfg_.username.has_value()) {
+        req.push("AUTH", *cfg_.username, *cfg_.password);
+      } else {
+        req.push("AUTH", *cfg_.password);
+      }
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_request{std::move(req)}};
     }
     return advance_after_auth();
   }
 
   auto advance_after_auth() -> fsm_output {
-    if (plan_.needs_select_db) {
+    if (cfg_.database != 0) {
       auto old_state = state_;
       state_ = connection_state::selecting_db;
-      return {fsm_action::state_change{old_state, state_}, fsm_action::send_select{}};
+      // SELECT with actual database
+      request req;
+      req.push("SELECT", cfg_.database);
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_request{std::move(req)}};
     }
     return advance_after_select();
   }
 
   auto advance_after_select() -> fsm_output {
-    if (plan_.needs_set_clientname) {
+    if (cfg_.client_name.has_value()) {
       auto old_state = state_;
       state_ = connection_state::setting_clientname;
-      return {fsm_action::state_change{old_state, state_}, fsm_action::send_clientname{}};
+      // CLIENT SETNAME with actual name
+      request req;
+      req.push("CLIENT", "SETNAME", *cfg_.client_name);
+      return {fsm_action::state_change{old_state, state_}, fsm_action::send_request{std::move(req)}};
     }
     return advance_after_clientname();
   }
@@ -237,7 +239,7 @@ class connection_fsm {
     return {fsm_action::state_change{old_state, state_}, fsm_action::connection_ready{}};
   }
 
-  handshake_plan plan_;
+  config const& cfg_;
   connection_state state_;
 };
 

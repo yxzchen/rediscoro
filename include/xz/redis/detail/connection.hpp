@@ -121,34 +121,12 @@ class connection {
    */
   void interpret_response(resp3::msg_view const& msg);
 
-  // === Command building (using request class) ===
-  auto build_hello_request() -> request;
-  auto build_auth_request() -> request;
-  auto build_select_request() -> request;
-  auto build_clientname_request() -> request;
-
   // === Helpers ===
   void start_read_loop_if_needed();
   auto wait_fsm_ready() -> io::awaitable<void>;
   void setup_connect_timer();
   void cancel_connect_timer();
   void fail_connection(std::error_code ec);
-
-  // === Refactored write spawner (eliminates code duplication) ===
-  template <typename ReqBuilder>
-  void spawn_write_task(ReqBuilder&& build) {
-    auto req = build();
-    auto data = std::string{req.payload()};
-    auto self = this;
-    io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
-      try {
-        co_await self->write_data(data);
-      } catch (std::system_error const& e) {
-        auto actions = self->fsm_.on_io_error(e.code());
-        self->execute_actions(actions);
-      }
-    }, io::use_detached);
-  }
 
  private:
   // Awaitable for wait_fsm_ready

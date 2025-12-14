@@ -3,16 +3,6 @@
 
 using namespace xz::redis;
 
-// Helper to convert config to handshake_plan for testing
-static auto make_plan(config const& cfg, bool needs_hello = true) -> handshake_plan {
-  return handshake_plan{
-      .needs_hello = needs_hello,
-      .needs_auth = cfg.password.has_value(),
-      .needs_select_db = cfg.database != 0,
-      .needs_set_clientname = cfg.client_name.has_value(),
-  };
-}
-
 class ConnectionFsmTest : public ::testing::Test {
  protected:
   auto get_action_type(fsm_action_variant const& action) -> std::string {
@@ -21,14 +11,19 @@ class ConnectionFsmTest : public ::testing::Test {
           using T = std::decay_t<decltype(a)>;
           if constexpr (std::is_same_v<T, fsm_action::state_change>) {
             return "state_change";
-          } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            return "send_hello";
-          } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
-            return "send_auth";
-          } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
-            return "send_select";
-          } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
-            return "send_clientname";
+          } else if constexpr (std::is_same_v<T, fsm_action::send_request>) {
+            // Inspect the request to determine the action type
+            auto const& payload = a.req.payload();
+            if (payload.find("*1\r\n$5\r\nHELLO") == 0 || payload.find("HELLO") != std::string::npos) {
+              return "send_hello";
+            } else if (payload.find("AUTH") != std::string::npos) {
+              return "send_auth";
+            } else if (payload.find("*2\r\n$6\r\nSELECT") == 0 || payload.find("SELECT") != std::string::npos) {
+              return "send_select";
+            } else if (payload.find("CLIENT") != std::string::npos && payload.find("SETNAME") != std::string::npos) {
+              return "send_clientname";
+            }
+            return "send_request";
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
             return "connection_ready";
           } else if constexpr (std::is_same_v<T, fsm_action::connection_failed>) {
@@ -50,15 +45,15 @@ class ConnectionFsmTest : public ::testing::Test {
 };
 
 TEST_F(ConnectionFsmTest, InitialStateIsDisconnected) {
-  handshake_plan plan{.needs_hello = true, .needs_auth = false, .needs_select_db = false, .needs_set_clientname = false};
-  connection_fsm fsm{plan};
+  config cfg;
+  connection_fsm fsm{cfg};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 }
 
 TEST_F(ConnectionFsmTest, OnConnectedSendsHelloAndTransitionsToHandshaking) {
-  handshake_plan plan{.needs_hello = true, .needs_auth = false, .needs_select_db = false, .needs_set_clientname = false};
-  connection_fsm fsm{plan};
+  config cfg;
+  connection_fsm fsm{cfg};
 
   auto output = fsm.on_connected();
 
@@ -68,7 +63,7 @@ TEST_F(ConnectionFsmTest, OnConnectedSendsHelloAndTransitionsToHandshaking) {
 
 TEST_F(ConnectionFsmTest, HelloOkWithoutAuthGoesToReady) {
   config cfg;
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   auto output = fsm.on_hello_ok();
@@ -79,7 +74,7 @@ TEST_F(ConnectionFsmTest, HelloOkWithoutAuthGoesToReady) {
 
 TEST_F(ConnectionFsmTest, HelloOkWithAuthGoesToAuthenticating) {
   config cfg{.password = "secret"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   auto output = fsm.on_hello_ok();
@@ -93,7 +88,7 @@ TEST_F(ConnectionFsmTest, HelloOkWithUsernamePasswordAuth) {
       .username = "admin",
       .password = "secret",
   };
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   auto output = fsm.on_hello_ok();
@@ -104,7 +99,7 @@ TEST_F(ConnectionFsmTest, HelloOkWithUsernamePasswordAuth) {
 
 TEST_F(ConnectionFsmTest, AuthOkGoesToReady) {
   config cfg{.password = "secret"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   fsm.on_hello_ok();
@@ -116,7 +111,7 @@ TEST_F(ConnectionFsmTest, AuthOkGoesToReady) {
 
 TEST_F(ConnectionFsmTest, HelloErrorGoesToFailed) {
   config cfg;
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   auto output = fsm.on_hello_error(make_error_code(error::resp3_hello));
@@ -134,7 +129,7 @@ TEST_F(ConnectionFsmTest, HelloErrorGoesToFailed) {
 
 TEST_F(ConnectionFsmTest, AuthErrorGoesToFailed) {
   config cfg{.password = "wrong-password"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   fsm.on_hello_ok();
@@ -146,7 +141,7 @@ TEST_F(ConnectionFsmTest, AuthErrorGoesToFailed) {
 
 TEST_F(ConnectionFsmTest, IoErrorGoesToFailed) {
   config cfg;
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   auto output = fsm.on_io_error(make_error_code(error::connect_timeout));
 
@@ -163,7 +158,7 @@ TEST_F(ConnectionFsmTest, IoErrorGoesToFailed) {
 
 TEST_F(ConnectionFsmTest, ResetBringsBackToDisconnected) {
   config cfg;
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
@@ -174,7 +169,7 @@ TEST_F(ConnectionFsmTest, ResetBringsBackToDisconnected) {
 
 TEST_F(ConnectionFsmTest, FullSuccessfulFlowWithoutAuth) {
   config cfg;
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 
@@ -189,7 +184,7 @@ TEST_F(ConnectionFsmTest, FullSuccessfulFlowWithoutAuth) {
 
 TEST_F(ConnectionFsmTest, FullSuccessfulFlowWithAuth) {
   config cfg{.password = "secret"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 
@@ -207,7 +202,7 @@ TEST_F(ConnectionFsmTest, FullSuccessfulFlowWithAuth) {
 
 TEST_F(ConnectionFsmTest, OnConnectedFromNonDisconnectedStateDoesNothing) {
   config cfg;
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
@@ -219,7 +214,7 @@ TEST_F(ConnectionFsmTest, OnConnectedFromNonDisconnectedStateDoesNothing) {
 
 TEST_F(ConnectionFsmTest, SelectDatabaseFlow) {
   config cfg{.database = 2};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   auto out1 = fsm.on_hello_ok();
@@ -234,7 +229,7 @@ TEST_F(ConnectionFsmTest, SelectDatabaseFlow) {
 
 TEST_F(ConnectionFsmTest, SelectErrorGoesToFailed) {
   config cfg{.database = 999};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   fsm.on_hello_ok();
@@ -246,7 +241,7 @@ TEST_F(ConnectionFsmTest, SelectErrorGoesToFailed) {
 
 TEST_F(ConnectionFsmTest, SetClientNameFlow) {
   config cfg{.client_name = "my-app"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   auto out1 = fsm.on_hello_ok();
@@ -261,7 +256,7 @@ TEST_F(ConnectionFsmTest, SetClientNameFlow) {
 
 TEST_F(ConnectionFsmTest, ClientnameErrorGoesToFailed) {
   config cfg{.client_name = "test"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   fsm.on_hello_ok();
@@ -277,7 +272,7 @@ TEST_F(ConnectionFsmTest, CompleteFlowWithAllOptions) {
       .database = 1,
       .client_name = "test-client",
   };
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   fsm.on_connected();
   EXPECT_EQ(fsm.current_state(), connection_state::handshaking);
@@ -302,8 +297,8 @@ TEST_F(ConnectionFsmTest, CompleteFlowWithAllOptions) {
 // This is by design - assertions help catch bugs during development.
 
 TEST_F(ConnectionFsmTest, Resp2ModeSkipsHandshakingState) {
-  config cfg;
-  connection_fsm fsm{make_plan(cfg, false)};  // needs_hello = false for RESP2
+  config cfg{.needs_hello = false};  // RESP2 mode
+  connection_fsm fsm{cfg};
 
   EXPECT_EQ(fsm.current_state(), connection_state::disconnected);
 
@@ -317,8 +312,8 @@ TEST_F(ConnectionFsmTest, Resp2ModeSkipsHandshakingState) {
 }
 
 TEST_F(ConnectionFsmTest, Resp2WithAuthGoesToAuthenticating) {
-  config cfg{.password = "secret"};
-  connection_fsm fsm{make_plan(cfg, false)};  // needs_hello = false for RESP2
+  config cfg{.password = "secret", .needs_hello = false};  // RESP2 mode
+  connection_fsm fsm{cfg};
 
   auto output = fsm.on_connected();
 
@@ -331,7 +326,7 @@ TEST_F(ConnectionFsmTest, Resp2WithAuthGoesToAuthenticating) {
 
 TEST_F(ConnectionFsmTest, IoErrorCanHappenInAnyState) {
   config cfg{.password = "secret"};
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   // Error during handshaking
   fsm.on_connected();
@@ -359,40 +354,40 @@ TEST_F(ConnectionFsmTest, ActionsAreDataFree) {
       .database = 5,
       .client_name = "my-app",
   };
-  connection_fsm fsm{make_plan(cfg)};
+  connection_fsm fsm{cfg};
 
   // All actions should be data-free structs, state_change should have old/new states
   auto out1 = fsm.on_connected();
-  ASSERT_EQ(out1.size(), 2);  // state_change + send_hello
+  ASSERT_EQ(out1.size(), 2);  // state_change + send_request
   ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out1[0]));
   auto sc1 = std::get<fsm_action::state_change>(out1[0]);
   EXPECT_EQ(sc1.old_state, connection_state::disconnected);
   EXPECT_EQ(sc1.new_state, connection_state::handshaking);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_hello>(out1[1]));
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_request>(out1[1]));
 
   auto out2 = fsm.on_hello_ok();
-  ASSERT_EQ(out2.size(), 2);  // state_change + send_auth
+  ASSERT_EQ(out2.size(), 2);  // state_change + send_request
   ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out2[0]));
   auto sc2 = std::get<fsm_action::state_change>(out2[0]);
   EXPECT_EQ(sc2.old_state, connection_state::handshaking);
   EXPECT_EQ(sc2.new_state, connection_state::authenticating);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_auth>(out2[1]));
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_request>(out2[1]));
 
   auto out3 = fsm.on_auth_ok();
-  ASSERT_EQ(out3.size(), 2);  // state_change + send_select
+  ASSERT_EQ(out3.size(), 2);  // state_change + send_request
   ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out3[0]));
   auto sc3 = std::get<fsm_action::state_change>(out3[0]);
   EXPECT_EQ(sc3.old_state, connection_state::authenticating);
   EXPECT_EQ(sc3.new_state, connection_state::selecting_db);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_select>(out3[1]));
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_request>(out3[1]));
 
   auto out4 = fsm.on_select_ok();
-  ASSERT_EQ(out4.size(), 2);  // state_change + send_clientname
+  ASSERT_EQ(out4.size(), 2);  // state_change + send_request
   ASSERT_TRUE(std::holds_alternative<fsm_action::state_change>(out4[0]));
   auto sc4 = std::get<fsm_action::state_change>(out4[0]);
   EXPECT_EQ(sc4.old_state, connection_state::selecting_db);
   EXPECT_EQ(sc4.new_state, connection_state::setting_clientname);
-  EXPECT_TRUE(std::holds_alternative<fsm_action::send_clientname>(out4[1]));
+  EXPECT_TRUE(std::holds_alternative<fsm_action::send_request>(out4[1]));
 
   auto out5 = fsm.on_clientname_ok();
   ASSERT_EQ(out5.size(), 2);  // state_change + connection_ready

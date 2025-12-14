@@ -11,12 +11,7 @@ connection::connection(io::io_context& ctx, config cfg)
     : ctx_{ctx},
       cfg_{std::move(cfg)},
       socket_{ctx_},
-      fsm_{handshake_plan{
-          .needs_hello = true,  // RESP3 by default
-          .needs_auth = cfg_.password.has_value(),
-          .needs_select_db = cfg_.database != 0,
-          .needs_set_clientname = cfg_.client_name.has_value(),
-      }},
+      fsm_{cfg_},
       parser_{} {}
 
 connection::~connection() {
@@ -202,19 +197,17 @@ void connection::execute_actions(fsm_output const& actions) {
           if constexpr (std::is_same_v<T, fsm_action::state_change>) {
             // State changed - FSM owns this, connection just observes
             // No action needed here - we could add logging if desired
-          } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            // Spawn write coroutine with co_spawn
-            // FSM ensures ordering - co_await in coroutine provides sequential execution
-            spawn_write_task([this] { return build_hello_request(); });
-
-          } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
-            spawn_write_task([this] { return build_auth_request(); });
-
-          } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
-            spawn_write_task([this] { return build_select_request(); });
-
-          } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
-            spawn_write_task([this] { return build_clientname_request(); });
+          } else if constexpr (std::is_same_v<T, fsm_action::send_request>) {
+            // FSM provides complete request, just send it!
+            auto data = std::string{a.req.payload()};
+            io::co_spawn(ctx_, [this, data = std::move(data)]() mutable -> io::awaitable<void> {
+              try {
+                co_await write_data(data);
+              } catch (std::system_error const& e) {
+                auto actions = fsm_.on_io_error(e.code());
+                execute_actions(actions);
+              }
+            }, io::use_detached);
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
             // Handshake complete
@@ -230,37 +223,6 @@ void connection::execute_actions(fsm_output const& actions) {
         },
         action);
   }
-}
-
-auto connection::build_hello_request() -> request {
-  // HELLO 3
-  request req;
-  req.push("HELLO", 3);
-  return req;
-}
-
-auto connection::build_auth_request() -> request {
-  request req;
-  if (cfg_.username.has_value()) {
-    // AUTH username password
-    req.push("AUTH", *cfg_.username, *cfg_.password);
-  } else {
-    // AUTH password
-    req.push("AUTH", *cfg_.password);
-  }
-  return req;
-}
-
-auto connection::build_select_request() -> request {
-  request req;
-  req.push("SELECT", cfg_.database);
-  return req;
-}
-
-auto connection::build_clientname_request() -> request {
-  request req;
-  req.push("CLIENT", "SETNAME", *cfg_.client_name);
-  return req;
 }
 
 auto connection::write_data(std::string data) -> io::awaitable<void> {
