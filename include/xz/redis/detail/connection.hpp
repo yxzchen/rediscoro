@@ -2,7 +2,6 @@
 
 #include <xz/io/io_context.hpp>
 #include <xz/io/ip.hpp>
-#include <xz/io/task.hpp>
 #include <xz/io/tcp_socket.hpp>
 #include <xz/io/co_spawn.hpp>
 #include <xz/redis/config.hpp>
@@ -83,15 +82,15 @@ class connection {
    * - Do not call connect() concurrently on the same connection
    * - wait_fsm_ready() supports only one awaiting coroutine
    */
-  auto connect() -> io::task<void>;
+  auto connect() -> io::awaitable<void>;
 
   void close();
   auto is_connected() const -> bool;
 
  private:
   // === Core coroutines ===
-  auto read_loop() -> io::task<void>;
-  auto write_data(std::string data) -> io::task<void>;
+  auto read_loop() -> io::awaitable<void>;
+  auto write_data(std::string data) -> io::awaitable<void>;
 
   // === FSM integration ===
   /**
@@ -130,7 +129,7 @@ class connection {
 
   // === Helpers ===
   void start_read_loop_if_needed();
-  auto wait_fsm_ready() -> io::task<void>;
+  auto wait_fsm_ready() -> io::awaitable<void>;
   void setup_connect_timer();
   void cancel_connect_timer();
   void fail_connection(std::error_code ec);
@@ -153,7 +152,7 @@ class connection {
   connection_fsm fsm_;
   resp3::parser parser_;
 
-  std::optional<io::task<void>> read_loop_task_;
+  std::optional<io::awaitable<void>> read_loop_task_;
   bool read_loop_running_ = false;
 
   // For wait_fsm_ready

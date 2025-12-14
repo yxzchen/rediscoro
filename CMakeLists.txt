@@ -25,7 +25,7 @@ include(FetchContent)
 FetchContent_Declare(
     ioxz
     GIT_REPOSITORY https://github.com/yxzchen/ioxz.git
-    GIT_TAG v0.1.0
+    GIT_TAG dev
 )
 
 FetchContent_MakeAvailable(ioxz)

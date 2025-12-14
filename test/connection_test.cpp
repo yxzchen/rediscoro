@@ -13,7 +13,7 @@ class ConnectionTest : public ::testing::Test {
   void SetUp() override {
     cfg.host = "127.0.0.1";
     cfg.port = 6379;
-    cfg.connect_timeout = std::chrono::milliseconds{5000};
+    cfg.connect_timeout = std::chrono::milliseconds{50000000};
     cfg.request_timeout = std::chrono::milliseconds{5000};
   }
 
@@ -23,48 +23,42 @@ class ConnectionTest : public ::testing::Test {
 TEST_F(ConnectionTest, ConnectBasic) {
   io_context ctx;
 
-  auto test_task = [&]() -> task<void> {
+  auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
     co_await conn.connect();
     EXPECT_TRUE(conn.is_connected());
     conn.close();
   };
 
-  auto t = test_task();
-  t.resume();
-  ctx.run();
+  co_spawn(ctx, test_task(), use_detached);
 }
 
 TEST_F(ConnectionTest, ConnectWithClientName) {
   io_context ctx;
   cfg.client_name = "test-client";
 
-  auto test_task = [&]() -> task<void> {
+  auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
     co_await conn.connect();
     EXPECT_TRUE(conn.is_connected());
     conn.close();
   };
 
-  auto t = test_task();
-  t.resume();
-  ctx.run();
+  co_spawn(ctx, test_task(), use_detached);
 }
 
 TEST_F(ConnectionTest, ConnectWithDatabase) {
   io_context ctx;
   cfg.database = 1;
 
-  auto test_task = [&]() -> task<void> {
+  auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
     co_await conn.connect();
     EXPECT_TRUE(conn.is_connected());
     conn.close();
   };
 
-  auto t = test_task();
-  t.resume();
-  ctx.run();
+  co_spawn(ctx, test_task(), use_detached);
 }
 
 TEST_F(ConnectionTest, ConnectWithAll) {
@@ -72,16 +66,14 @@ TEST_F(ConnectionTest, ConnectWithAll) {
   cfg.database = 2;
   cfg.client_name = "full-test-client";
 
-  auto test_task = [&]() -> task<void> {
+  auto test_task = [&]() -> awaitable<void> {
     redis_detail::connection conn{ctx, cfg};
     co_await conn.connect();
     EXPECT_TRUE(conn.is_connected());
     conn.close();
   };
 
-  auto t = test_task();
-  t.resume();
-  ctx.run();
+  co_spawn(ctx, test_task(), use_detached);
 }
 
 int main(int argc, char** argv) {

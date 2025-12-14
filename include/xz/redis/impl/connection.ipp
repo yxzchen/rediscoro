@@ -3,6 +3,8 @@
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/node.hpp>
 
+#include <iostream>
+
 namespace xz::redis::detail {
 
 connection::connection(io::io_context& ctx, config cfg)
@@ -21,7 +23,7 @@ connection::~connection() {
   close();
 }
 
-auto connection::connect() -> io::task<void> {
+auto connection::connect() -> io::awaitable<void> {
   // Check if already connected by checking FSM state
   if (fsm_.current_state() == connection_state::ready) {
     co_return;
@@ -51,12 +53,13 @@ auto connection::connect() -> io::task<void> {
 void connection::start_read_loop_if_needed() {
   if (!read_loop_running_) {
     read_loop_running_ = true;
-    read_loop_task_ = read_loop();
-    read_loop_task_->resume();
+    // read_loop_task_ = read_loop();
+    // read_loop_task_->resume();
+    io::co_spawn(ctx_, read_loop(), io::use_detached);
   }
 }
 
-auto connection::read_loop() -> io::task<void> {
+auto connection::read_loop() -> io::awaitable<void> {
   auto gen = parser_.parse();
 
   for (;;) {
@@ -200,75 +203,58 @@ void connection::execute_actions(fsm_output const& actions) {
             // State changed - FSM owns this, connection just observes
             // No action needed here - we could add logging if desired
           } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
-            // Spawn write coroutine directly with ctx_.post for proper scheduling
+            // Spawn write coroutine with co_spawn
             // FSM ensures ordering - co_await in coroutine provides sequential execution
             auto req = build_hello_request();
             auto data = std::string{req.payload()};
             auto self = this;
-            ctx_.post([self, data = std::move(data)]() mutable {
-              auto task = [self, data = std::move(data)]() -> io::task<void> {
-                try {
-                  co_await self->write_data(std::move(data));
-                } catch (std::system_error const& e) {
-                  // Write failed, report to FSM
-                  auto actions = self->fsm_.on_io_error(e.code());
-                  self->execute_actions(actions);
-                }
-              };
-              auto t = task();
-              t.resume();
-            });
+            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
+              try {
+                co_await self->write_data(data);
+              } catch (std::system_error const& e) {
+                auto actions = self->fsm_.on_io_error(e.code());
+                self->execute_actions(actions);
+              }
+            }, io::use_detached);
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
             auto req = build_auth_request();
             auto data = std::string{req.payload()};
             auto self = this;
-            ctx_.post([self, data = std::move(data)]() mutable {
-              auto task = [self, data = std::move(data)]() -> io::task<void> {
-                try {
-                  co_await self->write_data(std::move(data));
-                } catch (std::system_error const& e) {
-                  auto actions = self->fsm_.on_io_error(e.code());
-                  self->execute_actions(actions);
-                }
-              };
-              auto t = task();
-              t.resume();
-            });
+            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
+              try {
+                co_await self->write_data(data);
+              } catch (std::system_error const& e) {
+                auto actions = self->fsm_.on_io_error(e.code());
+                self->execute_actions(actions);
+              }
+            }, io::use_detached);
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
             auto req = build_select_request();
             auto data = std::string{req.payload()};
             auto self = this;
-            ctx_.post([self, data = std::move(data)]() mutable {
-              auto task = [self, data = std::move(data)]() -> io::task<void> {
-                try {
-                  co_await self->write_data(std::move(data));
-                } catch (std::system_error const& e) {
-                  auto actions = self->fsm_.on_io_error(e.code());
-                  self->execute_actions(actions);
-                }
-              };
-              auto t = task();
-              t.resume();
-            });
+            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
+              try {
+                co_await self->write_data(data);
+              } catch (std::system_error const& e) {
+                auto actions = self->fsm_.on_io_error(e.code());
+                self->execute_actions(actions);
+              }
+            }, io::use_detached);
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
             auto req = build_clientname_request();
             auto data = std::string{req.payload()};
             auto self = this;
-            ctx_.post([self, data = std::move(data)]() mutable {
-              auto task = [self, data = std::move(data)]() -> io::task<void> {
-                try {
-                  co_await self->write_data(std::move(data));
-                } catch (std::system_error const& e) {
-                  auto actions = self->fsm_.on_io_error(e.code());
-                  self->execute_actions(actions);
-                }
-              };
-              auto t = task();
-              t.resume();
-            });
+            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
+              try {
+                co_await self->write_data(data);
+              } catch (std::system_error const& e) {
+                auto actions = self->fsm_.on_io_error(e.code());
+                self->execute_actions(actions);
+              }
+            }, io::use_detached);
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
             // Handshake complete
@@ -317,7 +303,7 @@ auto connection::build_clientname_request() -> request {
   return req;
 }
 
-auto connection::write_data(std::string data) -> io::task<void> {
+auto connection::write_data(std::string data) -> io::awaitable<void> {
   co_await io::async_write(socket_, std::span<char const>{data.data(), data.size()}, cfg_.request_timeout);
 }
 
@@ -343,7 +329,7 @@ auto connection::wait_fsm_ready_awaitable::await_resume() -> void {
   }
 }
 
-auto connection::wait_fsm_ready() -> io::task<void> {
+auto connection::wait_fsm_ready() -> io::awaitable<void> {
   co_await wait_fsm_ready_awaitable{this};
 }
 
