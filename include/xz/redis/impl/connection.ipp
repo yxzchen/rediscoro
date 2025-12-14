@@ -205,56 +205,16 @@ void connection::execute_actions(fsm_output const& actions) {
           } else if constexpr (std::is_same_v<T, fsm_action::send_hello>) {
             // Spawn write coroutine with co_spawn
             // FSM ensures ordering - co_await in coroutine provides sequential execution
-            auto req = build_hello_request();
-            auto data = std::string{req.payload()};
-            auto self = this;
-            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
-              try {
-                co_await self->write_data(data);
-              } catch (std::system_error const& e) {
-                auto actions = self->fsm_.on_io_error(e.code());
-                self->execute_actions(actions);
-              }
-            }, io::use_detached);
+            spawn_write_task([this] { return build_hello_request(); });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_auth>) {
-            auto req = build_auth_request();
-            auto data = std::string{req.payload()};
-            auto self = this;
-            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
-              try {
-                co_await self->write_data(data);
-              } catch (std::system_error const& e) {
-                auto actions = self->fsm_.on_io_error(e.code());
-                self->execute_actions(actions);
-              }
-            }, io::use_detached);
+            spawn_write_task([this] { return build_auth_request(); });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_select>) {
-            auto req = build_select_request();
-            auto data = std::string{req.payload()};
-            auto self = this;
-            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
-              try {
-                co_await self->write_data(data);
-              } catch (std::system_error const& e) {
-                auto actions = self->fsm_.on_io_error(e.code());
-                self->execute_actions(actions);
-              }
-            }, io::use_detached);
+            spawn_write_task([this] { return build_select_request(); });
 
           } else if constexpr (std::is_same_v<T, fsm_action::send_clientname>) {
-            auto req = build_clientname_request();
-            auto data = std::string{req.payload()};
-            auto self = this;
-            io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
-              try {
-                co_await self->write_data(data);
-              } catch (std::system_error const& e) {
-                auto actions = self->fsm_.on_io_error(e.code());
-                self->execute_actions(actions);
-              }
-            }, io::use_detached);
+            spawn_write_task([this] { return build_clientname_request(); });
 
           } else if constexpr (std::is_same_v<T, fsm_action::connection_ready>) {
             // Handshake complete

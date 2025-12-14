@@ -134,6 +134,22 @@ class connection {
   void cancel_connect_timer();
   void fail_connection(std::error_code ec);
 
+  // === Refactored write spawner (eliminates code duplication) ===
+  template <typename ReqBuilder>
+  void spawn_write_task(ReqBuilder&& build) {
+    auto req = build();
+    auto data = std::string{req.payload()};
+    auto self = this;
+    io::co_spawn(ctx_, [self, data = std::move(data)]() -> io::awaitable<void> {
+      try {
+        co_await self->write_data(data);
+      } catch (std::system_error const& e) {
+        auto actions = self->fsm_.on_io_error(e.code());
+        self->execute_actions(actions);
+      }
+    }, io::use_detached);
+  }
+
  private:
   // Awaitable for wait_fsm_ready
   // Defined as a nested class to avoid linkage issues with local structs
