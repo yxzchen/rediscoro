@@ -1,8 +1,8 @@
 #pragma once
 
+#include <xz/io/co_spawn.hpp>
 #include <xz/io/io_context.hpp>
 #include <xz/io/tcp_socket.hpp>
-#include <xz/io/co_spawn.hpp>
 #include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/request.hpp>
@@ -97,13 +97,14 @@ class connection {
   void fail(std::error_code ec);
 
  private:
-  io::io_context& ctx_;
+  state state_{state::idle};
   config cfg_;
+  std::error_code error_;
+
+  io::io_context& ctx_;
   io::tcp_socket socket_;
   resp3::parser parser_;
   std::unique_ptr<pipeline> pipeline_{};
-  state state_{state::idle};
-  std::error_code error_;
 };
 
 }  // namespace xz::redis::detail
