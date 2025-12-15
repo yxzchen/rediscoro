@@ -17,6 +17,14 @@ connection::~connection() {
   stop();
 }
 
+auto connection::ensure_pipeline() -> void {
+  if (pipeline_) return;
+
+  // Pipeline is an internal implementation detail: users call connection.execute().
+  pipeline_ = std::make_unique<pipeline>(
+      ctx_, [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); });
+}
+
 auto connection::run() -> io::awaitable<void> {
   if (running_) {
     co_return;
@@ -28,6 +36,8 @@ auto connection::run() -> io::awaitable<void> {
 
   parser_.reset();
   error_ = {};
+
+  ensure_pipeline();
 
   try {
     // TCP connect
@@ -49,6 +59,22 @@ auto connection::run() -> io::awaitable<void> {
     socket_.close();
     throw std::system_error(error_);
   }
+}
+
+auto connection::execute(request const& req, ignore_t const&) -> io::awaitable<void> {
+  if (!running_) {
+    throw std::system_error(io::error::not_connected);
+  }
+  ensure_pipeline();
+  co_await pipeline_->execute(req, std::ignore);
+}
+
+auto connection::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
+  if (!running_) {
+    throw std::system_error(io::error::not_connected);
+  }
+  ensure_pipeline();
+  co_await pipeline_->execute_any(req, std::move(adapter));
 }
 
 auto connection::read_loop() -> io::awaitable<void> {

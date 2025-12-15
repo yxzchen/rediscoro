@@ -3,19 +3,15 @@
 #include <xz/io/co_spawn.hpp>
 #include <xz/io/error.hpp>
 #include <xz/io/io_context.hpp>
-#include <xz/io/tcp_socket.hpp>
-#include <xz/redis/detail/connection.hpp>
 
 namespace xz::redis::detail {
 
-pipeline::pipeline(connection& conn) : conn_{conn} {
-  conn_.set_pipeline(this);
-  io::co_spawn(conn_.get_executor(), pump(), io::use_detached);
+pipeline::pipeline(io::io_context& ex, write_fn_t write_fn) : ex_{ex}, write_fn_{std::move(write_fn)} {
+  io::co_spawn(ex_, pump(), io::use_detached);
 }
 
 pipeline::~pipeline() {
   stopped_ = true;
-  conn_.set_pipeline(nullptr);
   notify_queue();
   if (active_) {
     active_->ec = io::error::operation_aborted;
@@ -68,7 +64,7 @@ auto pipeline::pump() -> io::awaitable<void> {
 
     try {
       // Write request payload (timeout handled by connection).
-      co_await conn_.async_write(*op->req);
+      co_await write_fn_(*op->req);
     } catch (std::system_error const& e) {
       // Terminal for this op; also fan-out as connection-level error.
       op->ec = e.code();
@@ -171,7 +167,7 @@ void pipeline::complete(std::shared_ptr<op_state> const& op) {
 
 void pipeline::resume(std::coroutine_handle<> h) {
   if (!h) return;
-  conn_.get_executor().post([h]() mutable { h.resume(); });
+  ex_.post([h]() mutable { h.resume(); });
 }
 
 }  // namespace xz::redis::detail

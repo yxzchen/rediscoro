@@ -4,12 +4,15 @@
 #include <xz/io/ip.hpp>
 #include <xz/io/tcp_socket.hpp>
 #include <xz/io/co_spawn.hpp>
+#include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/resp3/parser.hpp>
 #include <xz/redis/resp3/node.hpp>
+#include <xz/redis/ignore.hpp>
 
 #include <coroutine>
+#include <memory>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -17,7 +20,7 @@
 
 namespace xz::redis::detail {
 
-class pipeline;
+class pipeline;  // internal: request scheduling / response dispatch
 
 /**
  * @brief Connection handles TCP and RESP parsing
@@ -59,17 +62,29 @@ class connection {
    */
   auto run() -> io::awaitable<void>;
 
+  /// Execute a request and ignore its responses.
+  auto execute(request const& req, ignore_t const& resp = std::ignore) -> io::awaitable<void>;
+
+  /// Execute a request and adapt its responses into `resp`.
+  template <class Response>
+  auto execute(request const& req, Response& resp) -> io::awaitable<void> {
+    // Keep pipeline hidden: compile-time convenience wrapper only.
+    co_await execute_any(req, adapter::any_adapter{resp});
+  }
+
   void stop();
   auto is_running() const -> bool;
   auto error() const -> std::error_code;
 
   auto get_executor() noexcept -> io::io_context& { return ctx_; }
 
-  void set_pipeline(pipeline* p) noexcept { pipeline_ = p; }
+ private:
+  auto ensure_pipeline() -> void;
 
   auto async_write(request const& req) -> io::awaitable<void>;
 
- private:
+  auto execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void>;
+
   auto read_loop() -> io::awaitable<void>;
   void fail(std::error_code ec);
 
@@ -78,7 +93,7 @@ class connection {
   config cfg_;
   io::tcp_socket socket_;
   resp3::parser parser_;
-  pipeline* pipeline_ = nullptr;
+  std::unique_ptr<pipeline> pipeline_{};
   bool running_ = false;
   std::error_code error_;
 };

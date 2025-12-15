@@ -2,7 +2,6 @@
 #include <xz/io/when_all.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/detail/connection.hpp>
-#include <xz/redis/detail/pipeline.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/response.hpp>
 
@@ -27,7 +26,6 @@ class PipelineTest : public ::testing::Test {
 TEST_F(PipelineTest, ExecutePing) {
   io_context ctx;
   redis_detail::connection conn{ctx, cfg};
-  redis_detail::pipeline pipe{conn};
 
   auto task = [&]() -> awaitable<void> {
     co_await conn.run();
@@ -36,7 +34,7 @@ TEST_F(PipelineTest, ExecutePing) {
     req.push("PING");
 
     response<std::string> resp;
-    co_await pipe.execute(req, resp);
+    co_await conn.execute(req, resp);
 
     EXPECT_TRUE(std::get<0>(resp).has_value());
     EXPECT_EQ(std::get<0>(resp).value(), "PONG");
@@ -52,7 +50,6 @@ TEST_F(PipelineTest, ExecutePing) {
 TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
   io_context ctx;
   redis_detail::connection conn{ctx, cfg};
-  redis_detail::pipeline pipe{conn};
 
   response<std::string> pong;
   response<std::string> echo;
@@ -60,13 +57,13 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
   auto t1 = [&]() -> awaitable<void> {
     request req;
     req.push("PING");
-    co_await pipe.execute(req, pong);
+    co_await conn.execute(req, pong);
   };
 
   auto t2 = [&]() -> awaitable<void> {
     request req;
     req.push("ECHO", "hello");
-    co_await pipe.execute(req, echo);
+    co_await conn.execute(req, echo);
   };
 
   auto main_task = [&]() -> awaitable<void> {

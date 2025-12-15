@@ -10,12 +10,11 @@
 #include <coroutine>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <system_error>
 
 namespace xz::redis::detail {
-
-class connection;
 
 /// A simple request scheduler / pipeline.
 ///
@@ -31,7 +30,9 @@ class connection;
 /// - Pipelining multiple in-flight requests (this is strictly sequential)
 class pipeline {
  public:
-  explicit pipeline(connection& conn);
+  using write_fn_t = std::function<io::awaitable<void>(request const&)>;
+
+  pipeline(io::io_context& ex, write_fn_t write_fn);
   ~pipeline();
 
   pipeline(pipeline const&) = delete;
@@ -47,6 +48,10 @@ class pipeline {
   auto execute(request const& req, Response& resp) -> io::awaitable<void> {
     co_await execute_any(req, adapter::any_adapter{resp});
   }
+
+  /// Execute a request and dispatch responses into `adapter`.
+  /// This is the non-template entrypoint used by `connection::execute()`.
+  auto execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void>;
 
   /// Called by `connection` for each parsed RESP message (single-threaded: io_context thread).
   void on_msg(resp3::msg_view const& msg);
@@ -93,7 +98,6 @@ class pipeline {
     void await_resume() const noexcept {}
   };
 
-  auto execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void>;
   auto pump() -> io::awaitable<void>;
 
   void notify_queue();
@@ -101,7 +105,8 @@ class pipeline {
   void resume(std::coroutine_handle<> h);
 
  private:
-  connection& conn_;
+  io::io_context& ex_;
+  write_fn_t write_fn_;
   std::deque<std::shared_ptr<op_state>> queue_{};
   std::shared_ptr<op_state> active_{};
 
