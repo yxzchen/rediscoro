@@ -1,7 +1,7 @@
-#include <xz/io/io_context.hpp>
-#include <xz/io/work_guard.hpp>
 #include <xz/io/co_spawn.hpp>
+#include <xz/io/io_context.hpp>
 #include <xz/io/when_all.hpp>
+#include <xz/io/work_guard.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/connection.hpp>
 #include <xz/redis/request.hpp>
@@ -32,8 +32,6 @@ class PipelineTest : public ::testing::Test {
 TEST_F(PipelineTest, ExecutePing) {
   io_context ctx;
   connection conn{ctx, cfg};
-  
-  auto guard = std::make_shared<work_guard<io_context>>(ctx);
 
   co_spawn(
       ctx,
@@ -49,10 +47,9 @@ TEST_F(PipelineTest, ExecutePing) {
         EXPECT_TRUE(std::get<0>(resp).has_value());
         EXPECT_EQ(std::get<0>(resp).value(), "PONG");
       },
-      [&, guard](std::exception_ptr eptr) mutable {
+      [&](std::exception_ptr eptr) mutable {
         conn.stop();
-        guard.reset();
-        
+
         if (eptr) {
           try {
             std::rethrow_exception(eptr);
@@ -64,7 +61,7 @@ TEST_F(PipelineTest, ExecutePing) {
             ADD_FAILURE() << "Unknown exception";
           }
         }
-        
+
         ctx.stop();
       });
 
@@ -77,8 +74,6 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
 
   response<std::string> pong;
   response<std::string> echo;
-  
-  auto guard = std::make_shared<work_guard<io_context>>(ctx);
 
   auto t1 = [&]() -> awaitable<void> {
     request req;
@@ -99,10 +94,9 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
         // Start both "concurrently" from the caller's perspective; pipeline serializes them.
         co_await when_all(t1(), t2());
       },
-      [&, guard](std::exception_ptr eptr) mutable {
+      [&](std::exception_ptr eptr) mutable {
         conn.stop();
-        guard.reset();
-        
+
         if (eptr) {
           try {
             std::rethrow_exception(eptr);
@@ -114,8 +108,6 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
             ADD_FAILURE() << "Unknown exception";
           }
         }
-        
-        ctx.stop();
       });
 
   ctx.run();

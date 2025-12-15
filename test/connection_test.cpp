@@ -28,7 +28,7 @@ TEST_F(ConnectionTest, RunBasic) {
   connection conn{ctx, cfg};
   
   // Keep io_context alive during the test
-  auto guard = std::make_shared<work_guard<io_context>>(ctx);
+  // auto guard = std::make_shared<work_guard<io_context>>(ctx);
 
   co_spawn(
       ctx,
@@ -36,10 +36,9 @@ TEST_F(ConnectionTest, RunBasic) {
         co_await conn.run();
         EXPECT_TRUE(conn.is_running());
       },
-      [&, guard](std::exception_ptr eptr) mutable {
+      [&](std::exception_ptr eptr) mutable {
         // Cleanup
         conn.stop();
-        guard.reset();  // Release work_guard
         
         // Check for exceptions
         if (eptr) {
