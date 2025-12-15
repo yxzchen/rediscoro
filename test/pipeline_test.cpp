@@ -7,9 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include "test_util.hpp"
+
 using namespace xz::io;
 using namespace xz::redis;
 namespace redis_detail = xz::redis::detail;
+namespace test_util = xz::redis::test_util;
 
 class PipelineTest : public ::testing::Test {
  protected:
@@ -27,7 +30,7 @@ TEST_F(PipelineTest, ExecutePing) {
   io_context ctx;
   redis_detail::connection conn{ctx, cfg};
 
-  auto task = [&]() -> awaitable<void> {
+  auto f = [&]() -> awaitable<void> {
     co_await conn.run();
 
     request req;
@@ -38,13 +41,10 @@ TEST_F(PipelineTest, ExecutePing) {
 
     EXPECT_TRUE(std::get<0>(resp).has_value());
     EXPECT_EQ(std::get<0>(resp).value(), "PONG");
-
-    // Allow ctx.run() to return (read_loop keeps the io_context alive via fd registrations).
-    conn.stop();
   };
 
-  co_spawn(ctx, task(), use_detached);
-  ctx.run();
+  auto res = test_util::run_io(ctx, f, [&]() { conn.stop(); });
+  ASSERT_TRUE(res.ec == std::error_code{} && res.what.empty()) << (res.what.empty() ? "unknown error" : res.what);
 }
 
 TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
@@ -66,15 +66,15 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
     co_await conn.execute(req, echo);
   };
 
-  auto main_task = [&]() -> awaitable<void> {
+  auto f = [&]() -> awaitable<void> {
     co_await conn.run();
     // Start both "concurrently" from the caller's perspective; pipeline serializes them.
     co_await when_all(t1(), t2());
-    conn.stop();
   };
 
-  co_spawn(ctx, main_task(), use_detached);
-  ctx.run();
+  auto res = test_util::run_io(ctx, f, [&]() { conn.stop(); });
+
+  ASSERT_TRUE(res.ec == std::error_code{} && res.what.empty()) << (res.what.empty() ? "unknown error" : res.what);
 
   EXPECT_TRUE(std::get<0>(pong).has_value());
   EXPECT_EQ(std::get<0>(pong).value(), "PONG");
@@ -82,5 +82,3 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
   EXPECT_TRUE(std::get<0>(echo).has_value());
   EXPECT_EQ(std::get<0>(echo).value(), "hello");
 }
-
-

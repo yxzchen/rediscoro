@@ -4,9 +4,12 @@
 
 #include <gtest/gtest.h>
 
+#include "test_util.hpp"
+
 using namespace xz::redis;
 using namespace xz::io;
 namespace redis_detail = xz::redis::detail;
+namespace test_util = xz::redis::test_util;
 
 class ConnectionTest : public ::testing::Test {
  protected:
@@ -25,19 +28,15 @@ class ConnectionTest : public ::testing::Test {
 TEST_F(ConnectionTest, RunBasic) {
   io_context ctx;
 
-  auto test_task = [&]() -> awaitable<void> {
-    redis_detail::connection conn{ctx, cfg};
-    try {
-      co_await conn.run();
-      EXPECT_TRUE(conn.is_running());
-      conn.stop();
-    } catch (const std::exception& e) {
-      ADD_FAILURE() << "Run failed: " << e.what();
-    }
+  redis_detail::connection conn{ctx, cfg};
+
+  auto f = [&]() -> awaitable<void> {
+    co_await conn.run();
+    EXPECT_TRUE(conn.is_running());
   };
 
-  co_spawn(ctx, test_task(), use_detached);
-  ctx.run();
+  auto res = test_util::run_io(ctx, f, [&]() { conn.stop(); });
+  ASSERT_TRUE(res.ec == std::error_code{} && res.what.empty()) << (res.what.empty() ? "unknown error" : res.what);
 }
 
 int main(int argc, char** argv) {
