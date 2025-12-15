@@ -104,10 +104,9 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
   if (!op->ec) {
     op->adapter.on_msg(msg, ec);
     if (ec) {
-      // Adapter conversion/protocol error. We still need to drain remaining replies
-      // for this request to keep the stream aligned.
-      op->ec = ec;
-      op->adapter = adapter::any_adapter{};  // switch to ignore for the rest
+      stop(ec);
+      error_fn_(ec);
+      return;
     }
   }
 

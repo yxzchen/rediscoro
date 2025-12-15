@@ -83,7 +83,7 @@ class pipeline {
       self->queue_waiter_ = h;
       return true;
     }
-    void await_resume() const noexcept {}
+    void await_resume() const noexcept { self->queue_waiter_ = {}; }
   };
 
   struct op_awaiter {
@@ -125,5 +125,3 @@ class pipeline {
 };
 
 }  // namespace xz::redis::detail
-
-
