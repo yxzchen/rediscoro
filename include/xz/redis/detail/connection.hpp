@@ -16,7 +16,6 @@
 #include <optional>
 #include <string>
 #include <system_error>
-#include <vector>
 
 namespace xz::redis::detail {
 
@@ -41,6 +40,14 @@ class pipeline;  // internal: request scheduling / response dispatch
  */
 class connection {
  public:
+  enum class state {
+    idle,
+    connecting,
+    running,
+    stopping,
+    failed,
+  };
+
   connection(io::io_context& ctx, config cfg);
   ~connection();
 
@@ -59,6 +66,9 @@ class connection {
    * Post-condition:
    * - On success: TCP connection established and read loop running
    * - On failure: exception is thrown with error code
+   *
+   * @warning Calling run() more than once is undefined behavior.
+   *          (In debug builds we assert; in release builds behavior is unspecified.)
    */
   auto run() -> io::awaitable<void>;
 
@@ -71,13 +81,15 @@ class connection {
   }
 
   void stop();
-  auto is_running() const -> bool;
+  [[nodiscard]] auto current_state() const noexcept -> state { return state_; }
+  [[nodiscard]] auto is_running() const noexcept -> bool { return state_ == state::running; }
   auto error() const -> std::error_code;
 
   auto get_executor() noexcept -> io::io_context& { return ctx_; }
 
  private:
   auto ensure_pipeline() -> void;
+  void close_transport() noexcept;
 
   auto async_write(request const& req) -> io::awaitable<void>;
 
@@ -92,7 +104,7 @@ class connection {
   io::tcp_socket socket_;
   resp3::parser parser_;
   std::unique_ptr<pipeline> pipeline_{};
-  bool running_ = false;
+  state state_{state::idle};
   std::error_code error_;
 };
 

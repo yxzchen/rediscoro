@@ -2,6 +2,7 @@
 #include <xz/io/tcp_socket.hpp>
 #include <xz/redis/detail/connection.hpp>
 #include <xz/redis/detail/pipeline.hpp>
+#include <xz/redis/detail/assert.hpp>
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/node.hpp>
 
@@ -29,13 +30,14 @@ auto connection::ensure_pipeline() -> void {
 }
 
 auto connection::run() -> io::awaitable<void> {
-  if (running_) {
-    co_return;
+  // By design: run() is not safe to call more than once.
+  REDISXZ_ASSERT(state_ == state::idle || state_ == state::failed, "run() called more than once");
+  if (state_ != state::idle && state_ != state::failed) {
+    throw std::system_error(io::error::operation_failed);
   }
 
-  // Mark running before we suspend on connect to prevent concurrent run() calls
-  // from spawning multiple connect/read loops.
-  running_ = true;
+  // Starting/restarting a connection attempt.
+  state_ = state::connecting;
 
   parser_.reset();
   error_ = {};
@@ -45,25 +47,27 @@ auto connection::run() -> io::awaitable<void> {
     auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
     co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
+    state_ = state::running;
+
     // Start read loop AFTER successful connect
     io::co_spawn(ctx_, read_loop(), io::use_detached);
   } catch (std::system_error const& e) {
     // Ensure the connection can be retried and no resources remain open.
     error_ = e.code();
-    running_ = false;
-    socket_.close();
+    state_ = state::failed;
+    close_transport();
     throw;
   } catch (...) {
     // Normalize unknown failures into an error_code-based exception.
     error_ = io::error::operation_failed;
-    running_ = false;
-    socket_.close();
+    state_ = state::failed;
+    close_transport();
     throw std::system_error(error_);
   }
 }
 
 auto connection::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
-  if (!running_) {
+  if (state_ != state::running) {
     throw std::system_error(io::error::not_connected);
   }
   ensure_pipeline();
@@ -102,14 +106,18 @@ auto connection::read_loop() -> io::awaitable<void> {
     }
   } catch (std::system_error const& e) {
     // Detached read loop: translate termination into connection error state.
-    //
-    // - If stop() already ran, running_ is false and fail() is a no-op.
-    // - If the socket was closed/cancelled, treat as a clean stop.
-    if (e.code() != io::error::operation_aborted) {
-      fail(e.code());
-    } else {
-      stop();
+    auto ec = e.code();
+
+    // Expected shutdown paths:
+    // - user called stop() (state::stopping -> close -> abort)
+    // - connection already transitioned to failed and closed transport
+    if (ec == io::error::operation_aborted || ec == io::error::not_connected) {
+      if (state_ == state::stopping || state_ == state::idle || state_ == state::failed) {
+        co_return;
+      }
     }
+
+    fail(ec);
     co_return;
   } catch (...) {
     fail(io::error::operation_failed);
@@ -118,7 +126,7 @@ auto connection::read_loop() -> io::awaitable<void> {
 }
 
 auto connection::async_write(request const& req) -> io::awaitable<void> {
-  if (!running_) {
+  if (state_ != state::running) {
     throw std::system_error(io::error::not_connected);
   }
 
@@ -127,11 +135,12 @@ auto connection::async_write(request const& req) -> io::awaitable<void> {
 }
 
 void connection::fail(std::error_code ec) {
-  if (!running_) {
+  if (state_ == state::idle || state_ == state::stopping) {
     return;
   }
 
   error_ = ec;
+  state_ = state::failed;
 
   if (pipeline_) {
     pipeline_->on_error(ec);
@@ -140,24 +149,43 @@ void connection::fail(std::error_code ec) {
   // TODO: Add logging here if needed
   // logger_.error("Connection failed: {}", ec.message());
 
-  // Clean up resources
-  stop();
+  // Clean up resources, but keep failed state for observability/reconnect.
+  close_transport();
 }
 
 void connection::stop() {
-  if (running_) {
-    running_ = false;
-    socket_.close();
-    parser_.reset();
+  if (state_ == state::idle) {
+    return;
   }
-}
 
-auto connection::is_running() const -> bool {
-  return running_;
+  // If already failed, don't clobber the real error (e.g. timeout).
+  if (state_ == state::failed) {
+    close_transport();
+    state_ = state::idle;
+    return;
+  }
+
+  state_ = state::stopping;
+  error_ = io::error::operation_aborted;
+
+  if (pipeline_ && !pipeline_->stopped()) {
+    pipeline_->on_error(io::error::operation_aborted);
+  }
+
+  close_transport();
+  state_ = state::idle;
 }
 
 auto connection::error() const -> std::error_code {
   return error_;
+}
+
+void connection::close_transport() noexcept {
+  try {
+    socket_.close();
+  } catch (...) {
+  }
+  parser_.reset();
 }
 
 }  // namespace xz::redis::detail
