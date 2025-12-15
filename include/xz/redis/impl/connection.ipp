@@ -20,17 +20,33 @@ auto connection::run() -> io::awaitable<void> {
     co_return;
   }
 
+  // Mark running before we suspend on connect to prevent concurrent run() calls
+  // from spawning multiple connect/read loops.
+  running_ = true;
+
   parser_.reset();
   error_ = {};
 
-  // TCP connect
-  auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
-  co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
+  try {
+    // TCP connect
+    auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
+    co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
-  running_ = true;
-
-  // Start read loop AFTER successful connect
-  io::co_spawn(ctx_, read_loop(), io::use_detached);
+    // Start read loop AFTER successful connect
+    io::co_spawn(ctx_, read_loop(), io::use_detached);
+  } catch (std::system_error const& e) {
+    // Ensure the connection can be retried and no resources remain open.
+    error_ = e.code();
+    running_ = false;
+    socket_.close();
+    throw;
+  } catch (...) {
+    // Normalize unknown failures into an error_code-based exception.
+    error_ = io::error::operation_failed;
+    running_ = false;
+    socket_.close();
+    throw std::system_error(error_);
+  }
 }
 
 auto connection::read_loop() -> io::awaitable<void> {
