@@ -1,14 +1,13 @@
 #include <xz/io/io_context.hpp>
+#include <xz/io/work_guard.hpp>
+#include <xz/io/co_spawn.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/connection.hpp>
 
 #include <gtest/gtest.h>
 
-#include "test_util.hpp"
-
 using namespace xz::redis;
 using namespace xz::io;
-namespace test_util = xz::redis::test_util;
 
 class ConnectionTest : public ::testing::Test {
  protected:
@@ -26,16 +25,40 @@ class ConnectionTest : public ::testing::Test {
 
 TEST_F(ConnectionTest, RunBasic) {
   io_context ctx;
-
   connection conn{ctx, cfg};
+  
+  // Keep io_context alive during the test
+  auto guard = std::make_shared<work_guard<io_context>>(ctx);
 
-  auto f = [&]() -> awaitable<void> {
-    co_await conn.run();
-    EXPECT_TRUE(conn.is_running());
-  };
+  co_spawn(
+      ctx,
+      [&]() -> awaitable<void> {
+        co_await conn.run();
+        EXPECT_TRUE(conn.is_running());
+      },
+      [&, guard](std::exception_ptr eptr) mutable {
+        // Cleanup
+        conn.stop();
+        guard.reset();  // Release work_guard
+        
+        // Check for exceptions
+        if (eptr) {
+          try {
+            std::rethrow_exception(eptr);
+          } catch (std::system_error const& e) {
+            ADD_FAILURE() << "System error: " << e.what();
+          } catch (std::exception const& e) {
+            ADD_FAILURE() << "Exception: " << e.what();
+          } catch (...) {
+            ADD_FAILURE() << "Unknown exception";
+          }
+        }
+        
+        // Stop io_context to exit the event loop
+        ctx.stop();
+      });
 
-  auto res = test_util::run_io(ctx, f, [&]() { conn.stop(); });
-  ASSERT_TRUE(res.ec == std::error_code{} && res.what.empty()) << (res.what.empty() ? "unknown error" : res.what);
+  ctx.run();
 }
 
 int main(int argc, char** argv) {

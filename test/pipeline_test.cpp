@@ -1,4 +1,6 @@
 #include <xz/io/io_context.hpp>
+#include <xz/io/work_guard.hpp>
+#include <xz/io/co_spawn.hpp>
 #include <xz/io/when_all.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/connection.hpp>
@@ -7,11 +9,8 @@
 
 #include <gtest/gtest.h>
 
-#include "test_util.hpp"
-
 using namespace xz::io;
 using namespace xz::redis;
-namespace test_util = xz::redis::test_util;
 
 class PipelineTest : public ::testing::Test {
  protected:
@@ -33,22 +32,43 @@ class PipelineTest : public ::testing::Test {
 TEST_F(PipelineTest, ExecutePing) {
   io_context ctx;
   connection conn{ctx, cfg};
+  
+  auto guard = std::make_shared<work_guard<io_context>>(ctx);
 
-  auto f = [&]() -> awaitable<void> {
-    co_await conn.run();
+  co_spawn(
+      ctx,
+      [&]() -> awaitable<void> {
+        co_await conn.run();
 
-    request req;
-    req.push("PING");
+        request req;
+        req.push("PING");
 
-    response<std::string> resp;
-    co_await conn.execute(req, resp);
+        response<std::string> resp;
+        co_await conn.execute(req, resp);
 
-    EXPECT_TRUE(std::get<0>(resp).has_value());
-    EXPECT_EQ(std::get<0>(resp).value(), "PONG");
-  };
+        EXPECT_TRUE(std::get<0>(resp).has_value());
+        EXPECT_EQ(std::get<0>(resp).value(), "PONG");
+      },
+      [&, guard](std::exception_ptr eptr) mutable {
+        conn.stop();
+        guard.reset();
+        
+        if (eptr) {
+          try {
+            std::rethrow_exception(eptr);
+          } catch (std::system_error const& e) {
+            ADD_FAILURE() << "System error: " << e.what();
+          } catch (std::exception const& e) {
+            ADD_FAILURE() << "Exception: " << e.what();
+          } catch (...) {
+            ADD_FAILURE() << "Unknown exception";
+          }
+        }
+        
+        ctx.stop();
+      });
 
-  auto res = test_util::run_io(ctx, f, [&]() { conn.stop(); });
-  ASSERT_TRUE(res.ec == std::error_code{} && res.what.empty()) << (res.what.empty() ? "unknown error" : res.what);
+  ctx.run();
 }
 
 TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
@@ -57,6 +77,8 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
 
   response<std::string> pong;
   response<std::string> echo;
+  
+  auto guard = std::make_shared<work_guard<io_context>>(ctx);
 
   auto t1 = [&]() -> awaitable<void> {
     request req;
@@ -70,15 +92,33 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
     co_await conn.execute(req, echo);
   };
 
-  auto f = [&]() -> awaitable<void> {
-    co_await conn.run();
-    // Start both "concurrently" from the caller's perspective; pipeline serializes them.
-    co_await when_all(t1(), t2());
-  };
+  co_spawn(
+      ctx,
+      [&]() -> awaitable<void> {
+        co_await conn.run();
+        // Start both "concurrently" from the caller's perspective; pipeline serializes them.
+        co_await when_all(t1(), t2());
+      },
+      [&, guard](std::exception_ptr eptr) mutable {
+        conn.stop();
+        guard.reset();
+        
+        if (eptr) {
+          try {
+            std::rethrow_exception(eptr);
+          } catch (std::system_error const& e) {
+            ADD_FAILURE() << "System error: " << e.what();
+          } catch (std::exception const& e) {
+            ADD_FAILURE() << "Exception: " << e.what();
+          } catch (...) {
+            ADD_FAILURE() << "Unknown exception";
+          }
+        }
+        
+        ctx.stop();
+      });
 
-  auto res = test_util::run_io(ctx, f, [&]() { conn.stop(); });
-
-  ASSERT_TRUE(res.ec == std::error_code{} && res.what.empty()) << (res.what.empty() ? "unknown error" : res.what);
+  ctx.run();
 
   EXPECT_TRUE(std::get<0>(pong).has_value());
   EXPECT_EQ(std::get<0>(pong).value(), "PONG");
