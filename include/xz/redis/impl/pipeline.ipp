@@ -25,10 +25,6 @@ pipeline::~pipeline() {
   }
 }
 
-auto pipeline::execute(request const& req, ignore_t const&) -> io::awaitable<void> {
-  co_await execute_any(req, adapter::any_adapter{});
-}
-
 auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
   if (stopped_) {
     throw std::system_error(io::error::operation_aborted);

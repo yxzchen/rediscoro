@@ -62,13 +62,11 @@ class connection {
    */
   auto run() -> io::awaitable<void>;
 
-  /// Execute a request and ignore its responses.
-  auto execute(request const& req, ignore_t const& resp = std::ignore) -> io::awaitable<void>;
-
   /// Execute a request and adapt its responses into `resp`.
-  template <class Response>
-  auto execute(request const& req, Response& resp) -> io::awaitable<void> {
-    // Keep pipeline hidden: compile-time convenience wrapper only.
+  ///
+  /// If `resp` is omitted, defaults to `std::ignore` (errors still propagate).
+  template <class Response = ignore_t>
+  auto execute(request const& req, Response& resp = std::ignore) -> io::awaitable<void> {
     co_await execute_any(req, adapter::any_adapter{resp});
   }
 

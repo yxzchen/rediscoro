@@ -83,6 +83,14 @@ template <class>
 struct response_traits;
 
 template <>
+struct response_traits<ignore_t> {
+  using response_type = ignore_t;
+  using adapter_type = ignore;
+
+  static auto adapt(response_type&) noexcept { return ignore{}; }
+};
+
+template <>
 struct response_traits<result<ignore_t>> {
   using response_type = result<ignore_t>;
   using adapter_type = ignore;

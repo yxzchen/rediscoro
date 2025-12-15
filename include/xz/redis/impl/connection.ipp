@@ -61,14 +61,6 @@ auto connection::run() -> io::awaitable<void> {
   }
 }
 
-auto connection::execute(request const& req, ignore_t const&) -> io::awaitable<void> {
-  if (!running_) {
-    throw std::system_error(io::error::not_connected);
-  }
-  ensure_pipeline();
-  co_await pipeline_->execute(req, std::ignore);
-}
-
 auto connection::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
   if (!running_) {
     throw std::system_error(io::error::not_connected);
