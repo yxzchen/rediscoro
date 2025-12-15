@@ -1,5 +1,7 @@
 #include <xz/io/error.hpp>
+#include <xz/io/tcp_socket.hpp>
 #include <xz/redis/detail/connection.hpp>
+#include <xz/redis/detail/pipeline.hpp>
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/node.hpp>
 
@@ -63,12 +65,14 @@ auto connection::read_loop() -> io::awaitable<void> {
 
       // Process all complete messages in buffer
       while (gen.next()) {
-        auto msg_opt = gen.value();
+        auto& msg_opt = gen.value();
         if (!msg_opt) {
           // Parser needs more data
           break;
         }
-        // Messages will be handled by pipeline (to be implemented)
+        if (pipeline_) {
+          pipeline_->on_msg(*msg_opt);
+        }
       }
 
       // Check for parser error
@@ -94,12 +98,25 @@ auto connection::read_loop() -> io::awaitable<void> {
   }
 }
 
+auto connection::async_write(request const& req) -> io::awaitable<void> {
+  if (!running_) {
+    throw std::system_error(io::error::not_connected);
+  }
+
+  auto payload = req.payload();
+  co_await io::async_write(socket_, std::span<char const>{payload.data(), payload.size()}, cfg_.request_timeout);
+}
+
 void connection::fail(std::error_code ec) {
   if (!running_) {
     return;
   }
 
   error_ = ec;
+
+  if (pipeline_) {
+    pipeline_->on_error(ec);
+  }
 
   // TODO: Add logging here if needed
   // logger_.error("Connection failed: {}", ec.message());

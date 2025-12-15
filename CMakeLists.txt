@@ -22,6 +22,9 @@ target_include_directories(redisxz INTERFACE
 # Fetch external dependencies
 include(FetchContent)
 
+# CI / offline-friendly builds: do not try to update FetchContent deps from the network
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+
 FetchContent_Declare(
     ioxz
     GIT_REPOSITORY https://github.com/yxzchen/ioxz.git

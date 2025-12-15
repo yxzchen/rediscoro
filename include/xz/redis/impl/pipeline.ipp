@@ -1,0 +1,179 @@
+#include <xz/redis/detail/pipeline.hpp>
+
+#include <xz/io/co_spawn.hpp>
+#include <xz/io/error.hpp>
+#include <xz/io/io_context.hpp>
+#include <xz/io/tcp_socket.hpp>
+#include <xz/redis/detail/connection.hpp>
+
+namespace xz::redis::detail {
+
+pipeline::pipeline(connection& conn) : conn_{conn} {
+  conn_.set_pipeline(this);
+  io::co_spawn(conn_.get_executor(), pump(), io::use_detached);
+}
+
+pipeline::~pipeline() {
+  stopped_ = true;
+  conn_.set_pipeline(nullptr);
+  notify_queue();
+  if (active_) {
+    active_->ec = io::error::operation_aborted;
+    complete(active_);
+  }
+  while (!queue_.empty()) {
+    auto op = std::move(queue_.front());
+    queue_.pop_front();
+    op->ec = io::error::operation_aborted;
+    complete(op);
+  }
+}
+
+auto pipeline::execute(request const& req, ignore_t const&) -> io::awaitable<void> {
+  co_await execute_any(req, adapter::any_adapter{});
+}
+
+auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
+  if (stopped_) {
+    throw std::system_error(io::error::operation_aborted);
+  }
+
+  auto op = std::make_shared<op_state>();
+  op->req = &req;
+  op->adapter = std::move(adapter);
+  op->remaining = req.expected_responses();
+
+  queue_.push_back(op);
+  notify_queue();
+
+  co_await op_awaiter{this, op, false};
+
+  if (op->ec) {
+    throw std::system_error(op->ec);
+  }
+}
+
+auto pipeline::pump() -> io::awaitable<void> {
+  for (;;) {
+    co_await queue_awaiter{this};
+    if (stopped_) {
+      co_return;
+    }
+
+    // Take next op.
+    auto op = std::move(queue_.front());
+    queue_.pop_front();
+
+    active_ = op;
+
+    try {
+      // Write request payload (timeout handled by connection).
+      co_await conn_.async_write(*op->req);
+    } catch (std::system_error const& e) {
+      // Terminal for this op; also fan-out as connection-level error.
+      op->ec = e.code();
+      complete(op);
+      active_.reset();
+      on_error(e.code());
+      continue;
+    }
+
+    // Requests with 0 expected responses (e.g. SUBSCRIBE) are not supported yet.
+    if (op->remaining == 0) {
+      complete(op);
+      active_.reset();
+      continue;
+    }
+
+    // Wait until on_msg() consumes all expected responses.
+    co_await op_awaiter{this, op, true};
+    active_.reset();
+  }
+}
+
+void pipeline::on_msg(resp3::msg_view const& msg) {
+  if (stopped_) {
+    return;
+  }
+
+  auto op = active_;
+  if (!op) {
+    // No active request: treat as server push / unsolicited message (unsupported for now).
+    return;
+  }
+
+  std::error_code ec{};
+  if (!op->ec) {
+    op->adapter.on_msg(msg, ec);
+    if (ec) {
+      // Adapter conversion/protocol error. We still need to drain remaining replies
+      // for this request to keep the stream aligned.
+      op->ec = ec;
+      op->adapter = adapter::any_adapter{};  // switch to ignore for the rest
+    }
+  }
+
+  if (op->remaining > 0) {
+    --op->remaining;
+  }
+
+  if (op->remaining == 0) {
+    complete(op);
+  }
+}
+
+void pipeline::on_error(std::error_code ec) {
+  if (stopped_) {
+    return;
+  }
+
+  stopped_ = true;
+  notify_queue();
+
+  if (active_ && !active_->done) {
+    active_->ec = ec;
+    complete(active_);
+  }
+
+  while (!queue_.empty()) {
+    auto op = std::move(queue_.front());
+    queue_.pop_front();
+    op->ec = ec;
+    complete(op);
+  }
+}
+
+void pipeline::notify_queue() {
+  if (queue_waiter_) {
+    auto h = queue_waiter_;
+    queue_waiter_ = {};
+    resume(h);
+  }
+}
+
+void pipeline::complete(std::shared_ptr<op_state> const& op) {
+  if (!op || op->done) {
+    return;
+  }
+  op->done = true;
+
+  if (op->waiter_user) {
+    auto h = op->waiter_user;
+    op->waiter_user = {};
+    resume(h);
+  }
+  if (op->waiter_pump) {
+    auto h = op->waiter_pump;
+    op->waiter_pump = {};
+    resume(h);
+  }
+}
+
+void pipeline::resume(std::coroutine_handle<> h) {
+  if (!h) return;
+  conn_.get_executor().post([h]() mutable { h.resume(); });
+}
+
+}  // namespace xz::redis::detail
+
+

@@ -7,6 +7,7 @@
 #include <xz/redis/config.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/resp3/parser.hpp>
+#include <xz/redis/resp3/node.hpp>
 
 #include <coroutine>
 #include <optional>
@@ -15,6 +16,8 @@
 #include <vector>
 
 namespace xz::redis::detail {
+
+class pipeline;
 
 /**
  * @brief Connection handles TCP and RESP parsing
@@ -60,6 +63,12 @@ class connection {
   auto is_running() const -> bool;
   auto error() const -> std::error_code;
 
+  auto get_executor() noexcept -> io::io_context& { return ctx_; }
+
+  void set_pipeline(pipeline* p) noexcept { pipeline_ = p; }
+
+  auto async_write(request const& req) -> io::awaitable<void>;
+
  private:
   auto read_loop() -> io::awaitable<void>;
   void fail(std::error_code ec);
@@ -69,6 +78,7 @@ class connection {
   config cfg_;
   io::tcp_socket socket_;
   resp3::parser parser_;
+  pipeline* pipeline_ = nullptr;
   bool running_ = false;
   std::error_code error_;
 };
