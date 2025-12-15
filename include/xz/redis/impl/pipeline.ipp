@@ -53,12 +53,9 @@ auto pipeline::pump() -> io::awaitable<void> {
       // Write request payload (timeout handled by connection).
       co_await write_fn_(*op->req);
     } catch (std::system_error const& e) {
-      // Terminal for this op; also fan-out as connection-level error.
-      op->ec = e.code();
-      complete(op);
-      active_.reset();
       on_error(e.code());
-      continue;
+      error_fn_(e.code());
+      co_return;
     }
 
     // Requests with 0 expected responses (e.g. SUBSCRIBE) are not supported yet.
@@ -69,28 +66,20 @@ auto pipeline::pump() -> io::awaitable<void> {
     }
 
     // Wait until on_msg() consumes all expected responses, or request timeout fires.
-    if (op->timeout.count() > 0) {
+    if (op->timeout.count() == 0) {
+      co_await op_awaiter{this, op, true};
+    } else {
       io::sleep_operation sleep{ex_, op->timeout};
       auto [idx, _] = co_await io::when_any(wait_active_done(op), sleep.wait());
 
       if (idx == 1) {
-        // Timed out: fail this request and treat as terminal (stream is now misaligned).
-        op->ec = io::error::timeout;
-        complete(op);
-        active_.reset();
-        
-        on_error(op->ec);
-        if (error_fn_) {
-          error_fn_(op->ec);
-        }
-        continue;
+        on_error(io::error::timeout);
+        error_fn_(io::error::timeout);
+        co_return;
       }
 
       // Cancel losing timer so it doesn't keep the io_context alive until expiry.
       sleep.cancel();
-      (void)_;
-    } else {
-      co_await op_awaiter{this, op, true};
     }
     active_.reset();
   }
