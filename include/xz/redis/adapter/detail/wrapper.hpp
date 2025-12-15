@@ -43,6 +43,9 @@ class wrapper<result<T>> {
     REDISXZ_ASSERT(!msg.empty());
     if (set_error_from_resp3(*result_, msg, true)) return;
     impl_.on_msg(result_->value(), msg, ec);
+    if (ec) {
+      *result_ = unexpected(error{msg.at(0).data_type, ec.message()});
+    }
   }
 };
 
@@ -64,6 +67,9 @@ class wrapper<result<std::optional<T>>> {
     if (msg.at(0).data_type == resp3::type3::null) return;
     result_->value().emplace();
     impl_.on_msg(result_->value().value(), msg, ec);
+    if (ec) {
+      *result_ = unexpected(error{msg.at(0).data_type, ec.message()});
+    }
   }
 };
 

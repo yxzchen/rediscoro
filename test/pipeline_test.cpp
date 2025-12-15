@@ -25,7 +25,7 @@ class PipelineTest : public ::testing::Test {
     // cfg.host = "153.3.238.127";
     // cfg.port = 80;
     // cfg.connect_timeout = std::chrono::milliseconds{1000};
-    // cfg.request_timeout = std::chrono::milliseconds{1};
+    // cfg.request_timeout = std::chrono::milliseconds{1000};
   }
 
   config cfg;

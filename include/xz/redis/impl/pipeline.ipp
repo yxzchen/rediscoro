@@ -103,11 +103,6 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
   std::error_code ec{};
   if (!op->ec) {
     op->adapter.on_msg(msg, ec);
-    if (ec) {
-      stop(ec);
-      error_fn_(ec);
-      return;
-    }
   }
 
   if (op->remaining > 0) {
