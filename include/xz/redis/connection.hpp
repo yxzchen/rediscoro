@@ -14,9 +14,11 @@
 #include <string>
 #include <system_error>
 
-namespace xz::redis::detail {
+namespace xz::redis {
 
+namespace detail {
 class pipeline;  // internal: request scheduling / response dispatch
+}
 
 /**
  * @brief Connection handles TCP and RESP parsing
@@ -108,7 +110,7 @@ class connection {
   io::io_context& ctx_;
   io::tcp_socket socket_;
   resp3::parser parser_;
-  std::unique_ptr<pipeline> pipeline_{};
+  std::unique_ptr<detail::pipeline> pipeline_{};
 };
 
-}  // namespace xz::redis::detail
+}  // namespace xz::redis

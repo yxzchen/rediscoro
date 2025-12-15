@@ -1,7 +1,7 @@
 #include <xz/io/io_context.hpp>
 #include <xz/io/when_all.hpp>
 #include <xz/redis/config.hpp>
-#include <xz/redis/detail/connection.hpp>
+#include <xz/redis/connection.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/response.hpp>
 
@@ -11,7 +11,6 @@
 
 using namespace xz::io;
 using namespace xz::redis;
-namespace redis_detail = xz::redis::detail;
 namespace test_util = xz::redis::test_util;
 
 class PipelineTest : public ::testing::Test {
@@ -33,7 +32,7 @@ class PipelineTest : public ::testing::Test {
 
 TEST_F(PipelineTest, ExecutePing) {
   io_context ctx;
-  redis_detail::connection conn{ctx, cfg};
+  connection conn{ctx, cfg};
 
   auto f = [&]() -> awaitable<void> {
     co_await conn.run();
@@ -54,7 +53,7 @@ TEST_F(PipelineTest, ExecutePing) {
 
 TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
   io_context ctx;
-  redis_detail::connection conn{ctx, cfg};
+  connection conn{ctx, cfg};
 
   response<std::string> pong;
   response<std::string> echo;

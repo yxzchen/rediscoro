@@ -1,6 +1,6 @@
 #include <xz/io/io_context.hpp>
 #include <xz/redis/config.hpp>
-#include <xz/redis/detail/connection.hpp>
+#include <xz/redis/connection.hpp>
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,6 @@
 
 using namespace xz::redis;
 using namespace xz::io;
-namespace redis_detail = xz::redis::detail;
 namespace test_util = xz::redis::test_util;
 
 class ConnectionTest : public ::testing::Test {
@@ -28,7 +27,7 @@ class ConnectionTest : public ::testing::Test {
 TEST_F(ConnectionTest, RunBasic) {
   io_context ctx;
 
-  redis_detail::connection conn{ctx, cfg};
+  connection conn{ctx, cfg};
 
   auto f = [&]() -> awaitable<void> {
     co_await conn.run();

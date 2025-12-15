@@ -1,12 +1,12 @@
 #include <xz/io/error.hpp>
 #include <xz/io/tcp_socket.hpp>
 #include <xz/redis/detail/assert.hpp>
-#include <xz/redis/detail/connection.hpp>
+#include <xz/redis/connection.hpp>
 #include <xz/redis/detail/pipeline.hpp>
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/node.hpp>
 
-namespace xz::redis::detail {
+namespace xz::redis {
 
 connection::connection(io::io_context& ctx, config cfg) : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, parser_{} {}
 
@@ -16,7 +16,7 @@ auto connection::ensure_pipeline() -> void {
   if (pipeline_ && !pipeline_->stopped()) return;
 
   // Pipeline is an internal implementation detail: users call connection.execute().
-  pipeline_ = std::make_unique<pipeline>(
+  pipeline_ = std::make_unique<detail::pipeline>(
       ctx_, [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); },
       [this](std::error_code ec) { this->fail(ec); }, cfg_.request_timeout);
 }
@@ -162,4 +162,4 @@ void connection::close_transport() noexcept {
   parser_.reset();
 }
 
-}  // namespace xz::redis::detail
+}  // namespace xz::redis
