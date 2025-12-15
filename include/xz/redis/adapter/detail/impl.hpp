@@ -56,7 +56,7 @@ class general_aggregate {
  public:
   explicit general_aggregate(Result* c = nullptr) : result_(c) {}
 
-  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg) {
     auto& vec = result_->value();
     vec.reserve(vec.size() + msg.size());
     for (auto const& node_view : msg) {

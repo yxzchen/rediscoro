@@ -14,11 +14,11 @@ template <class Result>
 inline bool set_error_from_resp3(Result& result, resp3::msg_view const& msg, bool null_is_error) noexcept {
   auto const& node = msg.at(0);
   if (is_error(node.data_type)) {
-    result = unexpected(error{node.data_type, {std::cbegin(node.value()), std::cend(node.value())}});
+    result = unexpected(error{std::string(node.value())});
     return true;
   }
   if (null_is_error && node.data_type == resp3::type3::null) {
-    result = unexpected(error{node.data_type, {std::cbegin(node.value()), std::cend(node.value())}});
+    result = unexpected(error{std::string(node.value())});
     return true;
   }
   return false;
@@ -46,7 +46,7 @@ class wrapper<result<T>> {
     std::error_code ec;
     impl_.on_msg(result_->value(), msg, ec);
     if (ec) {
-      *result_ = unexpected(error{msg.at(0).data_type, ec.message()});
+      *result_ = unexpected(error{ec.message()});
     }
   }
 };
@@ -72,7 +72,7 @@ class wrapper<result<std::optional<T>>> {
     std::error_code ec;
     impl_.on_msg(result_->value().value(), msg, ec);
     if (ec) {
-      *result_ = unexpected(error{msg.at(0).data_type, ec.message()});
+      *result_ = unexpected(error{ec.message()});
     }
   }
 };
