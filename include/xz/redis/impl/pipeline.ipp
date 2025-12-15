@@ -18,16 +18,7 @@ pipeline::pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn,
 pipeline::~pipeline() {
   stopped_ = true;
   notify_queue();
-  if (active_) {
-    active_->ec = io::error::operation_aborted;
-    complete(active_);
-  }
-  while (!queue_.empty()) {
-    auto op = std::move(queue_.front());
-    queue_.pop_front();
-    op->ec = io::error::operation_aborted;
-    complete(op);
-  }
+  complete_pending(io::error::operation_aborted);
 }
 
 auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
@@ -41,7 +32,7 @@ auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> 
   op->remaining = req.expected_responses();
   op->timeout = request_timeout_;
 
-  queue_.push_back(op);
+  pending_.push_back(op);
   notify_queue();
 
   co_await op_awaiter{this, op, false};
@@ -59,8 +50,8 @@ auto pipeline::pump() -> io::awaitable<void> {
     }
 
     // Take next op.
-    auto op = std::move(queue_.front());
-    queue_.pop_front();
+    auto op = std::move(pending_.front());
+    pending_.pop_front();
 
     active_ = op;
 
@@ -154,18 +145,7 @@ void pipeline::on_error(std::error_code ec) {
 
   stopped_ = true;
   notify_queue();
-
-  if (active_ && !active_->done) {
-    active_->ec = ec;
-    complete(active_);
-  }
-
-  while (!queue_.empty()) {
-    auto op = std::move(queue_.front());
-    queue_.pop_front();
-    op->ec = ec;
-    complete(op);
-  }
+  complete_pending(ec);
 }
 
 void pipeline::on_close() {
@@ -176,16 +156,18 @@ void pipeline::on_close() {
   stopped_ = true;
   notify_queue();
 
-  // Clean shutdown: abort any pending requests, but do NOT invoke error_fn_.
+  complete_pending(io::error::operation_aborted);
+}
+
+void pipeline::complete_pending(std::error_code ec) {
   if (active_ && !active_->done) {
-    active_->ec = io::error::operation_aborted;
+    active_->ec = ec;
     complete(active_);
   }
-
-  while (!queue_.empty()) {
-    auto op = std::move(queue_.front());
-    queue_.pop_front();
-    op->ec = io::error::operation_aborted;
+  while (!pending_.empty()) {
+    auto op = std::move(pending_.front());
+    pending_.pop_front();
+    op->ec = ec;
     complete(op);
   }
 }

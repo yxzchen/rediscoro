@@ -83,7 +83,7 @@ class pipeline {
 
   struct queue_awaiter {
     pipeline* self = nullptr;
-    auto await_ready() const noexcept -> bool { return self->stopped_ || !self->queue_.empty(); }
+    auto await_ready() const noexcept -> bool { return self->stopped_ || !self->pending_.empty(); }
     auto await_suspend(std::coroutine_handle<> h) noexcept -> bool {
       self->queue_waiter_ = h;
       return true;
@@ -115,12 +115,14 @@ class pipeline {
   void complete(std::shared_ptr<op_state> const& op);
   void resume(std::coroutine_handle<> h);
 
+  void complete_pending(std::error_code ec);
+
  private:
   io::io_context& ex_;
   write_fn_t write_fn_;
   error_fn_t error_fn_;
   std::chrono::milliseconds request_timeout_{};
-  std::deque<std::shared_ptr<op_state>> queue_{};
+  std::deque<std::shared_ptr<op_state>> pending_{};
   std::shared_ptr<op_state> active_{};
 
   std::coroutine_handle<> queue_waiter_{};
