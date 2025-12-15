@@ -78,9 +78,8 @@ auto pipeline::pump() -> io::awaitable<void> {
         op->ec = io::error::timeout;
         complete(op);
         active_.reset();
-        if (!stopped_) {
-          on_error(op->ec);
-        }
+        
+        on_error(op->ec);
         if (error_fn_) {
           error_fn_(op->ec);
         }
