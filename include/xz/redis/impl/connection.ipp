@@ -30,9 +30,9 @@ auto connection::ensure_pipeline() -> void {
 }
 
 auto connection::run() -> io::awaitable<void> {
-  // By design: run() is not safe to call more than once.
-  REDISXZ_ASSERT(state_ == state::idle || state_ == state::failed, "run() called more than once");
-  if (state_ != state::idle && state_ != state::failed) {
+  // By design: run() is not safe to call unless we're fully idle.
+  REDISXZ_ASSERT(state_ == state::idle, "run() called while not idle");
+  if (state_ != state::idle) {
     throw std::system_error(io::error::operation_failed);
   }
 
@@ -59,16 +59,12 @@ auto connection::run() -> io::awaitable<void> {
       co_return;
     }
 
-    // Ensure the connection can be retried and no resources remain open.
-    error_ = e.code();
-    state_ = state::failed;
-    close_transport();
+    // Connection attempt failed.
+    fail(e.code());
     throw;
   } catch (...) {
     // Normalize unknown failures into an error_code-based exception.
-    error_ = io::error::operation_failed;
-    state_ = state::failed;
-    close_transport();
+    fail(io::error::operation_failed);
     throw std::system_error(error_);
   }
 }
@@ -119,7 +115,7 @@ auto connection::read_loop() -> io::awaitable<void> {
     // - user called stop() (state::stopping -> close -> abort)
     // - connection already transitioned to failed and closed transport
     if (ec == io::error::operation_aborted || ec == io::error::not_connected) {
-      if (state_ == state::stopping || state_ == state::idle || state_ == state::failed) {
+      if (state_ == state::stopping || state_ == state::idle) {
         co_return;
       }
     }
@@ -147,7 +143,7 @@ void connection::fail(std::error_code ec) {
   }
 
   error_ = ec;
-  state_ = state::failed;
+  state_ = state::stopping;
 
   if (pipeline_) {
     pipeline_->on_error(ec);
@@ -156,19 +152,13 @@ void connection::fail(std::error_code ec) {
   // TODO: Add logging here if needed
   // logger_.error("Connection failed: {}", ec.message());
 
-  // Clean up resources, but keep failed state for observability/reconnect.
+  // Error-stop: close transport and return to idle, keeping error_ for observability/reconnect.
   close_transport();
+  state_ = state::idle;
 }
 
 void connection::stop() {
   if (state_ == state::idle) {
-    return;
-  }
-
-  // If already failed, don't clobber the real error (e.g. timeout).
-  if (state_ == state::failed) {
-    close_transport();
-    state_ = state::idle;
     return;
   }
 

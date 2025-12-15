@@ -45,7 +45,6 @@ class connection {
     connecting,
     running,
     stopping,
-    failed,
   };
 
   connection(io::io_context& ctx, config cfg);
@@ -68,6 +67,7 @@ class connection {
    * - On failure: exception is thrown with error code
    *
    * @warning Calling run() more than once is undefined behavior.
+   *          Concretely: calling run() while not in state::idle is UB.
    *          (In debug builds we assert; in release builds behavior is unspecified.)
    */
   auto run() -> io::awaitable<void>;
