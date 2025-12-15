@@ -7,19 +7,13 @@
 
 namespace xz::redis::detail {
 
-pipeline::pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn, std::chrono::milliseconds request_timeout)
-    : ex_{ex},
-      write_fn_{std::move(write_fn)},
-      error_fn_{std::move(error_fn)},
-      request_timeout_{request_timeout} {
+pipeline::pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn,
+                   std::chrono::milliseconds request_timeout)
+    : ex_{ex}, write_fn_{std::move(write_fn)}, error_fn_{std::move(error_fn)}, request_timeout_{request_timeout} {
   io::co_spawn(ex_, pump(), io::use_detached);
 }
 
-pipeline::~pipeline() {
-  stopped_ = true;
-  notify_queue();
-  complete_pending(io::error::operation_aborted);
-}
+pipeline::~pipeline() { on_close(); }
 
 auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
   if (stopped_) {
@@ -155,7 +149,6 @@ void pipeline::on_close() {
 
   stopped_ = true;
   notify_queue();
-
   complete_pending(io::error::operation_aborted);
 }
 
@@ -204,5 +197,3 @@ void pipeline::resume(std::coroutine_handle<> h) {
 }
 
 }  // namespace xz::redis::detail
-
-

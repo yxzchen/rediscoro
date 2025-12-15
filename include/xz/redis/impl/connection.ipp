@@ -125,8 +125,8 @@ void connection::fail(std::error_code ec) {
     return;
   }
 
-  error_ = ec;
   state_ = state::failed;
+  error_ = ec;
 
   if (pipeline_) {
     pipeline_->on_error(ec);
