@@ -16,9 +16,10 @@ auto connection::ensure_pipeline() -> void {
   if (pipeline_ && !pipeline_->stopped()) return;
 
   // Pipeline is an internal implementation detail: users call connection.execute().
-  pipeline_ = std::make_unique<detail::pipeline>(
+  pipeline_ = std::make_shared<detail::pipeline>(
       ctx_, [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); },
-      [this](std::error_code ec) { this->fail(ec); }, cfg_.request_timeout);
+      [this](std::error_code ec) { this->fail(ec); }, cfg_.request_timeout,
+      0 /* max_inflight (0 = unlimited) */);
 }
 
 auto connection::run() -> io::awaitable<void> {
@@ -41,7 +42,8 @@ auto connection::run() -> io::awaitable<void> {
     state_ = state::running;
 
     // Start read loop AFTER successful connect
-    io::co_spawn(ctx_, read_loop(), io::use_detached);
+    // Use a lambda factory to avoid immediate invocation and ensure proper lifetime management
+    io::co_spawn(ctx_, [this]() { return read_loop(); }, io::use_detached);
   } catch (std::system_error const& e) {
     // Connection attempt failed.
     fail(e.code());

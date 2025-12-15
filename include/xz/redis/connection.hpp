@@ -110,7 +110,7 @@ class connection {
   io::io_context& ctx_;
   io::tcp_socket socket_;
   resp3::parser parser_;
-  std::unique_ptr<detail::pipeline> pipeline_{};
+  std::shared_ptr<detail::pipeline> pipeline_{};
 };
 
 }  // namespace xz::redis

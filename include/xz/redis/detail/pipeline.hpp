@@ -1,7 +1,6 @@
 #pragma once
 
 #include <xz/io/awaitable.hpp>
-#include <xz/io/co_sleep.hpp>
 #include <xz/io/io_context.hpp>
 #include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/detail/assert.hpp>
@@ -19,24 +18,28 @@
 
 namespace xz::redis::detail {
 
-/// A simple request scheduler / pipeline.
+/// A request scheduler / pipeline with FIFO multiplexing.
 ///
 /// Responsibilities:
-/// - Serialize concurrent execute() calls into a single in-order stream.
-/// - Dispatch incoming RESP messages to the active request adapter.
+/// - Write requests in-order to the socket.
+/// - Maintain FIFO inflight queue (responses are FIFO in Redis/RESP).
+/// - Dispatch incoming RESP messages to inflight_.front().
 /// - Resume awaiting coroutines on completion.
 /// - Fan out connection-level errors to all pending requests.
 ///
 /// Non-goals (for now):
 /// - Cancellation tokens
 /// - Pub/Sub push handling
-/// - Pipelining multiple in-flight requests (this is strictly sequential)
-class pipeline {
+class pipeline : public std::enable_shared_from_this<pipeline> {
  public:
   using write_fn_t = std::function<io::awaitable<void>(request const&)>;
   using error_fn_t = std::function<void(std::error_code)>;
 
-  pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn, std::chrono::milliseconds request_timeout);
+  pipeline(io::io_context& ex,
+           write_fn_t write_fn,
+           error_fn_t error_fn,
+           std::chrono::milliseconds request_timeout,
+           std::size_t max_inflight = 0);
   ~pipeline();
 
   pipeline(pipeline const&) = delete;
@@ -68,63 +71,67 @@ class pipeline {
     request const* req = nullptr;
     adapter::any_adapter adapter{};
     std::size_t remaining = 0;
+    bool failed = false;
+
     std::chrono::milliseconds timeout{};
+    io::detail::timer_handle timeout_handle{};
+
     std::error_code ec{};
     bool done = false;
 
-    std::coroutine_handle<> waiter_user{};
-    std::coroutine_handle<> waiter_pump{};
-  };
+    std::coroutine_handle<> waiter{};
+    io::io_context* ex = nullptr;
 
-  struct queue_awaiter {
-    pipeline* self = nullptr;
-    auto await_ready() const noexcept -> bool { return false; }
-    auto await_suspend(std::coroutine_handle<> h) noexcept -> bool {
-      if (self->stopped_ || !self->pending_.empty()) {
-        return false;
+    void finish(std::error_code e = {}) {
+      if (done) return;
+      done = true;
+      if (!ec) ec = e;
+      if (timeout_handle) {
+        ex->cancel_timer(timeout_handle);
+        timeout_handle.reset();
       }
-      self->queue_waiter_ = h;
-      return true;
+      if (waiter) {
+        auto h = waiter;
+        waiter = {};
+        ex->post([h]() mutable { h.resume(); });
+      }
     }
-    void await_resume() const noexcept { self->queue_waiter_ = {}; }
   };
 
   struct op_awaiter {
     pipeline* self = nullptr;
     std::shared_ptr<op_state> op{};
-    bool for_pump = false;
 
     auto await_ready() const noexcept -> bool { return !op || op->done; }
     auto await_suspend(std::coroutine_handle<> h) noexcept -> bool {
-      if (for_pump) {
-        op->waiter_pump = h;
-      } else {
-        op->waiter_user = h;
-      }
+      op->waiter = h;
       return true;
     }
     void await_resume() const noexcept {}
   };
 
-  auto pump() -> io::awaitable<void>;
-  auto wait_active_done(std::shared_ptr<op_state> op) -> io::awaitable<void>;
+  void notify_pump();
+  void pump();
+  void start_write_one(std::shared_ptr<op_state> const& op);
+  void arm_timeout(std::shared_ptr<op_state> const& op);
+  void on_timeout(std::shared_ptr<op_state> const& op);
 
-  void notify_queue();
-  void complete(std::shared_ptr<op_state> const& op);
-  void resume(std::coroutine_handle<> h);
-
-  void complete_pending(std::error_code ec);
+  void stop_impl(std::error_code ec, bool call_error_fn);
+  void finish_all(std::error_code ec);
 
  private:
   io::io_context& ex_;
   write_fn_t write_fn_;
   error_fn_t error_fn_;
   std::chrono::milliseconds request_timeout_{};
-  std::deque<std::shared_ptr<op_state>> pending_{};
-  std::shared_ptr<op_state> active_{};
+  std::size_t max_inflight_ = 0;  // 0 = unlimited
 
-  std::coroutine_handle<> queue_waiter_{};
   bool stopped_ = false;
+  bool writing_ = false;
+  bool pump_scheduled_ = false;
+
+  std::deque<std::shared_ptr<op_state>> pending_{};
+  std::deque<std::shared_ptr<op_state>> inflight_{};
 };
 
 }  // namespace xz::redis::detail

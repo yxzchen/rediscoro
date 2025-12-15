@@ -2,18 +2,24 @@
 
 #include <xz/io/co_spawn.hpp>
 #include <xz/io/error.hpp>
-#include <xz/io/io_context.hpp>
-#include <xz/io/when_any.hpp>
+#include <xz/redis/resp3/type.hpp>
 
 namespace xz::redis::detail {
 
-pipeline::pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn,
-                   std::chrono::milliseconds request_timeout)
-    : ex_{ex}, write_fn_{std::move(write_fn)}, error_fn_{std::move(error_fn)}, request_timeout_{request_timeout} {
-  io::co_spawn(ex_, pump(), io::use_detached);
-}
+pipeline::pipeline(io::io_context& ex,
+                   write_fn_t write_fn,
+                   error_fn_t error_fn,
+                   std::chrono::milliseconds request_timeout,
+                   std::size_t max_inflight)
+    : ex_{ex},
+      write_fn_{std::move(write_fn)},
+      error_fn_{std::move(error_fn)},
+      request_timeout_{request_timeout},
+      max_inflight_{max_inflight} {}
 
-pipeline::~pipeline() { stop(); }
+pipeline::~pipeline() {
+  stop();
+}
 
 auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
   if (stopped_) {
@@ -25,83 +31,44 @@ auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> 
   op->adapter = std::move(adapter);
   op->remaining = req.expected_responses();
   op->timeout = request_timeout_;
+  op->ex = &ex_;
 
   pending_.push_back(op);
-  notify_queue();
+  notify_pump();
 
-  co_await op_awaiter{this, op, false};
+  co_await op_awaiter{this, op};
 
   if (op->ec) {
     throw std::system_error(op->ec);
   }
 }
 
-auto pipeline::pump() -> io::awaitable<void> {
-  for (;;) {
-    co_await queue_awaiter{this};
-    if (stopped_) {
-      co_return;
-    }
-
-    // Take next op.
-    auto op = std::move(pending_.front());
-    pending_.pop_front();
-
-    active_ = op;
-
-    try {
-      // Write request payload (timeout handled by connection).
-      co_await write_fn_(*op->req);
-    } catch (std::system_error const& e) {
-      stop(e.code());
-      error_fn_(e.code());
-      co_return;
-    }
-
-    // Requests with 0 expected responses (e.g. SUBSCRIBE) are not supported yet.
-    if (op->remaining == 0) {
-      complete(op);
-      active_.reset();
-      continue;
-    }
-
-    // Wait until on_msg() consumes all expected responses, or request timeout fires.
-    if (op->timeout.count() == 0) {
-      co_await op_awaiter{this, op, true};
-    } else {
-      io::sleep_operation sleep{ex_, op->timeout};
-      auto [idx, _] = co_await io::when_any(wait_active_done(op), sleep.wait());
-
-      if (idx == 1) {
-        stop(io::error::timeout);
-        error_fn_(io::error::timeout);
-        co_return;
-      }
-
-      // Cancel losing timer so it doesn't keep the io_context alive until expiry.
-      sleep.cancel();
-    }
-    active_.reset();
-  }
-}
-
-auto pipeline::wait_active_done(std::shared_ptr<op_state> op) -> io::awaitable<void> {
-  co_await op_awaiter{this, std::move(op), true};
-}
-
 void pipeline::on_msg(resp3::msg_view const& msg) {
-  if (stopped_) {
+  if (stopped_ || msg.empty()) {
     return;
   }
 
-  auto op = active_;
-  if (!op) {
-    // No active request: treat as server push / unsolicited message (unsupported for now).
+  // Future: push/attribute messages must not be dispatched to inflight FIFO.
+  auto const t = msg.front().data_type;
+  if (t == resp3::type3::push || t == resp3::type3::attribute) {
     return;
   }
 
-  if (!op->ec) {
-    op->adapter.on_msg(msg);
+  if (inflight_.empty()) {
+    // Unsolicited message (unsupported for now).
+    return;
+  }
+
+  auto op = inflight_.front();
+
+  // Adapter throws => response pollution risk => treat as connection error.
+  try {
+    if (!op->failed) {
+      op->adapter.on_msg(msg);
+    }
+  } catch (...) {
+    stop_impl(io::error::operation_failed, true);
+    return;
   }
 
   if (op->remaining > 0) {
@@ -109,62 +76,112 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
   }
 
   if (op->remaining == 0) {
-    complete(op);
+    inflight_.pop_front();
+    op->finish();
+    notify_pump();
   }
 }
 
 void pipeline::stop(std::error_code ec) {
-  if (stopped_) {
-    return;
-  }
-
-  stopped_ = true;
-  notify_queue();
-  complete_pending(ec);
+  stop_impl(ec, false);
 }
 
-void pipeline::complete_pending(std::error_code ec) {
-  if (active_ && !active_->done) {
-    active_->ec = ec;
-    complete(active_);
+void pipeline::notify_pump() {
+  if (stopped_ || pump_scheduled_) return;
+  pump_scheduled_ = true;
+
+  auto self = shared_from_this();
+  ex_.post([self]() mutable {
+    self->pump_scheduled_ = false;
+    self->pump();
+  });
+}
+
+void pipeline::pump() {
+  if (stopped_) return;
+
+  // Only one outstanding write at a time (preserve strict write ordering).
+  if (writing_) return;
+
+  // Respect max_inflight_ (0 = unlimited).
+  if (pending_.empty()) return;
+  if (max_inflight_ != 0 && inflight_.size() >= max_inflight_) return;
+
+  // Move one op to inflight and start its write. This ensures responses will have a FIFO target
+  // even if they arrive immediately after the coroutine yields.
+  auto op = std::move(pending_.front());
+  pending_.pop_front();
+
+  inflight_.push_back(op);
+  arm_timeout(op);
+
+  writing_ = true;
+  start_write_one(op);
+}
+
+void pipeline::start_write_one(std::shared_ptr<op_state> const& op) {
+  auto self = shared_from_this();
+  io::co_spawn(
+      ex_,
+      [self, op]() -> io::awaitable<void> {
+        try {
+          co_await self->write_fn_(*op->req);
+        } catch (std::system_error const& e) {
+          self->stop_impl(e.code(), true);
+          co_return;
+        } catch (...) {
+          self->stop_impl(io::error::operation_failed, true);
+          co_return;
+        }
+
+        self->writing_ = false;
+        self->notify_pump();
+      },
+      io::use_detached);
+}
+
+void pipeline::arm_timeout(std::shared_ptr<op_state> const& op) {
+  if (op->timeout.count() <= 0) return;
+
+  auto self = shared_from_this();
+  op->timeout_handle = ex_.schedule_timer(op->timeout, [self, op]() mutable { self->on_timeout(op); });
+}
+
+void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {
+  if (stopped_ || !op || op->done) return;
+
+  // Timeout while inflight is response-pollution risk => treat as connection error.
+  stop_impl(io::error::timeout, true);
+}
+
+void pipeline::stop_impl(std::error_code ec, bool call_error_fn) {
+  if (stopped_) return;
+  stopped_ = true;
+  writing_ = false;
+
+  finish_all(ec);
+
+  if (call_error_fn && error_fn_) {
+    try {
+      error_fn_(ec);
+    } catch (...) {
+      // best-effort
+    }
+  }
+}
+
+void pipeline::finish_all(std::error_code ec) {
+  // Complete inflight first.
+  while (!inflight_.empty()) {
+    auto op = std::move(inflight_.front());
+    inflight_.pop_front();
+    op->finish(ec);
   }
   while (!pending_.empty()) {
     auto op = std::move(pending_.front());
     pending_.pop_front();
-    op->ec = ec;
-    complete(op);
+    op->finish(ec);
   }
-}
-
-void pipeline::notify_queue() {
-  if (queue_waiter_) {
-    auto h = queue_waiter_;
-    queue_waiter_ = {};
-    resume(h);
-  }
-}
-
-void pipeline::complete(std::shared_ptr<op_state> const& op) {
-  if (!op || op->done) {
-    return;
-  }
-  op->done = true;
-
-  if (op->waiter_user) {
-    auto h = op->waiter_user;
-    op->waiter_user = {};
-    resume(h);
-  }
-  if (op->waiter_pump) {
-    auto h = op->waiter_pump;
-    op->waiter_pump = {};
-    resume(h);
-  }
-}
-
-void pipeline::resume(std::coroutine_handle<> h) {
-  if (!h) return;
-  ex_.post([h]() mutable { h.resume(); });
 }
 
 }  // namespace xz::redis::detail
