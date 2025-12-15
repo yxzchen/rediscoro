@@ -58,6 +58,7 @@ class connection {
 
   void stop();
   auto is_running() const -> bool;
+  auto error() const -> std::error_code;
 
  private:
   auto read_loop() -> io::awaitable<void>;

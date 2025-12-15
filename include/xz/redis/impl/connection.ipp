@@ -36,33 +36,45 @@ auto connection::run() -> io::awaitable<void> {
 auto connection::read_loop() -> io::awaitable<void> {
   auto gen = parser_.parse();
 
-  for (;;) {
-    auto span = parser_.prepare(4096);
-    auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, {});
+  try {
+    for (;;) {
+      auto span = parser_.prepare(4096);
+      auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, {});
 
-    if (n == 0) {
-      // EOF
-      fail(io::error::eof);
-      co_return;
-    }
+      // In ioxz, EOF is surfaced as an exception (std::system_error(error::eof)),
+      // so n==0 should not be observable here.
+      parser_.commit(n);
 
-    parser_.commit(n);
-
-    // Process all complete messages in buffer
-    while (gen.next()) {
-      auto msg_opt = gen.value();
-      if (!msg_opt) {
-        // Parser needs more data
-        break;
+      // Process all complete messages in buffer
+      while (gen.next()) {
+        auto msg_opt = gen.value();
+        if (!msg_opt) {
+          // Parser needs more data
+          break;
+        }
+        // Messages will be handled by pipeline (to be implemented)
       }
-      // Messages will be handled by pipeline (to be implemented)
-    }
 
-    // Check for parser error
-    if (auto ec = parser_.error()) {
-      fail(ec);
-      co_return;
+      // Check for parser error
+      if (auto ec = parser_.error()) {
+        fail(ec);
+        co_return;
+      }
     }
+  } catch (std::system_error const& e) {
+    // Detached read loop: translate termination into connection error state.
+    //
+    // - If stop() already ran, running_ is false and fail() is a no-op.
+    // - If the socket was closed/cancelled, treat as a clean stop.
+    if (e.code() != io::error::operation_aborted) {
+      fail(e.code());
+    } else {
+      stop();
+    }
+    co_return;
+  } catch (...) {
+    fail(io::error::operation_failed);
+    co_return;
   }
 }
 
@@ -90,6 +102,10 @@ void connection::stop() {
 
 auto connection::is_running() const -> bool {
   return running_;
+}
+
+auto connection::error() const -> std::error_code {
+  return error_;
 }
 
 }  // namespace xz::redis::detail
