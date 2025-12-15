@@ -168,6 +168,28 @@ void pipeline::on_error(std::error_code ec) {
   }
 }
 
+void pipeline::on_close() {
+  if (stopped_) {
+    return;
+  }
+
+  stopped_ = true;
+  notify_queue();
+
+  // Clean shutdown: abort any pending requests, but do NOT invoke error_fn_.
+  if (active_ && !active_->done) {
+    active_->ec = io::error::operation_aborted;
+    complete(active_);
+  }
+
+  while (!queue_.empty()) {
+    auto op = std::move(queue_.front());
+    queue_.pop_front();
+    op->ec = io::error::operation_aborted;
+    complete(op);
+  }
+}
+
 void pipeline::notify_queue() {
   if (queue_waiter_) {
     auto h = queue_waiter_;

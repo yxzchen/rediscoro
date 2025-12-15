@@ -52,6 +52,13 @@ auto connection::run() -> io::awaitable<void> {
     // Start read loop AFTER successful connect
     io::co_spawn(ctx_, read_loop(), io::use_detached);
   } catch (std::system_error const& e) {
+    // If the user called stop() while connecting, treat as a clean stop.
+    if (state_ == state::stopping && e.code() == io::error::operation_aborted) {
+      close_transport();
+      state_ = state::idle;
+      co_return;
+    }
+
     // Ensure the connection can be retried and no resources remain open.
     error_ = e.code();
     state_ = state::failed;
@@ -166,10 +173,9 @@ void connection::stop() {
   }
 
   state_ = state::stopping;
-  error_ = io::error::operation_aborted;
 
   if (pipeline_ && !pipeline_->stopped()) {
-    pipeline_->on_error(io::error::operation_aborted);
+    pipeline_->on_close();
   }
 
   close_transport();

@@ -64,6 +64,10 @@ class pipeline {
   /// Called by `connection` on terminal connection failure.
   void on_error(std::error_code ec);
 
+  /// Called by `connection` on clean user-initiated close.
+  /// Pending requests are completed with operation_aborted, but this is not treated as a failure.
+  void on_close();
+
  private:
   struct op_state {
     request const* req = nullptr;
