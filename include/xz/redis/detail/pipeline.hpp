@@ -1,12 +1,15 @@
 #pragma once
 
 #include <xz/io/awaitable.hpp>
+#include <xz/io/co_sleep.hpp>
+#include <xz/io/io_context.hpp>
 #include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/detail/assert.hpp>
 #include <xz/redis/ignore.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/resp3/node.hpp>
 
+#include <chrono>
 #include <coroutine>
 #include <cstddef>
 #include <deque>
@@ -31,8 +34,9 @@ namespace xz::redis::detail {
 class pipeline {
  public:
   using write_fn_t = std::function<io::awaitable<void>(request const&)>;
+  using error_fn_t = std::function<void(std::error_code)>;
 
-  pipeline(io::io_context& ex, write_fn_t write_fn);
+  pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn, std::chrono::milliseconds request_timeout);
   ~pipeline();
 
   pipeline(pipeline const&) = delete;
@@ -65,6 +69,7 @@ class pipeline {
     request const* req = nullptr;
     adapter::any_adapter adapter{};
     std::size_t remaining = 0;
+    std::chrono::milliseconds timeout{};
     std::error_code ec{};
     bool done = false;
 
@@ -100,6 +105,7 @@ class pipeline {
   };
 
   auto pump() -> io::awaitable<void>;
+  auto wait_active_done(std::shared_ptr<op_state> op) -> io::awaitable<void>;
 
   void notify_queue();
   void complete(std::shared_ptr<op_state> const& op);
@@ -108,6 +114,8 @@ class pipeline {
  private:
   io::io_context& ex_;
   write_fn_t write_fn_;
+  error_fn_t error_fn_;
+  std::chrono::milliseconds request_timeout_{};
   std::deque<std::shared_ptr<op_state>> queue_{};
   std::shared_ptr<op_state> active_{};
 

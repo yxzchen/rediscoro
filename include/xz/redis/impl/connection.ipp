@@ -22,7 +22,10 @@ auto connection::ensure_pipeline() -> void {
 
   // Pipeline is an internal implementation detail: users call connection.execute().
   pipeline_ = std::make_unique<pipeline>(
-      ctx_, [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); });
+      ctx_,
+      [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); },
+      [this](std::error_code ec) { this->fail(ec); },
+      cfg_.request_timeout);
 }
 
 auto connection::run() -> io::awaitable<void> {

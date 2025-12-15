@@ -3,10 +3,15 @@
 #include <xz/io/co_spawn.hpp>
 #include <xz/io/error.hpp>
 #include <xz/io/io_context.hpp>
+#include <xz/io/when_any.hpp>
 
 namespace xz::redis::detail {
 
-pipeline::pipeline(io::io_context& ex, write_fn_t write_fn) : ex_{ex}, write_fn_{std::move(write_fn)} {
+pipeline::pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn, std::chrono::milliseconds request_timeout)
+    : ex_{ex},
+      write_fn_{std::move(write_fn)},
+      error_fn_{std::move(error_fn)},
+      request_timeout_{request_timeout} {
   io::co_spawn(ex_, pump(), io::use_detached);
 }
 
@@ -34,6 +39,7 @@ auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> 
   op->req = &req;
   op->adapter = std::move(adapter);
   op->remaining = req.expected_responses();
+  op->timeout = request_timeout_;
 
   queue_.push_back(op);
   notify_queue();
@@ -77,10 +83,37 @@ auto pipeline::pump() -> io::awaitable<void> {
       continue;
     }
 
-    // Wait until on_msg() consumes all expected responses.
-    co_await op_awaiter{this, op, true};
+    // Wait until on_msg() consumes all expected responses, or request timeout fires.
+    if (op->timeout.count() > 0) {
+      io::sleep_operation sleep{ex_, op->timeout};
+      auto [idx, _] = co_await io::when_any(wait_active_done(op), sleep.wait());
+
+      if (idx == 1) {
+        // Timed out: fail this request and treat as terminal (stream is now misaligned).
+        op->ec = io::error::timeout;
+        complete(op);
+        active_.reset();
+        if (!stopped_) {
+          on_error(op->ec);
+        }
+        if (error_fn_) {
+          error_fn_(op->ec);
+        }
+        continue;
+      }
+
+      // Cancel losing timer so it doesn't keep the io_context alive until expiry.
+      sleep.cancel();
+      (void)_;
+    } else {
+      co_await op_awaiter{this, op, true};
+    }
     active_.reset();
   }
+}
+
+auto pipeline::wait_active_done(std::shared_ptr<op_state> op) -> io::awaitable<void> {
+  co_await op_awaiter{this, std::move(op), true};
 }
 
 void pipeline::on_msg(resp3::msg_view const& msg) {
