@@ -18,7 +18,7 @@ connection::~connection() {
 }
 
 auto connection::ensure_pipeline() -> void {
-  if (pipeline_) return;
+  if (pipeline_ && !pipeline_->stopped()) return;
 
   // Pipeline is an internal implementation detail: users call connection.execute().
   pipeline_ = std::make_unique<pipeline>(
@@ -36,8 +36,6 @@ auto connection::run() -> io::awaitable<void> {
 
   parser_.reset();
   error_ = {};
-
-  ensure_pipeline();
 
   try {
     // TCP connect

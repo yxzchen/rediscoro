@@ -40,6 +40,8 @@ class pipeline {
   pipeline(pipeline&&) = delete;
   auto operator=(pipeline&&) -> pipeline& = delete;
 
+  [[nodiscard]] auto stopped() const noexcept -> bool { return stopped_; }
+
   /// Execute a request and adapt responses into `resp`.
   ///
   /// If `resp` is omitted, defaults to `std::ignore` (errors still propagate).
