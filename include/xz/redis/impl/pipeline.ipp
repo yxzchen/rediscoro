@@ -164,7 +164,7 @@ void pipeline::complete(std::shared_ptr<op_state> const& op) {
 
 void pipeline::resume(std::coroutine_handle<> h) {
   if (!h) return;
-  ex_.dispatch([h]() mutable { h.resume(); });
+  ex_.post([h]() mutable { h.resume(); });
 }
 
 }  // namespace xz::redis::detail
