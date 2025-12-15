@@ -35,7 +35,8 @@ auto run_io(xz::io::io_context& ctx, Factory factory, Cleanup cleanup) -> run_re
       [res,
        f = std::move(factory),
        c = std::move(cleanup),
-       g = guard]() mutable -> xz::io::awaitable<void> {
+       g = guard,
+       &ctx]() mutable -> xz::io::awaitable<void> {
         try {
           co_await f();
         } catch (std::system_error const& e) {
@@ -53,6 +54,12 @@ auto run_io(xz::io::io_context& ctx, Factory factory, Cleanup cleanup) -> run_re
         } catch (...) {
           // Don't let cleanup failures mask the original exception.
         }
+        
+        // Release the work guard so io_context can exit
+        g.reset();
+        
+        // Stop the io_context to wake it from any pending wait
+        ctx.stop();
       },
       xz::io::use_detached);
 
