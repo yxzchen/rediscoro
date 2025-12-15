@@ -1,15 +1,12 @@
 #pragma once
 
 #include <xz/io/io_context.hpp>
-#include <xz/io/ip.hpp>
 #include <xz/io/tcp_socket.hpp>
 #include <xz/io/co_spawn.hpp>
 #include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/resp3/parser.hpp>
-#include <xz/redis/resp3/node.hpp>
-#include <xz/redis/ignore.hpp>
 
 #include <coroutine>
 #include <memory>
