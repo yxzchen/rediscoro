@@ -30,9 +30,8 @@ auto connection::ensure_pipeline() -> void {
 }
 
 auto connection::run() -> io::awaitable<void> {
-  // By design: run() is not safe to call unless we're fully idle.
-  REDISXZ_ASSERT(state_ == state::idle, "run() called while not idle");
-  if (state_ != state::idle) {
+  // By design: run() is only valid from stable "not connected" states.
+  if (state_ != state::idle && state_ != state::stopped && state_ != state::failed) {
     throw std::system_error(io::error::operation_failed);
   }
 
@@ -52,13 +51,6 @@ auto connection::run() -> io::awaitable<void> {
     // Start read loop AFTER successful connect
     io::co_spawn(ctx_, read_loop(), io::use_detached);
   } catch (std::system_error const& e) {
-    // If the user called stop() while connecting, treat as a clean stop.
-    if (state_ == state::stopping && e.code() == io::error::operation_aborted) {
-      close_transport();
-      state_ = state::idle;
-      co_return;
-    }
-
     // Connection attempt failed.
     fail(e.code());
     throw;
@@ -112,10 +104,10 @@ auto connection::read_loop() -> io::awaitable<void> {
     auto ec = e.code();
 
     // Expected shutdown paths:
-    // - user called stop() (state::stopping -> close -> abort)
+    // - user called stop() (state::stopped -> close -> abort)
     // - connection already transitioned to failed and closed transport
     if (ec == io::error::operation_aborted || ec == io::error::not_connected) {
-      if (state_ == state::stopping || state_ == state::idle) {
+      if (state_ == state::stopped || state_ == state::idle || state_ == state::failed) {
         co_return;
       }
     }
@@ -138,12 +130,12 @@ auto connection::async_write(request const& req) -> io::awaitable<void> {
 }
 
 void connection::fail(std::error_code ec) {
-  if (state_ == state::idle || state_ == state::stopping) {
+  if (state_ == state::idle || state_ == state::stopped || state_ == state::failed) {
     return;
   }
 
   error_ = ec;
-  state_ = state::stopping;
+  state_ = state::failed;
 
   if (pipeline_) {
     pipeline_->on_error(ec);
@@ -152,24 +144,20 @@ void connection::fail(std::error_code ec) {
   // TODO: Add logging here if needed
   // logger_.error("Connection failed: {}", ec.message());
 
-  // Error-stop: close transport and return to idle, keeping error_ for observability/reconnect.
   close_transport();
-  state_ = state::idle;
 }
 
 void connection::stop() {
-  if (state_ == state::idle) {
+  if (state_ == state::idle || state_ == state::stopped) {
     return;
   }
-
-  state_ = state::stopping;
 
   if (pipeline_ && !pipeline_->stopped()) {
     pipeline_->on_close();
   }
 
   close_transport();
-  state_ = state::idle;
+  state_ = state::stopped;
 }
 
 auto connection::error() const -> std::error_code {
