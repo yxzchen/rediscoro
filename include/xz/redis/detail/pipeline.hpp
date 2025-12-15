@@ -78,8 +78,11 @@ class pipeline {
 
   struct queue_awaiter {
     pipeline* self = nullptr;
-    auto await_ready() const noexcept -> bool { return self->stopped_ || !self->pending_.empty(); }
+    auto await_ready() const noexcept -> bool { return false; }
     auto await_suspend(std::coroutine_handle<> h) noexcept -> bool {
+      if (self->stopped_ || !self->pending_.empty()) {
+        return false;
+      }
       self->queue_waiter_ = h;
       return true;
     }
