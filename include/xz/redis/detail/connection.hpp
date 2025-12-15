@@ -96,6 +96,10 @@ class connection {
   auto read_loop() -> io::awaitable<void>;
   void fail(std::error_code ec);
 
+  [[nodiscard]] auto is_inactive_state() const noexcept -> bool {
+    return state_ == state::idle || state_ == state::stopped || state_ == state::failed;
+  }
+
  private:
   state state_{state::idle};
   config cfg_;

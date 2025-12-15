@@ -23,7 +23,7 @@ auto connection::ensure_pipeline() -> void {
 
 auto connection::run() -> io::awaitable<void> {
   // By design: run() is only valid from stable "not connected" states.
-  if (state_ != state::idle && state_ != state::stopped && state_ != state::failed) {
+  if (!is_inactive_state()) {
     throw std::system_error(io::error::operation_failed);
   }
 
@@ -121,7 +121,7 @@ auto connection::async_write(request const& req) -> io::awaitable<void> {
 }
 
 void connection::fail(std::error_code ec) {
-  if (state_ == state::idle || state_ == state::stopped || state_ == state::failed) {
+  if (is_inactive_state()) {
     return;
   }
 
@@ -139,7 +139,7 @@ void connection::fail(std::error_code ec) {
 }
 
 void connection::stop() {
-  if (state_ == state::idle || state_ == state::stopped || state_ == state::failed) {
+  if (is_inactive_state()) {
     return;
   }
 
