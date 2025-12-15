@@ -39,9 +39,11 @@ class wrapper<result<T>> {
  public:
   explicit wrapper(response_type* p = nullptr) : result_(p) {}
 
-  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg) {
     REDISXZ_ASSERT(!msg.empty());
     if (set_error_from_resp3(*result_, msg, true)) return;
+
+    std::error_code ec;
     impl_.on_msg(result_->value(), msg, ec);
     if (ec) {
       *result_ = unexpected(error{msg.at(0).data_type, ec.message()});
@@ -61,11 +63,13 @@ class wrapper<result<std::optional<T>>> {
  public:
   explicit wrapper(response_type* p = nullptr) : result_(p) {}
 
-  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg) {
     REDISXZ_ASSERT(!msg.empty());
     if (set_error_from_resp3(*result_, msg, false)) return;
     if (msg.at(0).data_type == resp3::type3::null) return;
+
     result_->value().emplace();
+    std::error_code ec;
     impl_.on_msg(result_->value().value(), msg, ec);
     if (ec) {
       *result_ = unexpected(error{msg.at(0).data_type, ec.message()});
