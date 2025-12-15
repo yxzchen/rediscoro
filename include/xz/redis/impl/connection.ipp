@@ -139,7 +139,7 @@ void connection::fail(std::error_code ec) {
 }
 
 void connection::stop() {
-  if (state_ == state::idle || state_ == state::stopped) {
+  if (state_ == state::idle || state_ == state::stopped || state_ == state::failed) {
     return;
   }
 
