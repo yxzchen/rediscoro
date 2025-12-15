@@ -13,7 +13,7 @@ pipeline::pipeline(io::io_context& ex, write_fn_t write_fn, error_fn_t error_fn,
   io::co_spawn(ex_, pump(), io::use_detached);
 }
 
-pipeline::~pipeline() { on_close(); }
+pipeline::~pipeline() { stop(); }
 
 auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
   if (stopped_) {
@@ -53,7 +53,7 @@ auto pipeline::pump() -> io::awaitable<void> {
       // Write request payload (timeout handled by connection).
       co_await write_fn_(*op->req);
     } catch (std::system_error const& e) {
-      on_error(e.code());
+      stop(e.code());
       error_fn_(e.code());
       co_return;
     }
@@ -73,7 +73,7 @@ auto pipeline::pump() -> io::awaitable<void> {
       auto [idx, _] = co_await io::when_any(wait_active_done(op), sleep.wait());
 
       if (idx == 1) {
-        on_error(io::error::timeout);
+        stop(io::error::timeout);
         error_fn_(io::error::timeout);
         co_return;
       }
@@ -120,7 +120,7 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
   }
 }
 
-void pipeline::on_error(std::error_code ec) {
+void pipeline::stop(std::error_code ec) {
   if (stopped_) {
     return;
   }
@@ -128,16 +128,6 @@ void pipeline::on_error(std::error_code ec) {
   stopped_ = true;
   notify_queue();
   complete_pending(ec);
-}
-
-void pipeline::on_close() {
-  if (stopped_) {
-    return;
-  }
-
-  stopped_ = true;
-  notify_queue();
-  complete_pending(io::error::operation_aborted);
 }
 
 void pipeline::complete_pending(std::error_code ec) {

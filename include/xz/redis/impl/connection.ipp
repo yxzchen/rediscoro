@@ -129,7 +129,7 @@ void connection::fail(std::error_code ec) {
   error_ = ec;
 
   if (pipeline_) {
-    pipeline_->on_error(ec);
+    pipeline_->stop(ec);
   }
 
   // TODO: Add logging here if needed
@@ -146,7 +146,7 @@ void connection::stop() {
   state_ = state::stopped;
 
   if (pipeline_ && !pipeline_->stopped()) {
-    pipeline_->on_close();
+    pipeline_->stop();
   }
 
   close_transport();

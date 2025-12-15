@@ -61,12 +61,7 @@ class pipeline {
   /// Called by `connection` for each parsed RESP message (single-threaded: io_context thread).
   void on_msg(resp3::msg_view const& msg);
 
-  /// Called by `connection` on terminal connection failure.
-  void on_error(std::error_code ec);
-
-  /// Called by `connection` on clean user-initiated close.
-  /// Pending requests are completed with operation_aborted, but this is not treated as a failure.
-  void on_close();
+  void stop(std::error_code ec = io::error::operation_aborted);
 
  private:
   struct op_state {
