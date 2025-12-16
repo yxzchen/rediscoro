@@ -19,6 +19,9 @@ class PipelineTest : public ::testing::Test {
     cfg.port = 6379;
     cfg.connect_timeout = std::chrono::milliseconds{1000};
     cfg.request_timeout = std::chrono::milliseconds{1000};
+    // Exercise handshake steps against local Redis.
+    cfg.database = 1;
+    cfg.client_name = std::string{"redisxz-test"};
 
     // cfg.host = "153.3.238.127";
     // cfg.port = 80;

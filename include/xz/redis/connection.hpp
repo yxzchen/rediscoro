@@ -33,7 +33,7 @@ class pipeline;  // internal: request scheduling / response dispatch
  * - All public methods must be called from the same io_context thread
  *
  * Does NOT handle:
- * - Handshake (will be implemented later with pipeline)
+ * - Handshake (HELLO/AUTH/SELECT/SETNAME is performed in run() after connect)
  * - User request queueing (handled by pipeline/scheduler)
  * - Response dispatching (handled by pipeline/scheduler)
  */

@@ -4,6 +4,8 @@
 #include <xz/redis/connection.hpp>
 #include <xz/redis/detail/pipeline.hpp>
 #include <xz/redis/error.hpp>
+#include <xz/redis/adapter/result.hpp>
+#include <xz/redis/response.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 namespace xz::redis {
@@ -45,9 +47,68 @@ auto connection::run() -> io::awaitable<void> {
 
     state_ = state::running;
 
+    // Pipeline is used for handshake and all subsequent requests.
+    ensure_pipeline();
+
     // Start read loop AFTER successful connect
     // Use a lambda factory to avoid immediate invocation and ensure proper lifetime management
     io::co_spawn(ctx_, [this]() { return read_loop(); }, io::use_detached);
+
+    // Handshake (HELLO/AUTH/SELECT/SETNAME), using pipeline and one reusable request.
+    {
+      request req;
+      req.reserve(256);
+
+      // HELLO (optionally AUTH+SETNAME in one RTT).
+      {
+        req.clear();
+
+        auto const proto = (cfg_.version == resp_version::resp3) ? "3" : "2";
+        bool const hello_can_auth = cfg_.username.has_value() && cfg_.password.has_value();
+        bool const hello_can_setname = cfg_.client_name.has_value();
+
+        if (hello_can_auth && hello_can_setname) {
+          req.push("HELLO", proto, "AUTH", *cfg_.username, *cfg_.password, "SETNAME", *cfg_.client_name);
+        } else if (hello_can_auth) {
+          req.push("HELLO", proto, "AUTH", *cfg_.username, *cfg_.password);
+        } else if (hello_can_setname) {
+          req.push("HELLO", proto, "SETNAME", *cfg_.client_name);
+        } else {
+          req.push("HELLO", proto);
+        }
+
+        adapter::result<std::vector<resp3::node>> hello_resp;
+        co_await execute_any(req, adapter::any_adapter{hello_resp});
+        if (!hello_resp.has_value()) {
+          throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
+                                  std::string("HELLO: ") + hello_resp.error().msg);
+        }
+      }
+
+      // AUTH <password> (when username not provided; more compatible than HELLO AUTH default).
+      if (cfg_.password.has_value() && !cfg_.username.has_value()) {
+        req.clear();
+        req.push("AUTH", *cfg_.password);
+        response<std::string> auth_resp;
+        co_await execute(req, auth_resp);
+        if (!std::get<0>(auth_resp).has_value()) {
+          throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
+                                  std::string("AUTH: ") + std::get<0>(auth_resp).error().msg);
+        }
+      }
+
+      // SELECT <db>
+      if (cfg_.database != 0) {
+        req.clear();
+        req.push("SELECT", cfg_.database);
+        response<std::string> sel_resp;
+        co_await execute(req, sel_resp);
+        if (!std::get<0>(sel_resp).has_value()) {
+          throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
+                                  std::string("SELECT: ") + std::get<0>(sel_resp).error().msg);
+        }
+      }
+    }
   } catch (std::system_error const& e) {
     // Connection attempt failed.
     fail(e.code());
