@@ -18,6 +18,18 @@
 
 namespace xz::redis::detail {
 
+using write_fn_t = std::function<io::awaitable<void>(request const&)>;
+using error_fn_t = std::function<void(std::error_code)>;
+
+/// Configuration for `detail::pipeline`.
+struct pipeline_config {
+  io::io_context& ex;
+  write_fn_t write_fn;
+  error_fn_t error_fn;
+  std::chrono::milliseconds request_timeout{};
+  std::size_t max_inflight = 0;  // 0 = unlimited
+};
+
 /// A request scheduler / pipeline with FIFO multiplexing.
 ///
 /// Responsibilities:
@@ -32,14 +44,7 @@ namespace xz::redis::detail {
 /// - Pub/Sub push handling
 class pipeline : public std::enable_shared_from_this<pipeline> {
  public:
-  using write_fn_t = std::function<io::awaitable<void>(request const&)>;
-  using error_fn_t = std::function<void(std::error_code)>;
-
-  pipeline(io::io_context& ex,
-           write_fn_t write_fn,
-           error_fn_t error_fn,
-           std::chrono::milliseconds request_timeout,
-           std::size_t max_inflight = 0);
+  explicit pipeline(pipeline_config const& cfg);
   ~pipeline();
 
   pipeline(pipeline const&) = delete;

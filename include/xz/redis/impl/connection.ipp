@@ -16,10 +16,14 @@ auto connection::ensure_pipeline() -> void {
   if (pipeline_ && !pipeline_->stopped()) return;
 
   // Pipeline is an internal implementation detail: users call connection.execute().
-  pipeline_ = std::make_shared<detail::pipeline>(
-      ctx_, [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); },
-      [this](std::error_code ec) { this->fail(ec); }, cfg_.request_timeout,
-      0 /* max_inflight (0 = unlimited) */);
+  detail::pipeline_config pcfg{
+      .ex = ctx_,
+      .write_fn = [this](request const& req) -> io::awaitable<void> { co_await this->async_write(req); },
+      .error_fn = [this](std::error_code ec) { this->fail(ec); },
+      .request_timeout = cfg_.request_timeout,
+      .max_inflight = 0 /* 0 = unlimited */,
+  };
+  pipeline_ = std::make_shared<detail::pipeline>(std::move(pcfg));
 }
 
 auto connection::run() -> io::awaitable<void> {

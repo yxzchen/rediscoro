@@ -6,16 +6,12 @@
 
 namespace xz::redis::detail {
 
-pipeline::pipeline(io::io_context& ex,
-                   write_fn_t write_fn,
-                   error_fn_t error_fn,
-                   std::chrono::milliseconds request_timeout,
-                   std::size_t max_inflight)
-    : ex_{ex},
-      write_fn_{std::move(write_fn)},
-      error_fn_{std::move(error_fn)},
-      request_timeout_{request_timeout},
-      max_inflight_{max_inflight} {}
+pipeline::pipeline(pipeline_config const& cfg)
+    : ex_{cfg.ex},
+      write_fn_{std::move(cfg.write_fn)},
+      error_fn_{std::move(cfg.error_fn)},
+      request_timeout_{cfg.request_timeout},
+      max_inflight_{cfg.max_inflight} {}
 
 pipeline::~pipeline() {
   stop_impl(io::error::operation_aborted, false);
