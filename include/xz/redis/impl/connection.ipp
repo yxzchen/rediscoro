@@ -47,6 +47,10 @@ auto connection::run() -> io::awaitable<void> {
     auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
     co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
+    // Connected. Mark running before starting read_loop/handshake so internal pipeline executes are allowed.
+    // (run() doesn't complete until handshake is done, so callers still can't issue requests early.)
+    state_ = state::running;
+
     // Pipeline is used for handshake and all subsequent requests.
     ensure_pipeline();
 
@@ -55,8 +59,6 @@ auto connection::run() -> io::awaitable<void> {
     io::co_spawn(ctx_, [this]() { return read_loop(); }, io::use_detached);
 
     co_await handshake();
-
-    state_ = state::running;
   } catch (std::system_error const& e) {
     // Connection attempt failed.
     fail(e.code());
@@ -108,14 +110,10 @@ auto connection::read_loop() -> io::awaitable<void> {
     // Detached read loop: translate termination into connection error state.
     auto ec = e.code();
 
-    // Expected shutdown paths:
-    // - user called stop() (state::stopped -> close -> abort)
-    // - connection already transitioned to failed and closed transport
+    // treat abort/not_connected as teardown signals and just exit.
+    // The lifecycle layer (run()/handshake()/write/pipeline) is responsible for reporting failures via fail().
     if (ec == io::error::operation_aborted || ec == io::error::not_connected) {
-      // If we're no longer running, an abort/not_connected is expected during teardown.
-      if (state_ != state::running) {
-        co_return;
-      }
+      co_return;
     }
 
     fail(ec);
