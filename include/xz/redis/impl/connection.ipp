@@ -1,14 +1,14 @@
 #include <xz/io/error.hpp>
 #include <xz/io/tcp_socket.hpp>
 #include <xz/io/when_all.hpp>
-#include <xz/redis/detail/assert.hpp>
+#include <xz/redis/adapter/result.hpp>
 #include <xz/redis/connection.hpp>
+#include <xz/redis/detail/assert.hpp>
 #include <xz/redis/detail/pipeline.hpp>
 #include <xz/redis/error.hpp>
-#include <xz/redis/adapter/result.hpp>
-#include <xz/redis/response.hpp>
 #include <xz/redis/ignore.hpp>
 #include <xz/redis/resp3/node.hpp>
+#include <xz/redis/response.hpp>
 
 namespace xz::redis {
 
@@ -47,8 +47,6 @@ auto connection::run() -> io::awaitable<void> {
     auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
     co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
 
-    state_ = state::running;
-
     // Pipeline is used for handshake and all subsequent requests.
     ensure_pipeline();
 
@@ -56,71 +54,9 @@ auto connection::run() -> io::awaitable<void> {
     // Use a lambda factory to avoid immediate invocation and ensure proper lifetime management
     io::co_spawn(ctx_, [this]() { return read_loop(); }, io::use_detached);
 
-    // Handshake (HELLO/AUTH/SELECT/CLIENT SETNAME).
-    // Build multiple single-command requests, start them all, then validate each response.
-    {
-      std::vector<request> reqs;
-      std::vector<adapter::result<ignore_t>> resps;
-      std::vector<std::string> ops;
+    co_await handshake();
 
-      // 1) HELLO <2|3>
-      {
-        auto const proto = (cfg_.version == resp_version::resp3) ? 3 : 2;
-        reqs.emplace_back();
-        reqs.back().push("HELLO", proto);
-        resps.emplace_back();
-        ops.emplace_back("HELLO");
-      }
-
-      // 2) AUTH (if either username/password is specified)
-      if (cfg_.username.has_value() || cfg_.password.has_value()) {
-        if (!cfg_.password.has_value()) {
-          throw std::system_error(io::error::operation_failed);
-        }
-        reqs.emplace_back();
-        if (cfg_.username.has_value()) {
-          reqs.back().push("AUTH", *cfg_.username, *cfg_.password);
-        } else {
-          reqs.back().push("AUTH", *cfg_.password);
-        }
-        resps.emplace_back();
-        ops.emplace_back("AUTH");
-      }
-
-      // 3) SELECT <db>
-      if (cfg_.database != 0) {
-        reqs.emplace_back();
-        reqs.back().push("SELECT", cfg_.database);
-        resps.emplace_back();
-        ops.emplace_back("SELECT");
-      }
-
-      // 4) CLIENT SETNAME <name>
-      if (cfg_.client_name.has_value()) {
-        reqs.emplace_back();
-        reqs.back().push("CLIENT", "SETNAME", *cfg_.client_name);
-        resps.emplace_back();
-        ops.emplace_back("CLIENT SETNAME");
-      }
-
-      // Start all handshake commands. We explicitly create awaitables in order so requests are enqueued FIFO.
-      std::vector<io::awaitable<void>> tasks;
-      tasks.reserve(reqs.size());
-      for (std::size_t i = 0; i < reqs.size(); ++i) {
-        tasks.emplace_back(execute(reqs[i], resps[i]));
-      }
-      if (!tasks.empty()) {
-        (void)co_await io::when_all(std::move(tasks));
-      }
-
-      // Validate responses (any server error aborts the connection).
-      for (std::size_t i = 0; i < resps.size(); ++i) {
-        if (!resps[i].has_value()) {
-          throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
-                                  ops[i] + ": " + resps[i].error().msg);
-        }
-      }
-    }
+    state_ = state::running;
   } catch (std::system_error const& e) {
     // Connection attempt failed.
     fail(e.code());
@@ -239,6 +175,70 @@ void connection::close_transport() noexcept {
   } catch (...) {
   }
   parser_.reset();
+}
+
+auto connection::handshake() -> io::awaitable<void> {
+  std::vector<request> reqs;
+  std::vector<adapter::result<ignore_t>> resps;
+  std::vector<std::string> ops;
+
+  // 1) HELLO <2|3>
+  {
+    auto const proto = (cfg_.version == resp_version::resp3) ? 3 : 2;
+    reqs.emplace_back();
+    reqs.back().push("HELLO", proto);
+    resps.emplace_back();
+    ops.emplace_back("HELLO");
+  }
+
+  // 2) AUTH (if either username/password is specified)
+  if (cfg_.username.has_value() || cfg_.password.has_value()) {
+    if (!cfg_.password.has_value()) {
+      throw std::system_error(io::error::operation_failed);
+    }
+    reqs.emplace_back();
+    if (cfg_.username.has_value()) {
+      reqs.back().push("AUTH", *cfg_.username, *cfg_.password);
+    } else {
+      reqs.back().push("AUTH", *cfg_.password);
+    }
+    resps.emplace_back();
+    ops.emplace_back("AUTH");
+  }
+
+  // 3) SELECT <db>
+  if (cfg_.database != 0) {
+    reqs.emplace_back();
+    reqs.back().push("SELECT", cfg_.database);
+    resps.emplace_back();
+    ops.emplace_back("SELECT");
+  }
+
+  // 4) CLIENT SETNAME <name>
+  if (cfg_.client_name.has_value()) {
+    reqs.emplace_back();
+    reqs.back().push("CLIENT", "SETNAME", *cfg_.client_name);
+    resps.emplace_back();
+    ops.emplace_back("CLIENT SETNAME");
+  }
+
+  // Start all handshake commands. We create awaitables in order so requests are enqueued FIFO.
+  std::vector<io::awaitable<void>> tasks;
+  tasks.reserve(reqs.size());
+  for (std::size_t i = 0; i < reqs.size(); ++i) {
+    tasks.emplace_back(execute(reqs[i], resps[i]));
+  }
+  if (!tasks.empty()) {
+    (void)co_await io::when_all(std::move(tasks));
+  }
+
+  // Validate responses (any server error aborts the connection).
+  for (std::size_t i = 0; i < resps.size(); ++i) {
+    if (!resps[i].has_value()) {
+      throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
+                              ops[i] + ": " + resps[i].error().msg);
+    }
+  }
 }
 
 }  // namespace xz::redis

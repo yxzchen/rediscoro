@@ -89,6 +89,7 @@ class connection {
 
  private:
   auto ensure_pipeline() -> void;
+  auto handshake() -> io::awaitable<void>;
   void close_transport() noexcept;
 
   auto async_write(request const& req) -> io::awaitable<void>;
