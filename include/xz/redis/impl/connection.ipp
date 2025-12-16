@@ -111,27 +111,13 @@ auto connection::run() -> io::awaitable<void> {
       }
 
       // Start all handshake commands. We explicitly create awaitables in order so requests are enqueued FIFO.
-      auto const n = reqs.size();
-      if (n == 1) {
-        auto a0 = execute(reqs[0], resps[0]);
-        co_await std::move(a0);
-      } else if (n == 2) {
-        auto a0 = execute(reqs[0], resps[0]);
-        auto a1 = execute(reqs[1], resps[1]);
-        co_await io::when_all(std::move(a0), std::move(a1));
-      } else if (n == 3) {
-        auto a0 = execute(reqs[0], resps[0]);
-        auto a1 = execute(reqs[1], resps[1]);
-        auto a2 = execute(reqs[2], resps[2]);
-        co_await io::when_all(std::move(a0), std::move(a1), std::move(a2));
-      } else if (n == 4) {
-        auto a0 = execute(reqs[0], resps[0]);
-        auto a1 = execute(reqs[1], resps[1]);
-        auto a2 = execute(reqs[2], resps[2]);
-        auto a3 = execute(reqs[3], resps[3]);
-        co_await io::when_all(std::move(a0), std::move(a1), std::move(a2), std::move(a3));
-      } else if (n != 0) {
-        throw std::system_error(io::error::operation_failed);
+      std::vector<io::awaitable<void>> tasks;
+      tasks.reserve(reqs.size());
+      for (std::size_t i = 0; i < reqs.size(); ++i) {
+        tasks.emplace_back(execute(reqs[i], resps[i]));
+      }
+      if (!tasks.empty()) {
+        (void)co_await io::when_all(std::move(tasks));
       }
 
       // Validate responses (any server error aborts the connection).
