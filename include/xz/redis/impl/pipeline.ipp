@@ -118,20 +118,20 @@ void pipeline::start_write_one(std::shared_ptr<op_state> const& op) {
   io::co_spawn(
       ex_,
       [self, op]() -> io::awaitable<void> {
-        try {
-          co_await self->write_fn_(*op->req);
-        } catch (std::system_error const& e) {
-          self->stop_impl(e.code(), true);
-          co_return;
-        } catch (...) {
-          self->stop_impl(io::error::operation_failed, true);
-          co_return;
-        }
+        co_await self->write_fn_(*op->req);
 
         self->writing_ = false;
         self->notify_pump();
       },
-      io::use_detached);
+      [self](std::exception_ptr eptr) {
+        try {
+          if (eptr) std::rethrow_exception(eptr);
+        } catch (std::system_error const& e) {
+          self->stop_impl(e.code(), true);
+        } catch (...) {
+          self->stop_impl(io::error::operation_failed, true);
+        }
+      });
 }
 
 void pipeline::arm_timeout(std::shared_ptr<op_state> const& op) {
