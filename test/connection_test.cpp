@@ -9,6 +9,10 @@
 
 #include "async_test_util.hpp"
 
+#include <map>
+#include <string>
+#include <vector>
+
 using namespace xz::redis;
 using namespace xz::io;
 
@@ -101,9 +105,6 @@ TEST_F(ConnectionTest, HandshakeFailsAgainstHttpServer) {
 TEST_F(ConnectionTest, CommandTimeoutOnBlockingCommand) {
   io_context ctx;
   config c = cfg;
-  c.host = "127.0.0.1";
-  c.port = 6379;
-  c.connect_timeout = std::chrono::milliseconds{1000};
   c.request_timeout = std::chrono::milliseconds{50};
 
   test_util::run_async(ctx, [&]() -> awaitable<void> {
@@ -122,6 +123,166 @@ TEST_F(ConnectionTest, CommandTimeoutOnBlockingCommand) {
       EXPECT_EQ(e.code(), xz::io::error::timeout);
     } catch (...) {
       ADD_FAILURE() << "Expected std::system_error for command timeout";
+    }
+  });
+}
+
+TEST_F(ConnectionTest, ExecuteVariousTypes) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    // Use DB=cfg.database (handshake already SELECTed it); keep keys under a test prefix.
+    std::string const key_counter = "redisxz-test:counter";
+    std::string const key_hash = "redisxz-test:hash";
+    std::string const key_list = "redisxz-test:list";
+
+    // DEL keys (best-effort).
+    {
+      request del;
+      del.push("DEL", key_counter, key_hash, key_list);
+      response<int> del_resp;
+      co_await conn.execute(del, del_resp);
+      (void)del_resp;
+    }
+
+    // INCR -> int
+    {
+      request r;
+      r.push("INCR", key_counter);
+      response<int> out;
+      co_await conn.execute(r, out);
+      if (!std::get<0>(out).has_value()) {
+        ADD_FAILURE() << "INCR failed: " << std::get<0>(out).error().msg;
+        co_return;
+      }
+      EXPECT_GE(std::get<0>(out).value(), 1);
+    }
+
+    // ECHO -> string
+    {
+      request r;
+      r.push("ECHO", "hello");
+      response<std::string> out;
+      co_await conn.execute(r, out);
+      if (!std::get<0>(out).has_value()) {
+        ADD_FAILURE() << "ECHO failed: " << std::get<0>(out).error().msg;
+        co_return;
+      }
+      EXPECT_EQ(std::get<0>(out).value(), "hello");
+    }
+
+    // GET missing -> optional<string> == null
+    {
+      request r;
+      r.push("GET", "redisxz-test:missing-key");
+      response<std::optional<std::string>> out;
+      co_await conn.execute(r, out);
+      if (!std::get<0>(out).has_value()) {
+        ADD_FAILURE() << "GET failed: " << std::get<0>(out).error().msg;
+        co_return;
+      }
+      EXPECT_FALSE(std::get<0>(out).value().has_value());
+    }
+
+    // HSET + HGETALL -> map<string,string> (RESP3 map)
+    {
+      request r1;
+      r1.push("HSET", key_hash, "field", "value");
+      response<int> hset;
+      co_await conn.execute(r1, hset);
+      if (!std::get<0>(hset).has_value()) {
+        ADD_FAILURE() << "HSET failed: " << std::get<0>(hset).error().msg;
+        co_return;
+      }
+
+      request r2;
+      r2.push("HGETALL", key_hash);
+      response<std::map<std::string, std::string>> hgetall;
+      co_await conn.execute(r2, hgetall);
+      if (!std::get<0>(hgetall).has_value()) {
+        ADD_FAILURE() << "HGETALL failed: " << std::get<0>(hgetall).error().msg;
+        co_return;
+      }
+      EXPECT_EQ(std::get<0>(hgetall).value().at("field"), "value");
+    }
+
+    // RPUSH + LRANGE -> vector<string>
+    {
+      request r1;
+      r1.push("RPUSH", key_list, "a", "b", "c");
+      response<int> rpush;
+      co_await conn.execute(r1, rpush);
+      if (!std::get<0>(rpush).has_value()) {
+        ADD_FAILURE() << "RPUSH failed: " << std::get<0>(rpush).error().msg;
+        co_return;
+      }
+
+      request r2;
+      r2.push("LRANGE", key_list, "0", "-1");
+      response<std::vector<std::string>> lrange;
+      co_await conn.execute(r2, lrange);
+      if (!std::get<0>(lrange).has_value()) {
+        ADD_FAILURE() << "LRANGE failed: " << std::get<0>(lrange).error().msg;
+        co_return;
+      }
+      auto const& v = std::get<0>(lrange).value();
+      if (v.size() != 3u) {
+        ADD_FAILURE() << "LRANGE returned unexpected size: " << v.size();
+        co_return;
+      }
+      EXPECT_EQ(v[0], "a");
+      EXPECT_EQ(v[1], "b");
+      EXPECT_EQ(v[2], "c");
+    }
+  });
+}
+
+TEST_F(ConnectionTest, ServerErrorAndTypeMismatchAreCapturedInResult) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    // Unknown command -> error captured in ignore_t result (execute does not throw).
+    {
+      request r;
+      r.push("THIS_COMMAND_DOES_NOT_EXIST");
+      response<ignore_t> out;
+      co_await conn.execute(r, out);
+      EXPECT_FALSE(std::get<0>(out).has_value());
+      EXPECT_FALSE(std::get<0>(out).error().msg.empty());
+    }
+
+    // Type mismatch: ECHO returns string, parse as int => error in result.
+    {
+      request r;
+      r.push("ECHO", "not-a-number");
+      response<int> out;
+      co_await conn.execute(r, out);
+      EXPECT_FALSE(std::get<0>(out).has_value());
+      EXPECT_FALSE(std::get<0>(out).error().msg.empty());
+    }
+  });
+}
+
+TEST_F(ConnectionTest, HandshakeFailsWithInvalidDatabase) {
+  io_context ctx;
+  config c = cfg;
+  c.database = 9999;  // out of range on default Redis
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, c};
+    try {
+      co_await conn.run();
+      ADD_FAILURE() << "Expected SELECT failure for invalid DB, but run() succeeded";
+    } catch (std::system_error const&) {
+      // Expected: handshake SELECT should fail.
+    } catch (...) {
+      ADD_FAILURE() << "Expected std::system_error for invalid DB";
     }
   });
 }
