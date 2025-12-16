@@ -88,8 +88,8 @@ enum class error {
   /// Timeout while writing data to the server.
   write_timeout,
 
-  /// RESP3 protocol error.
-  resp3_protocol,
+  // Handshake error.
+  handshake_error,
 };
 
 /**

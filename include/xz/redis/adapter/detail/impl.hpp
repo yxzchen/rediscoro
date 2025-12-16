@@ -2,6 +2,7 @@
 
 #include <xz/redis/adapter/detail/convert.hpp>
 #include <xz/redis/error.hpp>
+#include <xz/redis/ignore.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 #include <array>
@@ -81,6 +82,10 @@ class simple_impl {
 
     from_bulk(result, msg.front(), ec);
   }
+};
+
+struct ignore_impl {
+  void on_msg(ignore_t& result, resp3::msg_view const& msg, std::error_code& ec) {}
 };
 
 template <class Result>
@@ -227,6 +232,11 @@ struct list_impl {
 template <class T>
 struct impl_map {
   using type = simple_impl<T>;
+};
+
+template <>
+struct impl_map<ignore_t> {
+  using type = ignore_impl;
 };
 
 template <class Key, class Compare, class Allocator>

@@ -50,8 +50,8 @@ struct error_category_impl : std::error_category {
                "buffer.";
       case error::write_timeout:
         return "Timeout while writing data to the server.";
-      case error::resp3_protocol:
-        return "RESP3 protocol error.";
+      case error::handshake_error:
+        return "Handshake error.";
       default: REDISXZ_ASSERT(false); return "redisxz error.";
     }
     // clang-format on

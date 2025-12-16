@@ -94,13 +94,13 @@ class vector_adapter {
 template <class>
 struct response_traits;
 
-template <>
-struct response_traits<result<ignore_t>> {
-  using response_type = result<ignore_t>;
-  using adapter_type = ignore;
+// template <>
+// struct response_traits<result<ignore_t>> {
+//   using response_type = result<ignore_t>;
+//   using adapter_type = ignore;
 
-  static auto adapt(response_type& r) noexcept { return ignore{&r}; }
-};
+//   static auto adapt(response_type& r) noexcept { return adapter_type{&r}; }
+// };
 
 template <class String, class Allocator>
 struct response_traits<result<std::vector<resp3::basic_node<String>, Allocator>>> {

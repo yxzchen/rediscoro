@@ -176,62 +176,55 @@ void connection::close_transport() noexcept {
 }
 
 auto connection::handshake() -> io::awaitable<void> {
-  std::vector<request> reqs;
-  std::vector<adapter::result<ignore_t>> resps;
+  request req;
+  req.reserve(256);
   std::vector<std::string> ops;
+  ops.reserve(4);
+
+  // Build a single multi-command request; replies will be FIFO and parsed into `dynamic_response`.
 
   // 1) HELLO <2|3>
   {
     auto const proto = (cfg_.version == resp_version::resp3) ? 3 : 2;
-    reqs.emplace_back();
-    reqs.back().push("HELLO", proto);
-    resps.emplace_back();
+    req.push("HELLO", proto);
     ops.emplace_back("HELLO");
   }
 
   // 2) AUTH (if either username/password is specified)
   if (cfg_.username.has_value() || cfg_.password.has_value()) {
-    reqs.emplace_back();
     if (cfg_.username.has_value()) {
-      reqs.back().push("AUTH", *cfg_.username, *cfg_.password);
+      req.push("AUTH", *cfg_.username, *cfg_.password);
     } else {
-      reqs.back().push("AUTH", *cfg_.password);
+      req.push("AUTH", *cfg_.password);
     }
-    resps.emplace_back();
     ops.emplace_back("AUTH");
   }
 
-  // 3) SELECT <db>
-  if (cfg_.database != 0) {
-    reqs.emplace_back();
-    reqs.back().push("SELECT", cfg_.database);
-    resps.emplace_back();
-    ops.emplace_back("SELECT");
-  }
-
-  // 4) CLIENT SETNAME <name>
+  // 3) CLIENT SETNAME <name>
   if (cfg_.client_name.has_value()) {
-    reqs.emplace_back();
-    reqs.back().push("CLIENT", "SETNAME", *cfg_.client_name);
-    resps.emplace_back();
+    req.push("CLIENT", "SETNAME", *cfg_.client_name);
     ops.emplace_back("CLIENT SETNAME");
   }
 
-  // Start all handshake commands. We create awaitables in order so requests are enqueued FIFO.
-  std::vector<io::awaitable<void>> tasks;
-  tasks.reserve(reqs.size());
-  for (std::size_t i = 0; i < reqs.size(); ++i) {
-    tasks.emplace_back(execute(reqs[i], resps[i]));
-  }
-  if (!tasks.empty()) {
-    (void)co_await io::when_all(std::move(tasks));
+  // 4) SELECT <db>
+  if (cfg_.database != 0) {
+    req.push("SELECT", cfg_.database);
+    ops.emplace_back("SELECT");
   }
 
-  // Validate responses (any server error aborts the connection).
-  for (std::size_t i = 0; i < resps.size(); ++i) {
-    if (!resps[i].has_value()) {
-      throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
-                              ops[i] + ": " + resps[i].error().msg);
+  dynamic_response<ignore_t> resp;
+  co_await execute(req, resp);
+
+  // Must match number of commands we sent.
+  if (resp.size() != req.expected_responses()) {
+    throw std::system_error(io::error::operation_failed);
+  }
+
+  // Validate per-reply results (any server error aborts the connection).
+  for (std::size_t i = 0; i < resp.size(); ++i) {
+    if (!resp[i].has_value()) {
+      auto const& op = (i < ops.size() ? ops[i] : std::string("HANDSHAKE"));
+      throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error), op + ": " + resp[i].error().msg);
     }
   }
 }
