@@ -77,4 +77,32 @@ class wrapper<result<std::optional<T>>> {
   }
 };
 
+template <class T, class Allocator>
+class wrapper<std::vector<result<T>, Allocator>> {
+ public:
+  using response_type = std::vector<result<T>, Allocator>;
+
+ private:
+  response_type* result_;
+  typename impl_map<T>::type impl_;
+
+ public:
+  explicit wrapper(response_type* p = nullptr) : result_(p) {}
+
+  void on_msg(resp3::msg_view const& msg) {
+    REDISXZ_ASSERT(!msg.empty());
+
+    result_->emplace_back();
+    auto& elem = result_->back();
+
+    if (set_error_from_resp3(elem, msg, true)) return;
+
+    std::error_code ec;
+    impl_.on_msg(elem.value(), msg, ec);
+    if (ec) {
+      elem = unexpected(error{ec.message()});
+    }
+  }
+};
+
 }  // namespace xz::redis::adapter::detail
