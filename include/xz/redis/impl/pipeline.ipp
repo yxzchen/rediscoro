@@ -107,7 +107,7 @@ void pipeline::pump() {
   pending_.pop_front();
 
   inflight_.push_back(op);
-  arm_timeout(op);
+  set_timeout(op);
 
   writing_ = true;
   start_write_one(op);
@@ -134,7 +134,7 @@ void pipeline::start_write_one(std::shared_ptr<op_state> const& op) {
       });
 }
 
-void pipeline::arm_timeout(std::shared_ptr<op_state> const& op) {
+void pipeline::set_timeout(std::shared_ptr<op_state> const& op) {
   if (op->timeout.count() <= 0) return;
 
   auto self = shared_from_this();

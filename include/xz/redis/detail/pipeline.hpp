@@ -103,7 +103,7 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
   void notify_pump();
   void pump();
   void start_write_one(std::shared_ptr<op_state> const& op);
-  void arm_timeout(std::shared_ptr<op_state> const& op);
+  void set_timeout(std::shared_ptr<op_state> const& op);
   void on_timeout(std::shared_ptr<op_state> const& op);
 
   void stop_impl(std::error_code ec, bool call_error_fn);
