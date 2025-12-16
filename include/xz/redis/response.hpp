@@ -20,6 +20,6 @@ using generic_response = adapter::result<std::vector<resp3::node>>;
 /// - On each incoming reply message, a new element is appended and parsed into
 /// - After `connection::execute(req, resp)`, `resp.size()` should equal `req.expected_responses()`
 template <class T>
-using vector_response = std::vector<adapter::result<T>>;
+using dynamic_response = std::vector<adapter::result<T>>;
 
 }  // namespace xz::redis

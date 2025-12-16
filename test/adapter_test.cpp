@@ -80,7 +80,7 @@ TEST_F(AdapterTest, ThreeMessages) {
 }
 
 TEST_F(AdapterTest, VectorResponseAppendsPerMessage) {
-  vector_response<int> res;
+  dynamic_response<int> res;
   any_adapter adapter(res);
 
   adapter.on_msg(make_simple_msg(resp3::type3::number, "1"));
@@ -97,7 +97,7 @@ TEST_F(AdapterTest, VectorResponseAppendsPerMessage) {
 }
 
 TEST_F(AdapterTest, VectorResponseStoresPerElementError) {
-  vector_response<int> res;
+  dynamic_response<int> res;
   any_adapter adapter(res);
 
   adapter.on_msg(make_simple_msg(resp3::type3::number, "10"));
