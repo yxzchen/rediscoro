@@ -190,22 +190,22 @@ auto connection::handshake() -> io::awaitable<void> {
     ops.emplace_back("HELLO");
   }
 
-  // 2) AUTH (if either username/password is specified)
-  if (cfg_.username.has_value() || cfg_.password.has_value()) {
-    if (!cfg_.password.has_value()) {
-      throw std::system_error(io::error::operation_failed);
-    }
-    if (cfg_.username.has_value()) {
-      req.push("AUTH", *cfg_.username, *cfg_.password);
+  // 2) AUTH (server-driven errors)
+  // If either username/password is non-empty, send AUTH and let Redis respond with OK/ERR.
+  if (!cfg_.username.empty() || !cfg_.password.empty()) {
+    if (!cfg_.username.empty()) {
+      // AUTH <user> <pass> (pass may be empty => server decides)
+      req.push("AUTH", cfg_.username, cfg_.password);
     } else {
-      req.push("AUTH", *cfg_.password);
+      // AUTH <pass>
+      req.push("AUTH", cfg_.password);
     }
     ops.emplace_back("AUTH");
   }
 
   // 3) CLIENT SETNAME <name>
-  if (cfg_.client_name.has_value()) {
-    req.push("CLIENT", "SETNAME", *cfg_.client_name);
+  if (!cfg_.client_name.empty()) {
+    req.push("CLIENT", "SETNAME", cfg_.client_name);
     ops.emplace_back("CLIENT SETNAME");
   }
 
