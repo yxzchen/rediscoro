@@ -61,8 +61,6 @@ TEST_F(PipelineTest, ExecutePing) {
             ADD_FAILURE() << "Unknown exception";
           }
         }
-
-        ctx.stop();
       });
 
   ctx.run();
