@@ -79,6 +79,37 @@ TEST_F(AdapterTest, ThreeMessages) {
   EXPECT_TRUE(std::get<2>(res).value());
 }
 
+TEST_F(AdapterTest, VectorResponseAppendsPerMessage) {
+  vector_response<int> res;
+  any_adapter adapter(res);
+
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "1"));
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "2"));
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "3"));
+
+  ASSERT_EQ(res.size(), 3u);
+  EXPECT_TRUE(res[0].has_value());
+  EXPECT_TRUE(res[1].has_value());
+  EXPECT_TRUE(res[2].has_value());
+  EXPECT_EQ(res[0].value(), 1);
+  EXPECT_EQ(res[1].value(), 2);
+  EXPECT_EQ(res[2].value(), 3);
+}
+
+TEST_F(AdapterTest, VectorResponseStoresPerElementError) {
+  vector_response<int> res;
+  any_adapter adapter(res);
+
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "10"));
+  adapter.on_msg(make_error_msg(resp3::type3::simple_error, "ERR nope"));
+
+  ASSERT_EQ(res.size(), 2u);
+  EXPECT_TRUE(res[0].has_value());
+  EXPECT_EQ(res[0].value(), 10);
+  EXPECT_FALSE(res[1].has_value());
+  EXPECT_EQ(res[1].error().msg, "ERR nope");
+}
+
 TEST_F(AdapterTest, VectorOfInts) {
   response<std::vector<int>> res;
   any_adapter adapter(res);
