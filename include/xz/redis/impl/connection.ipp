@@ -191,9 +191,6 @@ auto connection::handshake() -> io::awaitable<void> {
 
   // 2) AUTH (if either username/password is specified)
   if (cfg_.username.has_value() || cfg_.password.has_value()) {
-    if (!cfg_.password.has_value()) {
-      throw std::system_error(io::error::operation_failed);
-    }
     reqs.emplace_back();
     if (cfg_.username.has_value()) {
       reqs.back().push("AUTH", *cfg_.username, *cfg_.password);
