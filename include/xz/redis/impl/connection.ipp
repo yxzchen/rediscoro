@@ -1,5 +1,6 @@
 #include <xz/io/error.hpp>
 #include <xz/io/tcp_socket.hpp>
+#include <xz/io/when_all.hpp>
 #include <xz/redis/detail/assert.hpp>
 #include <xz/redis/connection.hpp>
 #include <xz/redis/detail/pipeline.hpp>
@@ -7,7 +8,6 @@
 #include <xz/redis/adapter/result.hpp>
 #include <xz/redis/response.hpp>
 #include <xz/redis/ignore.hpp>
-#include <xz/redis/resp3/type.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 namespace xz::redis {
@@ -56,65 +56,89 @@ auto connection::run() -> io::awaitable<void> {
     // Use a lambda factory to avoid immediate invocation and ensure proper lifetime management
     io::co_spawn(ctx_, [this]() { return read_loop(); }, io::use_detached);
 
-    // Handshake (HELLO/AUTH/SELECT/CLIENT SETNAME), pipelined in ONE request and executed via pipeline.
+    // Handshake (HELLO/AUTH/SELECT/CLIENT SETNAME).
+    // Build multiple single-command requests, start them all, then validate each response.
     {
-      request req;
-      req.reserve(256);
-
-      // Build one pipelined request (multiple commands back-to-back).
+      std::vector<request> reqs;
+      std::vector<adapter::result<ignore_t>> resps;
       std::vector<std::string> ops;
+      reqs.reserve(4);
+      resps.reserve(4);
       ops.reserve(4);
 
       // 1) HELLO <2|3>
-      auto const proto = (cfg_.version == resp_version::resp3) ? "3" : "2";
-      req.push("HELLO", proto);
-      ops.emplace_back("HELLO");
+      {
+        auto const proto = (cfg_.version == resp_version::resp3) ? "3" : "2";
+        reqs.emplace_back();
+        reqs.back().reserve(128);
+        reqs.back().push("HELLO", proto);
+        resps.emplace_back();
+        ops.emplace_back("HELLO");
+      }
 
-      // 2) AUTH
+      // 2) AUTH (if either username/password is specified)
       if (cfg_.username.has_value() || cfg_.password.has_value()) {
         if (!cfg_.password.has_value()) {
           throw std::system_error(io::error::operation_failed);
         }
+        reqs.emplace_back();
+        reqs.back().reserve(128);
         if (cfg_.username.has_value()) {
-          req.push("AUTH", *cfg_.username, *cfg_.password);
+          reqs.back().push("AUTH", *cfg_.username, *cfg_.password);
         } else {
-          req.push("AUTH", *cfg_.password);
+          reqs.back().push("AUTH", *cfg_.password);
         }
+        resps.emplace_back();
         ops.emplace_back("AUTH");
       }
 
       // 3) SELECT <db>
       if (cfg_.database != 0) {
-        req.push("SELECT", cfg_.database);
+        reqs.emplace_back();
+        reqs.back().reserve(128);
+        reqs.back().push("SELECT", cfg_.database);
+        resps.emplace_back();
         ops.emplace_back("SELECT");
       }
 
       // 4) CLIENT SETNAME <name>
       if (cfg_.client_name.has_value()) {
-        req.push("CLIENT", "SETNAME", *cfg_.client_name);
+        reqs.emplace_back();
+        reqs.back().reserve(128);
+        reqs.back().push("CLIENT", "SETNAME", *cfg_.client_name);
+        resps.emplace_back();
         ops.emplace_back("CLIENT SETNAME");
       }
 
-      // Execute the whole setup request and capture per-reply errors.
-      std::vector<adapter::result<ignore_t>> results(ops.size());
-      std::size_t i = 0;
-      auto ad = adapter::any_adapter{
-          [&](resp3::msg_view const& msg) mutable {
-            if (i >= results.size() || msg.empty()) return;
-            auto const& node = msg.front();
-            if (resp3::is_error(node.data_type) || node.data_type == resp3::type3::null) {
-              results[i] = unexpected(adapter::error{std::string(node.value())});
-            }
-            ++i;
-          }};
+      // Start all handshake commands. We explicitly create awaitables in order so requests are enqueued FIFO.
+      auto const n = reqs.size();
+      if (n == 1) {
+        auto a0 = execute(reqs[0], resps[0]);
+        co_await std::move(a0);
+      } else if (n == 2) {
+        auto a0 = execute(reqs[0], resps[0]);
+        auto a1 = execute(reqs[1], resps[1]);
+        co_await io::when_all(std::move(a0), std::move(a1));
+      } else if (n == 3) {
+        auto a0 = execute(reqs[0], resps[0]);
+        auto a1 = execute(reqs[1], resps[1]);
+        auto a2 = execute(reqs[2], resps[2]);
+        co_await io::when_all(std::move(a0), std::move(a1), std::move(a2));
+      } else if (n == 4) {
+        auto a0 = execute(reqs[0], resps[0]);
+        auto a1 = execute(reqs[1], resps[1]);
+        auto a2 = execute(reqs[2], resps[2]);
+        auto a3 = execute(reqs[3], resps[3]);
+        co_await io::when_all(std::move(a0), std::move(a1), std::move(a2), std::move(a3));
+      } else if (n != 0) {
+        throw std::system_error(io::error::operation_failed);
+      }
 
-      co_await execute_any(req, std::move(ad));
-
-      // Validate all replies (any error aborts the connection).
-      for (std::size_t j = 0; j < results.size(); ++j) {
-        if (!results[j].has_value()) {
+      // Validate responses (any server error aborts the connection).
+      for (std::size_t i = 0; i < resps.size(); ++i) {
+        if (!resps[i].has_value()) {
           throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
-                                  ops[j] + ": " + results[j].error().msg);
+                                  ops[i] + ": " + resps[i].error().msg);
         }
       }
     }
