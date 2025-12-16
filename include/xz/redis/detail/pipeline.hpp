@@ -49,16 +49,8 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
 
   [[nodiscard]] auto stopped() const noexcept -> bool { return stopped_; }
 
-  /// Execute a request and adapt responses into `resp`.
-  ///
-  /// If `resp` is omitted, defaults to `std::ignore` (errors still propagate).
-  template <class Response = ignore_t>
-  auto execute(request const& req, Response& resp = std::ignore) -> io::awaitable<void> {
-    co_await execute_any(req, adapter::any_adapter{resp});
-  }
-
   /// Execute a request and dispatch responses into `adapter`.
-  /// This is the non-template entrypoint used by `connection::execute()`.
+  /// This is the non-template entrypoint used by `connection::execute_any()`.
   auto execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void>;
 
   /// Called by `connection` for each parsed RESP message (single-threaded: io_context thread).
@@ -71,7 +63,6 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
     request const* req = nullptr;
     adapter::any_adapter adapter{};
     std::size_t remaining = 0;
-    bool failed = false;
 
     std::chrono::milliseconds timeout{};
     io::detail::timer_handle timeout_handle{};
@@ -99,7 +90,6 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
   };
 
   struct op_awaiter {
-    pipeline* self = nullptr;
     std::shared_ptr<op_state> op{};
 
     auto await_ready() const noexcept -> bool { return !op || op->done; }

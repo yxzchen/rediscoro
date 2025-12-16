@@ -18,7 +18,7 @@ pipeline::pipeline(io::io_context& ex,
       max_inflight_{max_inflight} {}
 
 pipeline::~pipeline() {
-  stop();
+  stop_impl(io::error::operation_aborted, false);
 }
 
 auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
@@ -36,7 +36,7 @@ auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> 
   pending_.push_back(op);
   notify_pump();
 
-  co_await op_awaiter{this, op};
+  co_await op_awaiter{op};
 
   if (op->ec) {
     throw std::system_error(op->ec);
@@ -63,9 +63,7 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
 
   // Adapter throws => response pollution risk => treat as connection error.
   try {
-    if (!op->failed) {
-      op->adapter.on_msg(msg);
-    }
+    op->adapter.on_msg(msg);
   } catch (...) {
     stop_impl(io::error::operation_failed, true);
     return;
@@ -80,10 +78,6 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
     op->finish();
     notify_pump();
   }
-}
-
-void pipeline::stop(std::error_code ec) {
-  stop_impl(ec, false);
 }
 
 void pipeline::notify_pump() {
@@ -152,6 +146,10 @@ void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {
 
   // Timeout while inflight is response-pollution risk => treat as connection error.
   stop_impl(io::error::timeout, true);
+}
+
+void pipeline::stop(std::error_code ec) {
+  stop_impl(ec, false);
 }
 
 void pipeline::stop_impl(std::error_code ec, bool call_error_fn) {
