@@ -62,15 +62,11 @@ auto connection::run() -> io::awaitable<void> {
       std::vector<request> reqs;
       std::vector<adapter::result<ignore_t>> resps;
       std::vector<std::string> ops;
-      reqs.reserve(4);
-      resps.reserve(4);
-      ops.reserve(4);
 
       // 1) HELLO <2|3>
       {
-        auto const proto = (cfg_.version == resp_version::resp3) ? "3" : "2";
+        auto const proto = (cfg_.version == resp_version::resp3) ? 3 : 2;
         reqs.emplace_back();
-        reqs.back().reserve(128);
         reqs.back().push("HELLO", proto);
         resps.emplace_back();
         ops.emplace_back("HELLO");
@@ -82,7 +78,6 @@ auto connection::run() -> io::awaitable<void> {
           throw std::system_error(io::error::operation_failed);
         }
         reqs.emplace_back();
-        reqs.back().reserve(128);
         if (cfg_.username.has_value()) {
           reqs.back().push("AUTH", *cfg_.username, *cfg_.password);
         } else {
@@ -95,7 +90,6 @@ auto connection::run() -> io::awaitable<void> {
       // 3) SELECT <db>
       if (cfg_.database != 0) {
         reqs.emplace_back();
-        reqs.back().reserve(128);
         reqs.back().push("SELECT", cfg_.database);
         resps.emplace_back();
         ops.emplace_back("SELECT");
@@ -104,7 +98,6 @@ auto connection::run() -> io::awaitable<void> {
       // 4) CLIENT SETNAME <name>
       if (cfg_.client_name.has_value()) {
         reqs.emplace_back();
-        reqs.back().reserve(128);
         reqs.back().push("CLIENT", "SETNAME", *cfg_.client_name);
         resps.emplace_back();
         ops.emplace_back("CLIENT SETNAME");
