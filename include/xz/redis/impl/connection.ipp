@@ -6,6 +6,8 @@
 #include <xz/redis/error.hpp>
 #include <xz/redis/adapter/result.hpp>
 #include <xz/redis/response.hpp>
+#include <xz/redis/ignore.hpp>
+#include <xz/redis/resp3/type.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 namespace xz::redis {
@@ -54,58 +56,65 @@ auto connection::run() -> io::awaitable<void> {
     // Use a lambda factory to avoid immediate invocation and ensure proper lifetime management
     io::co_spawn(ctx_, [this]() { return read_loop(); }, io::use_detached);
 
-    // Handshake (HELLO/AUTH/SELECT/SETNAME), using pipeline and one reusable request.
+    // Handshake (HELLO/AUTH/SELECT/CLIENT SETNAME), pipelined in ONE request and executed via pipeline.
     {
       request req;
       req.reserve(256);
 
-      // HELLO (optionally AUTH+SETNAME in one RTT).
-      {
-        req.clear();
+      // Build one pipelined request (multiple commands back-to-back).
+      std::vector<std::string> ops;
+      ops.reserve(4);
 
-        auto const proto = (cfg_.version == resp_version::resp3) ? "3" : "2";
-        bool const hello_can_auth = cfg_.username.has_value() && cfg_.password.has_value();
-        bool const hello_can_setname = cfg_.client_name.has_value();
+      // 1) HELLO <2|3>
+      auto const proto = (cfg_.version == resp_version::resp3) ? "3" : "2";
+      req.push("HELLO", proto);
+      ops.emplace_back("HELLO");
 
-        if (hello_can_auth && hello_can_setname) {
-          req.push("HELLO", proto, "AUTH", *cfg_.username, *cfg_.password, "SETNAME", *cfg_.client_name);
-        } else if (hello_can_auth) {
-          req.push("HELLO", proto, "AUTH", *cfg_.username, *cfg_.password);
-        } else if (hello_can_setname) {
-          req.push("HELLO", proto, "SETNAME", *cfg_.client_name);
+      // 2) AUTH
+      if (cfg_.username.has_value() || cfg_.password.has_value()) {
+        if (!cfg_.password.has_value()) {
+          throw std::system_error(io::error::operation_failed);
+        }
+        if (cfg_.username.has_value()) {
+          req.push("AUTH", *cfg_.username, *cfg_.password);
         } else {
-          req.push("HELLO", proto);
+          req.push("AUTH", *cfg_.password);
         }
-
-        adapter::result<std::vector<resp3::node>> hello_resp;
-        co_await execute_any(req, adapter::any_adapter{hello_resp});
-        if (!hello_resp.has_value()) {
-          throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
-                                  std::string("HELLO: ") + hello_resp.error().msg);
-        }
+        ops.emplace_back("AUTH");
       }
 
-      // AUTH <password> (when username not provided; more compatible than HELLO AUTH default).
-      if (cfg_.password.has_value() && !cfg_.username.has_value()) {
-        req.clear();
-        req.push("AUTH", *cfg_.password);
-        response<std::string> auth_resp;
-        co_await execute(req, auth_resp);
-        if (!std::get<0>(auth_resp).has_value()) {
-          throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
-                                  std::string("AUTH: ") + std::get<0>(auth_resp).error().msg);
-        }
-      }
-
-      // SELECT <db>
+      // 3) SELECT <db>
       if (cfg_.database != 0) {
-        req.clear();
         req.push("SELECT", cfg_.database);
-        response<std::string> sel_resp;
-        co_await execute(req, sel_resp);
-        if (!std::get<0>(sel_resp).has_value()) {
+        ops.emplace_back("SELECT");
+      }
+
+      // 4) CLIENT SETNAME <name>
+      if (cfg_.client_name.has_value()) {
+        req.push("CLIENT", "SETNAME", *cfg_.client_name);
+        ops.emplace_back("CLIENT SETNAME");
+      }
+
+      // Execute the whole setup request and capture per-reply errors.
+      std::vector<adapter::result<ignore_t>> results(ops.size());
+      std::size_t i = 0;
+      auto ad = adapter::any_adapter{
+          [&](resp3::msg_view const& msg) mutable {
+            if (i >= results.size() || msg.empty()) return;
+            auto const& node = msg.front();
+            if (resp3::is_error(node.data_type) || node.data_type == resp3::type3::null) {
+              results[i] = unexpected(adapter::error{std::string(node.value())});
+            }
+            ++i;
+          }};
+
+      co_await execute_any(req, std::move(ad));
+
+      // Validate all replies (any error aborts the connection).
+      for (std::size_t j = 0; j < results.size(); ++j) {
+        if (!results[j].has_value()) {
           throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error),
-                                  std::string("SELECT: ") + std::get<0>(sel_resp).error().msg);
+                                  ops[j] + ": " + results[j].error().msg);
         }
       }
     }

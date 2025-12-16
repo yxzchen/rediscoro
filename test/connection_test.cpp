@@ -3,6 +3,8 @@
 #include <xz/io/co_spawn.hpp>
 #include <xz/redis/config.hpp>
 #include <xz/redis/connection.hpp>
+#include <xz/redis/request.hpp>
+#include <xz/redis/response.hpp>
 
 #include <gtest/gtest.h>
 
@@ -38,6 +40,21 @@ TEST_F(ConnectionTest, RunBasic) {
       [&]() -> awaitable<void> {
         co_await conn.run();
         EXPECT_TRUE(conn.is_running());
+
+        // Verify handshake applied client name.
+        request req;
+        req.push("CLIENT", "GETNAME");
+        response<std::optional<std::string>> name;
+        co_await conn.execute(req, name);
+        if (!std::get<0>(name).has_value()) {
+          ADD_FAILURE() << "CLIENT GETNAME failed: " << std::get<0>(name).error().msg;
+          co_return;
+        }
+        if (!std::get<0>(name).value().has_value()) {
+          ADD_FAILURE() << "CLIENT GETNAME returned null (name not set)";
+          co_return;
+        }
+        EXPECT_EQ(std::get<0>(name).value().value(), "redisxz-test");
       },
       [&](std::exception_ptr eptr) mutable {
         // Cleanup
