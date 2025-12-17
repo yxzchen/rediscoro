@@ -18,7 +18,7 @@ struct ignore {
     if (!result_) return;
 
     auto const& node = msg.front();
-    if (is_error(node.data_type) || node.data_type == resp3::type3::null) {
+    if (is_error(node.data_type)) {
       *result_ = unexpected(error{std::string(node.value())});
     }
   }
