@@ -183,14 +183,7 @@ auto connection::handshake() -> io::awaitable<void> {
 
   // Build a single multi-command request; replies will be FIFO and parsed into `dynamic_response`.
 
-  // 1) HELLO <2|3>
-  {
-    auto const proto = (cfg_.version == resp_version::resp3) ? 3 : 2;
-    req.push("HELLO", proto);
-    ops.emplace_back("HELLO");
-  }
-
-  // 2) AUTH (server-driven errors)
+  // 1) AUTH (server-driven errors)
   // If either username/password is non-empty, send AUTH and let Redis respond with OK/ERR.
   if (!cfg_.username.empty() || !cfg_.password.empty()) {
     if (!cfg_.username.empty()) {
@@ -201,6 +194,13 @@ auto connection::handshake() -> io::awaitable<void> {
       req.push("AUTH", cfg_.password);
     }
     ops.emplace_back("AUTH");
+  }
+
+  // 2) HELLO <2|3>
+  {
+    auto const proto = (cfg_.version == resp_version::resp3) ? 3 : 2;
+    req.push("HELLO", proto);
+    ops.emplace_back("HELLO");
   }
 
   // 3) CLIENT SETNAME <name>
