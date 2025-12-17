@@ -8,9 +8,7 @@ connection::connection(io::io_context& ctx, config cfg)
     : impl_{std::make_shared<detail::connection_impl>(ctx, std::move(cfg))} {}
 
 connection::~connection() {
-  if (impl_) {
-    impl_->stop();
-  }
+  impl_->stop();
 }
 
 auto connection::run() -> io::awaitable<void> {
@@ -22,27 +20,23 @@ auto connection::execute_any(request const& req, adapter::any_adapter adapter) -
 }
 
 void connection::stop() {
-  if (impl_) {
-    impl_->stop();
-  }
+  impl_->stop();
 }
 
 auto connection::graceful_stop() -> io::awaitable<void> {
-  if (impl_) {
-    co_await impl_->graceful_stop();
-  }
+  co_await impl_->graceful_stop();
 }
 
 auto connection::current_state() const noexcept -> state {
-  return impl_ ? static_cast<state>(impl_->current_state()) : state::stopped;
+  return static_cast<state>(impl_->current_state());
 }
 
 auto connection::is_running() const noexcept -> bool {
-  return impl_ && impl_->is_running();
+  return impl_->is_running();
 }
 
 auto connection::error() const -> std::error_code {
-  return impl_ ? impl_->error() : std::error_code{};
+  return impl_->error();
 }
 
 auto connection::get_executor() noexcept -> io::io_context& {
