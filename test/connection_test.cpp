@@ -405,6 +405,74 @@ TEST_F(ConnectionTest, TupleResponseIntStringVectorStringWorks) {
   });
 }
 
+TEST_F(ConnectionTest, ExecuteOneSingleTypeWorks) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    std::string const key_counter = "redisxz-test:execute_one:counter";
+
+    request req;
+    req.push("INCR", key_counter);
+
+    auto out = co_await conn.execute_one<int>(req);
+    if (!out.has_value()) {
+      ADD_FAILURE() << "INCR failed: " << out.error().message;
+      co_return;
+    }
+    EXPECT_GE(out.value(), 1);
+  });
+}
+
+TEST_F(ConnectionTest, ExecuteOneMultipleTypesWorkWithGenericContainers) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    std::string const key_list = "redisxz-test:execute_one:list";
+
+    // Seed list for LRANGE.
+    {
+      request seed;
+      seed.push("DEL", key_list);
+      seed.push("RPUSH", key_list, "a", "b", "c");
+      dynamic_response<ignore_t> seed_resp;
+      co_await conn.execute(seed, seed_resp);
+    }
+
+    request req;
+    req.push("ECHO", "hello");
+    req.push("LRANGE", key_list, "0", "-1");
+    req.push("GET", "redisxz-test:execute_one:missing");
+
+    auto resp = co_await conn.execute_one<std::string, std::vector<std::string>, std::optional<std::string>>(req);
+    auto& r0 = std::get<0>(resp);
+    auto& r1 = std::get<1>(resp);
+    auto& r2 = std::get<2>(resp);
+
+    if (!r0.has_value()) {
+      ADD_FAILURE() << "ECHO failed: " << r0.error().message;
+      co_return;
+    }
+    if (!r1.has_value()) {
+      ADD_FAILURE() << "LRANGE failed: " << r1.error().message;
+      co_return;
+    }
+    if (!r2.has_value()) {
+      ADD_FAILURE() << "GET failed: " << r2.error().message;
+      co_return;
+    }
+
+    EXPECT_EQ(r0.value(), "hello");
+    EXPECT_EQ(r1.value(), (std::vector<std::string>{"a", "b", "c"}));
+    EXPECT_FALSE(r2.value().has_value());
+  });
+}
+
 TEST_F(ConnectionTest, HandshakeFailsWithInvalidDatabase) {
   io_context ctx;
   config c = cfg;
