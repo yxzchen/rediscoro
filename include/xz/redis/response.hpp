@@ -1,6 +1,7 @@
 #pragma once
 
 #include <xz/redis/adapter/result.hpp>
+#include <xz/redis/resp3/node.hpp>
 
 #include <vector>
 
@@ -9,7 +10,9 @@ namespace xz::redis {
 template <class... Ts>
 using response = std::tuple<adapter::result<Ts>...>;
 
-using generic_response = adapter::result<std::vector<resp3::node>>;
+/// A "generic" response that preserves message boundaries:
+/// one owning `resp3::message` per received reply.
+using generic_response = adapter::result<std::vector<resp3::msg>>;
 
 /// A runtime-sized response: one `adapter::result<T>` per received reply message.
 ///

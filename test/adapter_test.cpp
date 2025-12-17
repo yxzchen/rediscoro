@@ -266,10 +266,13 @@ TEST_F(AdapterTest, GeneralAggregateDeepCopy) {
   adapter.on_msg(msg);
 
   EXPECT_TRUE(res.has_value());
-  auto const& nodes = res.value();
+  auto const& msgs = res.value();
+
+  ASSERT_EQ(msgs.size(), 1u);
+  auto const& nodes = msgs[0];
 
   // Should have 3 nodes: 1 aggregate header + 2 elements
-  ASSERT_EQ(nodes.size(), 3);
+  ASSERT_EQ(nodes.size(), 3u);
 
   // First node: array header
   EXPECT_EQ(nodes[0].data_type, resp3::type3::array);

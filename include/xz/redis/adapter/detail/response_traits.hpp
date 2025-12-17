@@ -102,10 +102,10 @@ struct response_traits;
 //   static auto adapt(response_type& r) noexcept { return adapter_type{&r}; }
 // };
 
-template <class String, class Allocator>
-struct response_traits<result<std::vector<resp3::basic_node<String>, Allocator>>> {
-  using response_type = result<std::vector<resp3::basic_node<String>, Allocator>>;
-  using adapter_type = general_aggregate<response_type>;
+template <class Allocator>
+struct response_traits<result<std::vector<resp3::msg, Allocator>>> {
+  using response_type = result<std::vector<resp3::msg, Allocator>>;
+  using adapter_type = general_messages<response_type>;
 
   static auto adapt(response_type& v) noexcept { return adapter_type{&v}; }
 };

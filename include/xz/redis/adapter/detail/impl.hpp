@@ -50,19 +50,16 @@ inline bool has_nested_aggregates(resp3::msg_view const& msg, std::size_t start_
 }
 
 template <class Result>
-class general_aggregate {
+class general_messages {
  private:
   Result* result_;
 
  public:
-  explicit general_aggregate(Result* c = nullptr) : result_(c) {}
+  explicit general_messages(Result* c = nullptr) : result_(c) {}
 
-  void on_msg(resp3::msg_view const& msg) {
-    auto& vec = result_->value();
-    vec.reserve(vec.size() + msg.size());
-    for (auto const& node_view : msg) {
-      vec.push_back(resp3::to_owning_node(node_view));
-    }
+  void on_msg(resp3::msg_view const& msgv) {
+    auto& msgs = result_->value();
+    msgs.push_back(resp3::to_owning_msg(msgv));
   }
 };
 
