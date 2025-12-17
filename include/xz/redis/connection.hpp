@@ -7,17 +7,32 @@
 #include <xz/redis/config.hpp>
 #include <xz/redis/request.hpp>
 #include <xz/redis/resp3/parser.hpp>
+#include <xz/redis/response.hpp>
 
 #include <coroutine>
 #include <memory>
 #include <optional>
 #include <string>
 #include <system_error>
+#include <tuple>
 
 namespace xz::redis {
 
 namespace detail {
 class pipeline;  // internal: request scheduling / response dispatch
+
+template <class... Ts>
+struct execute_result;
+
+template <class T>
+struct execute_result<T> {
+  using type = response0<T>;
+};
+
+template <class T1, class T2, class... Ts>
+struct execute_result<T1, T2, Ts...> {
+  using type = response<T1, T2, Ts...>;
+};
 }
 
 /**
@@ -78,6 +93,22 @@ class connection {
   template <class Response = ignore_t>
   auto execute(request const& req, Response& resp = std::ignore) -> io::awaitable<void> {
     co_await execute_any(req, adapter::any_adapter{resp});
+  }
+
+  /// Execute a request and return its adapted reply object by value.
+  ///
+  /// - For one reply type: returns `response0<T>` (i.e. `adapter::result<T>`)
+  /// - For multiple reply types: returns `response<Ts...>` (tuple of `adapter::result<Ti>`)
+  ///
+  /// Example:
+  /// - `auto r = co_await conn.execute_one<int>(req);`
+  /// - `auto tup = co_await conn.execute_one<int, std::string>(req);`
+  template <class... Ts>
+  auto execute_one(request const& req) -> io::awaitable<typename detail::execute_result<Ts...>::type> {
+    static_assert(sizeof...(Ts) > 0, "execute_one<Ts...> requires at least one reply type");
+    typename detail::execute_result<Ts...>::type resp{};
+    co_await execute(req, resp);
+    co_return resp;
   }
 
   void stop();
