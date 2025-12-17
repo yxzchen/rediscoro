@@ -269,6 +269,142 @@ TEST_F(ConnectionTest, ServerErrorAndTypeMismatchAreCapturedInResult) {
   });
 }
 
+TEST_F(ConnectionTest, MultiCommandSingleRequestAllOk) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    // One request containing multiple commands (pipelined).
+    request req;
+    req.push("PING");
+    req.push("ECHO", "hello");
+    req.push("INCR", "redisxz-test:multi:counter");
+
+    dynamic_response<ignore_t> resp;
+    co_await conn.execute(req, resp);
+
+    EXPECT_EQ(resp.size(), req.expected_responses());
+    for (std::size_t i = 0; i < resp.size(); ++i) {
+      EXPECT_TRUE(resp[i].has_value()) << "reply[" << i << "] error: " << resp[i].error().message;
+    }
+  });
+}
+
+TEST_F(ConnectionTest, MultiCommandSingleRequestSurfacesPerReplyError) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    request req;
+    req.push("PING");
+    req.push("THIS_COMMAND_DOES_NOT_EXIST");
+    req.push("PING");
+
+    dynamic_response<ignore_t> resp;
+    co_await conn.execute(req, resp);
+
+    if (resp.size() != req.expected_responses()) {
+      ADD_FAILURE() << "Expected " << req.expected_responses() << " replies, got " << resp.size();
+      co_return;
+    }
+    EXPECT_TRUE(resp[0].has_value());
+    EXPECT_FALSE(resp[1].has_value());
+    EXPECT_TRUE(resp[2].has_value());
+  });
+}
+
+TEST_F(ConnectionTest, MultiCommandSingleRequestGenericResponsePreservesBoundaries) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    request req;
+    req.push("PING");
+    req.push("ECHO", "hello");
+
+    generic_response resp;
+    co_await conn.execute(req, resp);
+
+    if (!resp.has_value()) {
+      ADD_FAILURE() << "Execute failed: " << resp.error().message;
+      co_return;
+    }
+    EXPECT_EQ(resp.value().size(), req.expected_responses());
+    for (auto const& msg : resp.value()) {
+      EXPECT_FALSE(msg.empty());
+    }
+  });
+}
+
+TEST_F(ConnectionTest, TupleResponseIntStringVectorStringWorks) {
+  io_context ctx;
+
+  test_util::run_async(ctx, [&]() -> awaitable<void> {
+    connection conn{ctx, cfg};
+    co_await conn.run();
+
+    std::string const key_counter = "redisxz-test:multi:tuple:counter";
+    std::string const key_list = "redisxz-test:multi:tuple:list";
+
+    // Best-effort cleanup.
+    {
+      request del;
+      del.push("DEL", key_counter, key_list);
+      response0<int> del_resp;
+      co_await conn.execute(del, del_resp);
+      (void)del_resp;
+    }
+
+    // Seed list for LRANGE.
+    {
+      request seed;
+      seed.push("RPUSH", key_list, "a", "b", "c");
+      response0<int> rpush;
+      co_await conn.execute(seed, rpush);
+      if (!rpush.has_value()) {
+        ADD_FAILURE() << "RPUSH failed: " << rpush.error().message;
+        co_return;
+      }
+    }
+
+    // One request, three different typed replies.
+    request req;
+    req.push("INCR", key_counter);          // int
+    req.push("ECHO", "hello");              // string
+    req.push("LRANGE", key_list, "0", "-1"); // vector<string>
+
+    response<int, std::string, std::vector<std::string>> resp;
+    co_await conn.execute(req, resp);
+
+    auto& r0 = std::get<0>(resp);
+    auto& r1 = std::get<1>(resp);
+    auto& r2 = std::get<2>(resp);
+
+    if (!r0.has_value()) {
+      ADD_FAILURE() << "INCR failed: " << r0.error().message;
+      co_return;
+    }
+    if (!r1.has_value()) {
+      ADD_FAILURE() << "ECHO failed: " << r1.error().message;
+      co_return;
+    }
+    if (!r2.has_value()) {
+      ADD_FAILURE() << "LRANGE failed: " << r2.error().message;
+      co_return;
+    }
+
+    EXPECT_GE(r0.value(), 1);
+    EXPECT_EQ(r1.value(), "hello");
+    EXPECT_EQ(r2.value(), (std::vector<std::string>{"a", "b", "c"}));
+  });
+}
+
 TEST_F(ConnectionTest, HandshakeFailsWithInvalidDatabase) {
   io_context ctx;
   config c = cfg;
