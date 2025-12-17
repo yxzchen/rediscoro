@@ -205,27 +205,27 @@ void connection_impl::close_transport() noexcept {
 }
 
 auto connection_impl::reconnect_loop() -> io::awaitable<void> {
-  while (reconnect_active_ && cfg_.auto_reconnect) {
+  while (reconnect_active_) {
     if (cfg_.reconnect_delay.count() > 0) {
       co_await io::co_sleep(ctx_, cfg_.reconnect_delay);
     }
 
     if (!reconnect_active_ || state_ == state::stopped) {
-      break;
+      reconnect_active_ = false;
+      co_return;
     }
 
     try {
       co_await run();
-      break;  // Success
+      reconnect_active_ = false;
+      co_return;
     } catch (...) {
       if (!reconnect_active_ || state_ == state::stopped) {
-        break;
+        reconnect_active_ = false;
+        co_return;
       }
-      // Continue loop on reconnect failure
     }
   }
-  reconnect_active_ = false;
-  reconnect_task_.reset();
 }
 
 auto connection_impl::handshake() -> io::awaitable<void> {
