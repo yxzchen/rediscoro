@@ -97,9 +97,6 @@ class connection {
   auto get_executor() noexcept -> io::io_context&;
 
  private:
-  auto execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void>;
-
- private:
   std::shared_ptr<detail::connection_impl> impl_;
 };
 

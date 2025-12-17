@@ -15,10 +15,6 @@ auto connection::run() -> io::awaitable<void> {
   co_await impl_->run();
 }
 
-auto connection::execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void> {
-  co_await impl_->execute_any(req, adapter);
-}
-
 void connection::stop() {
   impl_->stop();
 }
