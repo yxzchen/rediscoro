@@ -66,11 +66,11 @@ class static_adapter {
   explicit static_adapter(R& r) { assigner<size - 1>::assign(adapters_, r); }
 
   // clang-format off
-  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
+  void on_msg(resp3::msg_view const& msg) {
     REDISXZ_ASSERT(i_ < adapters_.size());
     std::visit(
       [&](auto& arg) {
-         arg.on_msg(msg, ec);
+         arg.on_msg(msg);
       },
       adapters_.at(i_)
     );
@@ -79,21 +79,33 @@ class static_adapter {
   // clang-format on
 };
 
+template <class R>
+class vector_adapter {
+ private:
+  using adapter_type = adapter_t<R>;
+  adapter_type adapter_;
+
+ public:
+  explicit vector_adapter(R& r) { adapter_ = internal_adapt(r); }
+
+  void on_msg(resp3::msg_view const& msg) { adapter_.on_msg(msg); }
+};
+
 template <class>
 struct response_traits;
 
-template <>
-struct response_traits<result<ignore_t>> {
-  using response_type = result<ignore_t>;
-  using adapter_type = ignore;
+// template <>
+// struct response_traits<result<ignore_t>> {
+//   using response_type = result<ignore_t>;
+//   using adapter_type = ignore;
 
-  static auto adapt(response_type&) noexcept { return ignore{}; }
-};
+//   static auto adapt(response_type& r) noexcept { return adapter_type{&r}; }
+// };
 
-template <class String, class Allocator>
-struct response_traits<result<std::vector<resp3::basic_node<String>, Allocator>>> {
-  using response_type = result<std::vector<resp3::basic_node<String>, Allocator>>;
-  using adapter_type = general_aggregate<response_type>;
+template <class Allocator>
+struct response_traits<result<std::vector<resp3::msg, Allocator>>> {
+  using response_type = result<std::vector<resp3::msg, Allocator>>;
+  using adapter_type = general_messages<response_type>;
 
   static auto adapt(response_type& v) noexcept { return adapter_type{&v}; }
 };
@@ -104,6 +116,22 @@ struct response_traits<response<Ts...>> {
   using adapter_type = static_adapter<response_type>;
 
   static auto adapt(response_type& r) noexcept { return adapter_type{r}; }
+};
+
+template <class T>
+struct response_traits<result<T>> {
+  using response_type = result<T>;
+  using adapter_type = result_traits<response_type>;
+
+  static auto adapt(response_type& v) noexcept { return adapter_type::adapt(v); }
+};
+
+template <class T, class Allocator>
+struct response_traits<std::vector<result<T>, Allocator>> {
+  using response_type = std::vector<result<T>, Allocator>;
+  using adapter_type = vector_adapter<response_type>;
+
+  static auto adapt(response_type& v) noexcept { return adapter_type{v}; }
 };
 
 }  // namespace xz::redis::adapter::detail

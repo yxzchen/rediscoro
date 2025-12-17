@@ -4,24 +4,22 @@
 #include <xz/redis/resp3/node.hpp>
 
 #include <charconv>
+#include <concepts>
 #include <optional>
 #include <type_traits>
 
 namespace xz::redis::adapter::detail {
 
-// clang-format off
-template <class T> struct is_integral_number : std::is_integral<T> { };
-template <> struct is_integral_number<bool> : std::false_type { };
-template <> struct is_integral_number<char> : std::false_type { };
-template <> struct is_integral_number<char16_t> : std::false_type { };
-template <> struct is_integral_number<char32_t> : std::false_type { };
-template <> struct is_integral_number<wchar_t> : std::false_type { };
+template <class T>
+concept is_number = std::integral<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char> &&
+                      !std::is_same_v<T, char16_t> && !std::is_same_v<T, char32_t> &&
+                      !std::is_same_v<T, wchar_t>
 #ifdef __cpp_char8_t
-template <> struct is_integral_number<char8_t> : std::false_type { };
+                      && !std::is_same_v<T, char8_t>
 #endif
-// clang-format on
+;
 
-template <class T, bool = is_integral_number<T>::value>
+template <class T, bool = is_number<T>>
 struct converter;
 
 template <class T>
@@ -29,10 +27,8 @@ struct converter<T, true> {
   static void apply(T& i, resp3::node_view const& node, std::error_code& ec) {
     auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), i);
-    if (res.ec != std::errc()) {
+    if (res.ec != std::errc() || res.ptr != view.data() + view.size()) {
       ec = xz::redis::error::not_a_number;
-    } else if (res.ptr != view.data() + view.size()) {
-      ec = xz::redis::error::invalid_number_format;
     }
   }
 };
@@ -47,10 +43,8 @@ struct converter<double, false> {
   static void apply(double& d, resp3::node_view const& node, std::error_code& ec) {
     auto const& view = node.value();
     auto const res = std::from_chars(view.data(), view.data() + view.size(), d);
-    if (res.ec != std::errc()) {
+    if (res.ec != std::errc() || res.ptr != view.data() + view.size()) {
       ec = xz::redis::error::not_a_double;
-    } else if (res.ptr != view.data() + view.size()) {
-      ec = xz::redis::error::invalid_double_format;
     }
   }
 };

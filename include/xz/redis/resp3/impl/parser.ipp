@@ -1,4 +1,4 @@
-#include <xz/redis/assert.hpp>
+#include <xz/redis/detail/assert.hpp>
 #include <xz/redis/error.hpp>
 #include <xz/redis/resp3/parser.hpp>
 
@@ -11,17 +11,14 @@ namespace xz::redis::resp3 {
 
 void to_int(std::size_t& i, std::string_view sv, std::error_code& ec) {
   auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), i);
-  if (res.ec != std::errc()) {
+  if (res.ec != std::errc() || res.ptr != sv.data() + sv.size()) {
     ec = error::not_a_number;
-  } else if (res.ptr != sv.data() + sv.size()) {
-    ec = error::invalid_number_format;
   }
 }
 
 // Cascades element completion upward through the stack
 void parser::commit_elem() noexcept {
   REDISXZ_ASSERT(!pending_.empty());
-  if (pending_.empty()) return;
 
   pending_.top()--;
   while (pending_.top() == 0) {
@@ -66,7 +63,7 @@ auto parser::read_bulk_data(std::size_t length, std::error_code& ec) noexcept ->
   return result;
 }
 
-auto parser::parse() -> detail::generator<std::optional<msg_view>> {
+auto parser::parse() -> generator_type {
   msg_view msg;
   msg.reserve(16);
   std::optional<std::string_view> line;
@@ -84,7 +81,6 @@ auto parser::parse() -> detail::generator<std::optional<msg_view>> {
     }
 
     // === Parse header ===
-    REDISXZ_ASSERT(!pending_.empty());
     if (line->empty()) {
       ec_ = error::invalid_data_type;
       co_return;
@@ -220,7 +216,6 @@ auto parser::parse() -> detail::generator<std::optional<msg_view>> {
     // === Yield complete message ===
     if (pending_.empty()) {
       co_yield std::optional<msg_view>{std::move(msg)};
-      msg.clear();
     }
   }
 }

@@ -42,37 +42,31 @@ class AdapterTest : public ::testing::Test {
 };
 
 TEST_F(AdapterTest, IntegerSimpleString) {
-  response<int> res;
+  response0<int> res;
   any_adapter adapter(res);
 
   auto msg = make_simple_msg(resp3::type3::simple_string, "42");
-  std::error_code ec;
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  EXPECT_EQ(std::get<0>(res).value(), 42);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(res.value(), 42);
 }
 
 TEST_F(AdapterTest, ThreeMessages) {
   response<std::string, int, bool> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   // First message: string
   auto msg1 = make_simple_msg(resp3::type3::blob_string, "hello");
-  adapter.on_msg(msg1, ec);
-  EXPECT_FALSE(ec);
+  adapter.on_msg(msg1);
 
   // Second message: int
   auto msg2 = make_simple_msg(resp3::type3::number, "123");
-  adapter.on_msg(msg2, ec);
-  EXPECT_FALSE(ec);
+  adapter.on_msg(msg2);
 
   // Third message: bool
   auto msg3 = make_simple_msg(resp3::type3::boolean, "t");
-  adapter.on_msg(msg3, ec);
-  EXPECT_FALSE(ec);
+  adapter.on_msg(msg3);
 
   // Verify all results
   EXPECT_TRUE(std::get<0>(res).has_value());
@@ -85,20 +79,49 @@ TEST_F(AdapterTest, ThreeMessages) {
   EXPECT_TRUE(std::get<2>(res).value());
 }
 
-TEST_F(AdapterTest, VectorOfInts) {
-  response<std::vector<int>> res;
+TEST_F(AdapterTest, VectorResponseAppendsPerMessage) {
+  dynamic_response<int> res;
   any_adapter adapter(res);
-  std::error_code ec;
+
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "1"));
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "2"));
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "3"));
+
+  ASSERT_EQ(res.size(), 3u);
+  EXPECT_TRUE(res[0].has_value());
+  EXPECT_TRUE(res[1].has_value());
+  EXPECT_TRUE(res[2].has_value());
+  EXPECT_EQ(res[0].value(), 1);
+  EXPECT_EQ(res[1].value(), 2);
+  EXPECT_EQ(res[2].value(), 3);
+}
+
+TEST_F(AdapterTest, VectorResponseStoresPerElementError) {
+  dynamic_response<int> res;
+  any_adapter adapter(res);
+
+  adapter.on_msg(make_simple_msg(resp3::type3::number, "10"));
+  adapter.on_msg(make_error_msg(resp3::type3::simple_error, "ERR nope"));
+
+  ASSERT_EQ(res.size(), 2u);
+  EXPECT_TRUE(res[0].has_value());
+  EXPECT_EQ(res[0].value(), 10);
+  EXPECT_FALSE(res[1].has_value());
+  EXPECT_EQ(res[1].error().message, "ERR nope");
+}
+
+TEST_F(AdapterTest, VectorOfInts) {
+  response0<std::vector<int>> res;
+  any_adapter adapter(res);
 
   auto msg = make_aggregate_msg(resp3::type3::array, 3,
                                   resp3::node_view{resp3::type3::number, "10"},
                                   resp3::node_view{resp3::type3::number, "20"},
                                   resp3::node_view{resp3::type3::number, "30"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& vec = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& vec = res.value();
   ASSERT_EQ(vec.size(), 3);
   EXPECT_EQ(vec[0], 10);
   EXPECT_EQ(vec[1], 20);
@@ -106,19 +129,17 @@ TEST_F(AdapterTest, VectorOfInts) {
 }
 
 TEST_F(AdapterTest, SetOfStrings) {
-  response<std::set<std::string>> res;
+  response0<std::set<std::string>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::set, 3,
                                   resp3::node_view{resp3::type3::blob_string, "apple"},
                                   resp3::node_view{resp3::type3::blob_string, "banana"},
                                   resp3::node_view{resp3::type3::blob_string, "cherry"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& s = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& s = res.value();
   EXPECT_EQ(s.size(), 3);
   EXPECT_TRUE(s.count("apple") == 1);
   EXPECT_TRUE(s.count("banana") == 1);
@@ -126,40 +147,36 @@ TEST_F(AdapterTest, SetOfStrings) {
 }
 
 TEST_F(AdapterTest, MapOfStringToInt) {
-  response<std::map<std::string, int>> res;
+  response0<std::map<std::string, int>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::map, 2,
                                   resp3::node_view{resp3::type3::blob_string, "foo"},
                                   resp3::node_view{resp3::type3::number, "100"},
                                   resp3::node_view{resp3::type3::blob_string, "bar"},
                                   resp3::node_view{resp3::type3::number, "200"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& m = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& m = res.value();
   EXPECT_EQ(m.size(), 2);
   EXPECT_EQ(m.at("foo"), 100);
   EXPECT_EQ(m.at("bar"), 200);
 }
 
 TEST_F(AdapterTest, UnorderedSetOfInts) {
-  response<std::unordered_set<int>> res;
+  response0<std::unordered_set<int>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::set, 4,
                                   resp3::node_view{resp3::type3::number, "1"},
                                   resp3::node_view{resp3::type3::number, "2"},
                                   resp3::node_view{resp3::type3::number, "3"},
                                   resp3::node_view{resp3::type3::number, "4"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& s = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& s = res.value();
   EXPECT_EQ(s.size(), 4);
   EXPECT_TRUE(s.count(1) == 1);
   EXPECT_TRUE(s.count(2) == 1);
@@ -168,39 +185,35 @@ TEST_F(AdapterTest, UnorderedSetOfInts) {
 }
 
 TEST_F(AdapterTest, UnorderedMapOfIntToString) {
-  response<std::unordered_map<int, std::string>> res;
+  response0<std::unordered_map<int, std::string>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::map, 2,
                                   resp3::node_view{resp3::type3::number, "1"},
                                   resp3::node_view{resp3::type3::blob_string, "one"},
                                   resp3::node_view{resp3::type3::number, "2"},
                                   resp3::node_view{resp3::type3::blob_string, "two"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& m = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& m = res.value();
   EXPECT_EQ(m.size(), 2);
   EXPECT_EQ(m.at(1), "one");
   EXPECT_EQ(m.at(2), "two");
 }
 
 TEST_F(AdapterTest, ListOfDoubles) {
-  response<std::list<double>> res;
+  response0<std::list<double>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::array, 3,
                                   resp3::node_view{resp3::type3::doublean, "1.5"},
                                   resp3::node_view{resp3::type3::doublean, "2.5"},
                                   resp3::node_view{resp3::type3::doublean, "3.5"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& lst = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& lst = res.value();
   EXPECT_EQ(lst.size(), 3);
   auto it = lst.begin();
   EXPECT_DOUBLE_EQ(*it++, 1.5);
@@ -209,37 +222,33 @@ TEST_F(AdapterTest, ListOfDoubles) {
 }
 
 TEST_F(AdapterTest, DequeOfStrings) {
-  response<std::deque<std::string>> res;
+  response0<std::deque<std::string>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::array, 2,
                                   resp3::node_view{resp3::type3::blob_string, "first"},
                                   resp3::node_view{resp3::type3::blob_string, "second"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& dq = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& dq = res.value();
   EXPECT_EQ(dq.size(), 2);
   EXPECT_EQ(dq[0], "first");
   EXPECT_EQ(dq[1], "second");
 }
 
 TEST_F(AdapterTest, ArrayOfInts) {
-  response<std::array<int, 3>> res;
+  response0<std::array<int, 3>> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::array, 3,
                                   resp3::node_view{resp3::type3::number, "5"},
                                   resp3::node_view{resp3::type3::number, "10"},
                                   resp3::node_view{resp3::type3::number, "15"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
-  EXPECT_TRUE(std::get<0>(res).has_value());
-  auto const& arr = std::get<0>(res).value();
+  EXPECT_TRUE(res.has_value());
+  auto const& arr = res.value();
   EXPECT_EQ(arr.size(), 3);
   EXPECT_EQ(arr[0], 5);
   EXPECT_EQ(arr[1], 10);
@@ -249,20 +258,21 @@ TEST_F(AdapterTest, ArrayOfInts) {
 TEST_F(AdapterTest, GeneralAggregateDeepCopy) {
   generic_response res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   // Create a message with aggregate and simple nodes
   auto msg = make_aggregate_msg(resp3::type3::array, 2,
                                   resp3::node_view{resp3::type3::blob_string, "hello"},
                                   resp3::node_view{resp3::type3::number, "42"});
-  adapter.on_msg(msg, ec);
+  adapter.on_msg(msg);
 
-  EXPECT_FALSE(ec);
   EXPECT_TRUE(res.has_value());
-  auto const& nodes = res.value();
+  auto const& msgs = res.value();
+
+  ASSERT_EQ(msgs.size(), 1u);
+  auto const& nodes = msgs[0];
 
   // Should have 3 nodes: 1 aggregate header + 2 elements
-  ASSERT_EQ(nodes.size(), 3);
+  ASSERT_EQ(nodes.size(), 3u);
 
   // First node: array header
   EXPECT_EQ(nodes[0].data_type, resp3::type3::array);
@@ -281,15 +291,12 @@ TEST_F(AdapterTest, GeneralAggregateDeepCopy) {
 }
 
 TEST_F(AdapterTest, Ignore) {
-  response<ignore_t> res;
+  response0<ignore_t> res;
   any_adapter adapter(res);
-  std::error_code ec;
 
   auto msg = make_aggregate_msg(resp3::type3::array, 3,
                                   resp3::node_view{resp3::type3::number, "10"},
                                   resp3::node_view{resp3::type3::number, "20"},
                                   resp3::node_view{resp3::type3::number, "30"});
-  adapter.on_msg(msg, ec);
-
-  EXPECT_FALSE(ec);
+  adapter.on_msg(msg);
 }

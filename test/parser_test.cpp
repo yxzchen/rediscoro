@@ -293,7 +293,7 @@ TEST_F(ParserTest, InvalidNumberFormat) {
     if (!result) continue;
   }
 
-  EXPECT_EQ(p.error(), xz::redis::error::invalid_number_format);
+  EXPECT_EQ(p.error(), xz::redis::error::not_a_number);
 }
 
 TEST_F(ParserTest, StreamedStringHandling) {
@@ -375,7 +375,7 @@ TEST_F(ParserTest, ConvertToOwningNode) {
   ASSERT_TRUE(result.has_value());
 
   // Convert to owning node
-  auto owning = xz::redis::resp3::to_owning_nodes(*result);
+  auto owning = xz::redis::resp3::to_owning_msg(*result);
   EXPECT_EQ(owning.size(), 1);
   EXPECT_EQ(owning[0].value(), "testing");
 

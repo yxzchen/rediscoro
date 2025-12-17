@@ -1,9 +1,8 @@
 #pragma once
 
+#include <xz/redis/detail/assert.hpp>
 #include <xz/redis/resp3/parser.hpp>
 #include <xz/redis/resp3/type.hpp>
-
-#include <xz/redis/assert.hpp>
 
 #include <string>
 #include <tuple>

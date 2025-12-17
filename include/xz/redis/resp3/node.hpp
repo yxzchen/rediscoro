@@ -47,6 +47,7 @@ struct basic_node {
 using node = basic_node<std::string>;
 using node_view = basic_node<std::string_view>;
 
+using msg = std::vector<node>;
 using msg_view = std::vector<node_view>;
 
 inline auto to_owning_node(node_view const& view) -> node {
@@ -62,11 +63,11 @@ inline auto to_owning_node(node_view const& view) -> node {
   return result;
 }
 
-inline auto to_owning_nodes(std::vector<node_view> const& views) -> std::vector<node> {
-  std::vector<node> result;
-  result.reserve(views.size());
-  for (auto const& view : views) {
-    result.push_back(to_owning_node(view));
+inline auto to_owning_msg(msg_view const& msgv) -> msg {
+  msg result;
+  result.reserve(msgv.size());
+  for (auto const& nd : msgv) {
+    result.push_back(to_owning_node(nd));
   }
   return result;
 }

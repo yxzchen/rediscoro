@@ -1,4 +1,4 @@
-#include <xz/redis/assert.hpp>
+#include <xz/redis/detail/assert.hpp>
 #include <xz/redis/error.hpp>
 
 namespace xz::redis {
@@ -19,6 +19,7 @@ struct error_category_impl : std::error_category {
         return "Can't convert string to number (maybe forgot to upgrade to RESP3?).";
       case error::exceeeds_max_nested_depth:
         return "Exceeds the maximum number of nested responses.";
+      case error::aggregate_size_overflow:        return "Aggregate size would cause integer overflow.";
       case error::unexpected_bool_value:          return "Unexpected bool value.";
       case error::empty_field:                    return "Expected field value is empty.";
       case error::expects_resp3_simple_type:      return "Expects a resp3 simple type.";
@@ -39,9 +40,6 @@ struct error_category_impl : std::error_category {
       case error::sync_receive_push_failed:
         return "Can't receive server push synchronously without blocking.";
       case error::incompatible_node_depth: return "Incompatible node depth.";
-      case error::resp3_hello:
-        return "The server response to the setup request sent during connection establishment "
-               "contains an error.";
       case error::unix_sockets_unsupported:
         return "The configuration specified a UNIX socket address, but UNIX sockets are not "
                "supported by the system.";
@@ -52,6 +50,8 @@ struct error_category_impl : std::error_category {
                "buffer.";
       case error::write_timeout:
         return "Timeout while writing data to the server.";
+      case error::handshake_error:
+        return "Handshake error.";
       default: REDISXZ_ASSERT(false); return "redisxz error.";
     }
     // clang-format on

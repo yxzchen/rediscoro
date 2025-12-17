@@ -1,7 +1,7 @@
 #pragma once
 
 #include <xz/redis/resp3/detail/buffer.hpp>
-#include <xz/redis/resp3/detail/generator.hpp>
+#include <xz/redis/resp3/generator.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 #include <cstdint>
@@ -13,6 +13,8 @@
 
 namespace xz::redis::resp3 {
 
+using generator_type = generator<std::optional<std::vector<node_view>>>;
+
 class parser {
  public:
   static constexpr std::string_view sep = "\r\n";
@@ -23,17 +25,15 @@ class parser {
 
   void feed(std::string_view data) { buffer_.feed(data); }
   std::span<char> prepare(std::size_t n) { return buffer_.prepare(n); }
+  void commit(std::size_t n) { return buffer_.commit(n); }
 
-  /** @brief Manually compact the internal buffer.
-   *
-   *  Call this when you're done with all node_views from previous messages
-   *  to reclaim memory consumed by parsed data. This invalidates ALL
-   *  previously returned node_views.
-   *
-   *  The buffer grows automatically but never shrinks or compacts automatically
-   *  to preserve string_view validity.
-   */
-  void compact() { buffer_.compact(); }
+  void reset() {
+    buffer_.clear();
+    while (!pending_.empty()) {
+      pending_.pop();
+    }
+    ec_ = {};
+  }
 
   std::error_code error() const { return ec_; }
 
@@ -53,7 +53,7 @@ class parser {
    *
    *  @return A generator yielding optional vectors of node_views.
    */
-  auto parse() -> detail::generator<std::optional<std::vector<node_view>>>;
+  auto parse() -> generator_type;
 
  private:
   detail::buffer buffer_;

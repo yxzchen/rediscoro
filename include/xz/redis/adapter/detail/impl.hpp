@@ -2,6 +2,7 @@
 
 #include <xz/redis/adapter/detail/convert.hpp>
 #include <xz/redis/error.hpp>
+#include <xz/redis/ignore.hpp>
 #include <xz/redis/resp3/node.hpp>
 
 #include <array>
@@ -49,19 +50,16 @@ inline bool has_nested_aggregates(resp3::msg_view const& msg, std::size_t start_
 }
 
 template <class Result>
-class general_aggregate {
+class general_messages {
  private:
   Result* result_;
 
  public:
-  explicit general_aggregate(Result* c = nullptr) : result_(c) {}
+  explicit general_messages(Result* c = nullptr) : result_(c) {}
 
-  void on_msg(resp3::msg_view const& msg, std::error_code& ec) {
-    auto& vec = result_->value();
-    vec.reserve(vec.size() + msg.size());
-    for (auto const& node_view : msg) {
-      vec.push_back(resp3::to_owning_node(node_view));
-    }
+  void on_msg(resp3::msg_view const& msgv) {
+    auto& msgs = result_->value();
+    msgs.push_back(resp3::to_owning_msg(msgv));
   }
 };
 
@@ -81,6 +79,10 @@ class simple_impl {
 
     from_bulk(result, msg.front(), ec);
   }
+};
+
+struct ignore_impl {
+  void on_msg(ignore_t& result, resp3::msg_view const& msg, std::error_code& ec) {}
 };
 
 template <class Result>
@@ -227,6 +229,11 @@ struct list_impl {
 template <class T>
 struct impl_map {
   using type = simple_impl<T>;
+};
+
+template <>
+struct impl_map<ignore_t> {
+  using type = ignore_impl;
 };
 
 template <class Key, class Compare, class Allocator>

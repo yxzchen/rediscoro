@@ -13,9 +13,6 @@ enum class error {
   /// Can't parse the string as a number.
   not_a_number,
 
-  /// Number parsing consumed only part of the input.
-  invalid_number_format,
-
   /// The maximum depth of a nested response was exceeded.
   exceeeds_max_nested_depth,
 
@@ -55,9 +52,6 @@ enum class error {
   /// Not a double
   not_a_double,
 
-  /// Double parsing consumed only part of the input.
-  invalid_double_format,
-
   /// Got RESP3 null.
   resp3_null,
 
@@ -82,9 +76,6 @@ enum class error {
   /// Incompatible node depth.
   incompatible_node_depth,
 
-  /// The setup request sent during connection establishment failed (the name is historical).
-  resp3_hello,
-
   /// The configuration specified a UNIX socket address, but UNIX sockets are not supported by the system.
   unix_sockets_unsupported,
 
@@ -96,6 +87,9 @@ enum class error {
 
   /// Timeout while writing data to the server.
   write_timeout,
+
+  // Handshake error.
+  handshake_error,
 };
 
 /**

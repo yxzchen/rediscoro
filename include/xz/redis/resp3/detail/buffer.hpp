@@ -1,6 +1,6 @@
 #pragma once
 
-#include <xz/redis/assert.hpp>
+#include <xz/redis/detail/assert.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -47,14 +47,14 @@ class buffer {
   std::size_t capacity() const { return data_.size(); }
   // clang-format on
 
-  void compact();
-
   void clear() {
     read_pos_ = 0;
     write_pos_ = 0;
   }
 
  private:
+  void compact();
+
   std::vector<char> data_;
   std::size_t read_pos_ = 0;
   std::size_t write_pos_ = 0;

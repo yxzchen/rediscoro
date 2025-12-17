@@ -4,6 +4,7 @@
 #include <xz/redis/resp3/type.hpp>
 
 #include <algorithm>
+#include <concepts>
 #include <string>
 #include <tuple>
 
@@ -12,6 +13,15 @@ namespace xz::redis {
 namespace detail {
 auto is_subscribe(std::string_view cmd) -> bool;
 }  // namespace detail
+
+template <class Iterator>
+concept forward_iterator = std::forward_iterator<Iterator>;
+
+template <class Range>
+concept range = requires(Range& r) {
+  std::begin(r);
+  std::end(r);
+};
 
 class request {
  public:
@@ -36,10 +46,9 @@ class request {
     check_cmd(cmd);
   }
 
-  template <class ForwardIterator>
-  void push_range(std::string_view cmd, std::string_view key, ForwardIterator begin, ForwardIterator end,
-                  typename std::iterator_traits<ForwardIterator>::value_type* = nullptr) {
-    using value_type = typename std::iterator_traits<ForwardIterator>::value_type;
+  template <forward_iterator Iterator>
+  void push_range(std::string_view cmd, std::string_view key, Iterator begin, Iterator end) {
+    using value_type = typename std::iterator_traits<Iterator>::value_type;
 
     if (begin == end) return;
 
@@ -54,10 +63,9 @@ class request {
     check_cmd(cmd);
   }
 
-  template <class ForwardIterator>
-  void push_range(std::string_view cmd, ForwardIterator begin, ForwardIterator end,
-                  typename std::iterator_traits<ForwardIterator>::value_type* = nullptr) {
-    using value_type = typename std::iterator_traits<ForwardIterator>::value_type;
+  template <forward_iterator Iterator>
+  void push_range(std::string_view cmd, Iterator begin, Iterator end) {
+    using value_type = typename std::iterator_traits<Iterator>::value_type;
 
     if (begin == end) return;
 
@@ -71,14 +79,13 @@ class request {
     check_cmd(cmd);
   }
 
-  template <class Range>
-  void push_range(std::string_view cmd, std::string_view key, Range const& range,
-                  decltype(std::begin(range))* = nullptr) {
+  template <range Range>
+  void push_range(std::string_view cmd, std::string_view key, Range const& range) {
     push_range(cmd, key, std::begin(range), std::end(range));
   }
 
-  template <class Range>
-  void push_range(std::string_view cmd, Range const& range, decltype(std::cbegin(range))* = nullptr) {
+  template <range Range>
+  void push_range(std::string_view cmd, Range const& range) {
     push_range(cmd, std::cbegin(range), std::cend(range));
   }
 
