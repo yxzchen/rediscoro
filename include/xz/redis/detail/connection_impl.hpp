@@ -84,6 +84,7 @@ class connection_impl : public std::enable_shared_from_this<connection_impl> {
 
   bool reconnect_active_{false};
   std::optional<io::awaitable<void>> reconnect_task_{};
+  std::optional<io::awaitable<void>> read_task_{};
 };
 
 }  // namespace xz::redis::detail

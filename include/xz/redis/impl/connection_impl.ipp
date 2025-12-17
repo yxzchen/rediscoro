@@ -55,10 +55,8 @@ auto connection_impl::run() -> io::awaitable<void> {
     ensure_pipeline();
 
     // Spawn read_loop with shared_from_this() - keeps impl alive
-    // Note: use_detached here because read_loop runs for the entire connection lifetime
-    // and doesn't need to be awaited (graceful_stop will close socket to terminate it)
     auto self = shared_from_this();
-    io::co_spawn(ctx_, [self]() { return self->read_loop(); }, io::use_detached);
+    read_task_ = io::co_spawn(ctx_, [self]() { return self->read_loop(); }, io::use_awaitable);
 
     co_await handshake();
   } catch (std::system_error const& e) {
@@ -175,10 +173,18 @@ auto connection_impl::graceful_stop() -> io::awaitable<void> {
   stop();
 
   // Wait for background tasks to complete
-  // Note: read_loop uses use_detached so can't be awaited; socket close will terminate it
-  if (reconnect_active_ && reconnect_task_.has_value()) {
-    co_await std::move(*reconnect_task_);
+  std::vector<io::awaitable<void>> tasks;
+  if (read_task_.has_value()) {
+    tasks.push_back(std::move(*read_task_));
+    read_task_.reset();
+  }
+  if (reconnect_task_.has_value()) {
+    tasks.push_back(std::move(*reconnect_task_));
     reconnect_task_.reset();
+  }
+
+  if (!tasks.empty()) {
+    co_await io::when_all(std::move(tasks));
   }
 }
 
