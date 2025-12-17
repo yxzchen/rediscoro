@@ -42,13 +42,7 @@ struct execute_result<T1, T2, Ts...> {
  */
 class connection {
  public:
-  enum class state {
-    idle,
-    connecting,
-    running,
-    stopped,
-    failed,
-  };
+  using state = detail::connection_impl::state;
 
   connection(io::io_context& ctx, config cfg);
   ~connection();
@@ -66,7 +60,7 @@ class connection {
   /// Execute a request and adapt its responses into `resp`.
   template <class Response = ignore_t>
   auto execute(request const& req, Response& resp = std::ignore) -> io::awaitable<void> {
-    co_await impl_->execute(req, resp);
+    co_await impl_->execute_any(req, adapter::any_adapter{resp});
   }
 
   /// Execute a request and return its adapted reply object by value.

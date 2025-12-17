@@ -60,13 +60,13 @@ class connection_impl : public std::enable_shared_from_this<connection_impl> {
  private:
   auto ensure_pipeline() -> void;
   auto handshake() -> io::awaitable<void>;
-  void close_transport() noexcept;
-
   auto async_write(request const& req) -> io::awaitable<void>;
 
   auto read_loop() -> io::awaitable<void>;
   auto reconnect_loop() -> io::awaitable<void>;
+
   void fail(std::error_code ec);
+  void close_transport() noexcept;
 
   [[nodiscard]] auto is_inactive_state() const noexcept -> bool {
     return state_ == state::idle || state_ == state::stopped || state_ == state::failed;

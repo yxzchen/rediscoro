@@ -24,7 +24,7 @@ auto connection::graceful_stop() -> io::awaitable<void> {
 }
 
 auto connection::current_state() const noexcept -> state {
-  return static_cast<state>(impl_->current_state());
+  return impl_->current_state();
 }
 
 auto connection::is_running() const noexcept -> bool {

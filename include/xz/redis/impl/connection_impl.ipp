@@ -19,9 +19,7 @@ namespace xz::redis::detail {
 connection_impl::connection_impl(io::io_context& ctx, config cfg)
     : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, parser_{} {}
 
-connection_impl::~connection_impl() {
-  stop();
-}
+connection_impl::~connection_impl() { stop(); }
 
 auto connection_impl::ensure_pipeline() -> void {
   if (pipeline_ && !pipeline_->stopped()) return;
@@ -42,8 +40,8 @@ auto connection_impl::run() -> io::awaitable<void> {
   }
 
   state_ = state::connecting;
-  parser_.reset();
   error_ = {};
+  parser_.reset();
 
   try {
     auto endpoint = io::ip::tcp_endpoint{io::ip::address_v4::from_string(cfg_.host), cfg_.port};
@@ -160,7 +158,7 @@ void connection_impl::fail(std::error_code ec) {
 void connection_impl::stop() {
   reconnect_active_ = false;
 
-  if (state_ == state::stopped) {
+  if (is_inactive_state()) {
     return;
   }
 
@@ -178,7 +176,7 @@ auto connection_impl::graceful_stop() -> io::awaitable<void> {
 
   // Wait for background tasks to complete
   // Note: read_loop uses use_detached so can't be awaited; socket close will terminate it
-  if (reconnect_task_.has_value()) {
+  if (reconnect_active_ && reconnect_task_.has_value()) {
     co_await std::move(*reconnect_task_);
     reconnect_task_.reset();
   }
@@ -222,7 +220,6 @@ auto connection_impl::reconnect_loop() -> io::awaitable<void> {
       }
     }
   }
-  reconnect_active_ = false;
 }
 
 auto connection_impl::handshake() -> io::awaitable<void> {
