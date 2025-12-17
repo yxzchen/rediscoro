@@ -42,11 +42,11 @@ TEST_F(PipelineTest, ExecutePing) {
     request req;
     req.push("PING");
 
-    response<std::string> resp;
+    response0<std::string> resp;
     co_await conn.execute(req, resp);
 
-    EXPECT_TRUE(std::get<0>(resp).has_value());
-    EXPECT_EQ(std::get<0>(resp).value(), "PONG");
+    EXPECT_TRUE(resp.has_value());
+    EXPECT_EQ(resp.value(), "PONG");
   });
 }
 
@@ -55,8 +55,8 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
 
   test_util::run_async(ctx, [&]() -> awaitable<void> {
     connection conn{ctx, cfg};
-    response<std::string> pong;
-    response<std::string> echo;
+    response0<std::string> pong;
+    response0<std::string> echo;
 
     auto t1 = [&]() -> awaitable<void> {
       request req;
@@ -74,10 +74,10 @@ TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
     // Start both "concurrently" from the caller's perspective; pipeline serializes them.
     co_await when_all(t1(), t2());
 
-    EXPECT_TRUE(std::get<0>(pong).has_value());
-    EXPECT_EQ(std::get<0>(pong).value(), "PONG");
+    EXPECT_TRUE(pong.has_value());
+    EXPECT_EQ(pong.value(), "PONG");
 
-    EXPECT_TRUE(std::get<0>(echo).has_value());
-    EXPECT_EQ(std::get<0>(echo).value(), "hello");
+    EXPECT_TRUE(echo.has_value());
+    EXPECT_EQ(echo.value(), "hello");
   });
 }

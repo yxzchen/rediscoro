@@ -63,7 +63,7 @@ TEST_F(ConnectionTest, ConnectTimeoutToHttpServer) {
   config c = cfg;
   c.host = "153.3.238.127";
   c.port = 80;
-  c.connect_timeout = std::chrono::milliseconds{5};     // RTT ~30ms => should timeout
+  c.connect_timeout = std::chrono::milliseconds{1};
   c.request_timeout = std::chrono::milliseconds{200};
 
   test_util::run_async(ctx, [&]() -> awaitable<void> {
@@ -114,7 +114,7 @@ TEST_F(ConnectionTest, CommandTimeoutOnBlockingCommand) {
     // BLPOP blocks up to 1s; with request_timeout=50ms this should timeout.
     request req;
     req.push("BLPOP", "redisxz-test-nonexistent-key", "1");
-    response<ignore_t> resp;
+    response0<ignore_t> resp;
 
     try {
       co_await conn.execute(req, resp);
@@ -143,7 +143,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
     {
       request del;
       del.push("DEL", key_counter, key_hash, key_list);
-      response<int> del_resp;
+      response0<int> del_resp;
       co_await conn.execute(del, del_resp);
       (void)del_resp;
     }
@@ -152,83 +152,83 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
     {
       request r;
       r.push("INCR", key_counter);
-      response<int> out;
+      response0<int> out;
       co_await conn.execute(r, out);
-      if (!std::get<0>(out).has_value()) {
-        ADD_FAILURE() << "INCR failed: " << std::get<0>(out).error().message;
+      if (!out.has_value()) {
+        ADD_FAILURE() << "INCR failed: " << out.error().message;
         co_return;
       }
-      EXPECT_GE(std::get<0>(out).value(), 1);
+      EXPECT_GE(out.value(), 1);
     }
 
     // ECHO -> string
     {
       request r;
       r.push("ECHO", "hello");
-      response<std::string> out;
+      response0<std::string> out;
       co_await conn.execute(r, out);
-      if (!std::get<0>(out).has_value()) {
-        ADD_FAILURE() << "ECHO failed: " << std::get<0>(out).error().message;
+      if (!out.has_value()) {
+        ADD_FAILURE() << "ECHO failed: " << out.error().message;
         co_return;
       }
-      EXPECT_EQ(std::get<0>(out).value(), "hello");
+      EXPECT_EQ(out.value(), "hello");
     }
 
     // GET missing -> optional<string> == null
     {
       request r;
       r.push("GET", "redisxz-test:missing-key");
-      response<std::optional<std::string>> out;
+      response0<std::optional<std::string>> out;
       co_await conn.execute(r, out);
-      if (!std::get<0>(out).has_value()) {
-        ADD_FAILURE() << "GET failed: " << std::get<0>(out).error().message;
+      if (!out.has_value()) {
+        ADD_FAILURE() << "GET failed: " << out.error().message;
         co_return;
       }
-      EXPECT_FALSE(std::get<0>(out).value().has_value());
+      EXPECT_FALSE(out.value().has_value());
     }
 
     // HSET + HGETALL -> map<string,string> (RESP3 map)
     {
       request r1;
       r1.push("HSET", key_hash, "field", "value");
-      response<int> hset;
+      response0<int> hset;
       co_await conn.execute(r1, hset);
-      if (!std::get<0>(hset).has_value()) {
-        ADD_FAILURE() << "HSET failed: " << std::get<0>(hset).error().message;
+      if (!hset.has_value()) {
+        ADD_FAILURE() << "HSET failed: " << hset.error().message;
         co_return;
       }
 
       request r2;
       r2.push("HGETALL", key_hash);
-      response<std::map<std::string, std::string>> hgetall;
+      response0<std::map<std::string, std::string>> hgetall;
       co_await conn.execute(r2, hgetall);
-      if (!std::get<0>(hgetall).has_value()) {
-        ADD_FAILURE() << "HGETALL failed: " << std::get<0>(hgetall).error().message;
+      if (!hgetall.has_value()) {
+        ADD_FAILURE() << "HGETALL failed: " << hgetall.error().message;
         co_return;
       }
-      EXPECT_EQ(std::get<0>(hgetall).value().at("field"), "value");
+      EXPECT_EQ(hgetall.value().at("field"), "value");
     }
 
     // RPUSH + LRANGE -> vector<string>
     {
       request r1;
       r1.push("RPUSH", key_list, "a", "b", "c");
-      response<int> rpush;
+      response0<int> rpush;
       co_await conn.execute(r1, rpush);
-      if (!std::get<0>(rpush).has_value()) {
-        ADD_FAILURE() << "RPUSH failed: " << std::get<0>(rpush).error().message;
+      if (!rpush.has_value()) {
+        ADD_FAILURE() << "RPUSH failed: " << rpush.error().message;
         co_return;
       }
 
       request r2;
       r2.push("LRANGE", key_list, "0", "-1");
-      response<std::vector<std::string>> lrange;
+      response0<std::vector<std::string>> lrange;
       co_await conn.execute(r2, lrange);
-      if (!std::get<0>(lrange).has_value()) {
-        ADD_FAILURE() << "LRANGE failed: " << std::get<0>(lrange).error().message;
+      if (!lrange.has_value()) {
+        ADD_FAILURE() << "LRANGE failed: " << lrange.error().message;
         co_return;
       }
-      auto const& v = std::get<0>(lrange).value();
+      auto const& v = lrange.value();
       if (v.size() != 3u) {
         ADD_FAILURE() << "LRANGE returned unexpected size: " << v.size();
         co_return;
@@ -251,20 +251,20 @@ TEST_F(ConnectionTest, ServerErrorAndTypeMismatchAreCapturedInResult) {
     {
       request r;
       r.push("THIS_COMMAND_DOES_NOT_EXIST");
-      response<ignore_t> out;
+      response0<ignore_t> out;
       co_await conn.execute(r, out);
-      EXPECT_FALSE(std::get<0>(out).has_value());
-      EXPECT_FALSE(std::get<0>(out).error().message.empty());
+      EXPECT_FALSE(out.has_value());
+      EXPECT_FALSE(out.error().message.empty());
     }
 
     // Type mismatch: ECHO returns string, parse as int => error in result.
     {
       request r;
       r.push("ECHO", "not-a-number");
-      response<int> out;
+      response0<int> out;
       co_await conn.execute(r, out);
-      EXPECT_FALSE(std::get<0>(out).has_value());
-      EXPECT_FALSE(std::get<0>(out).error().message.empty());
+      EXPECT_FALSE(out.has_value());
+      EXPECT_FALSE(out.error().message.empty());
     }
   });
 }
