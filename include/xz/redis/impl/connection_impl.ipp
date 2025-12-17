@@ -205,21 +205,21 @@ auto connection_impl::reconnect_loop() -> io::awaitable<void> {
     }
 
     if (!reconnect_active_ || state_ == state::stopped) {
-      reconnect_active_ = false;
-      co_return;
+      break;
     }
 
     try {
       co_await run();
-      reconnect_active_ = false;
-      co_return;
+      break;  // Success
     } catch (...) {
       if (!reconnect_active_ || state_ == state::stopped) {
-        reconnect_active_ = false;
-        co_return;
+        break;
       }
+      // Continue loop on reconnect failure
     }
   }
+  reconnect_active_ = false;
+  reconnect_task_.reset();
 }
 
 auto connection_impl::handshake() -> io::awaitable<void> {
