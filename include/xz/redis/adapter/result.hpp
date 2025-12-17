@@ -9,7 +9,7 @@
 namespace xz::redis::adapter {
 
 struct error {
-  std::string msg;
+  std::string message;
 };
 
 template <typename T>

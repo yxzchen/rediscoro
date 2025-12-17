@@ -47,7 +47,7 @@ TEST_F(ConnectionTest, RunBasic) {
     response<std::optional<std::string>> name;
     co_await conn.execute(req, name);
     if (!std::get<0>(name).has_value()) {
-      ADD_FAILURE() << "CLIENT GETNAME failed: " << std::get<0>(name).error().msg;
+      ADD_FAILURE() << "CLIENT GETNAME failed: " << std::get<0>(name).error().message;
       co_return;
     }
     if (!std::get<0>(name).value().has_value()) {
@@ -155,7 +155,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<int> out;
       co_await conn.execute(r, out);
       if (!std::get<0>(out).has_value()) {
-        ADD_FAILURE() << "INCR failed: " << std::get<0>(out).error().msg;
+        ADD_FAILURE() << "INCR failed: " << std::get<0>(out).error().message;
         co_return;
       }
       EXPECT_GE(std::get<0>(out).value(), 1);
@@ -168,7 +168,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<std::string> out;
       co_await conn.execute(r, out);
       if (!std::get<0>(out).has_value()) {
-        ADD_FAILURE() << "ECHO failed: " << std::get<0>(out).error().msg;
+        ADD_FAILURE() << "ECHO failed: " << std::get<0>(out).error().message;
         co_return;
       }
       EXPECT_EQ(std::get<0>(out).value(), "hello");
@@ -181,7 +181,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<std::optional<std::string>> out;
       co_await conn.execute(r, out);
       if (!std::get<0>(out).has_value()) {
-        ADD_FAILURE() << "GET failed: " << std::get<0>(out).error().msg;
+        ADD_FAILURE() << "GET failed: " << std::get<0>(out).error().message;
         co_return;
       }
       EXPECT_FALSE(std::get<0>(out).value().has_value());
@@ -194,7 +194,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<int> hset;
       co_await conn.execute(r1, hset);
       if (!std::get<0>(hset).has_value()) {
-        ADD_FAILURE() << "HSET failed: " << std::get<0>(hset).error().msg;
+        ADD_FAILURE() << "HSET failed: " << std::get<0>(hset).error().message;
         co_return;
       }
 
@@ -203,7 +203,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<std::map<std::string, std::string>> hgetall;
       co_await conn.execute(r2, hgetall);
       if (!std::get<0>(hgetall).has_value()) {
-        ADD_FAILURE() << "HGETALL failed: " << std::get<0>(hgetall).error().msg;
+        ADD_FAILURE() << "HGETALL failed: " << std::get<0>(hgetall).error().message;
         co_return;
       }
       EXPECT_EQ(std::get<0>(hgetall).value().at("field"), "value");
@@ -216,7 +216,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<int> rpush;
       co_await conn.execute(r1, rpush);
       if (!std::get<0>(rpush).has_value()) {
-        ADD_FAILURE() << "RPUSH failed: " << std::get<0>(rpush).error().msg;
+        ADD_FAILURE() << "RPUSH failed: " << std::get<0>(rpush).error().message;
         co_return;
       }
 
@@ -225,7 +225,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
       response<std::vector<std::string>> lrange;
       co_await conn.execute(r2, lrange);
       if (!std::get<0>(lrange).has_value()) {
-        ADD_FAILURE() << "LRANGE failed: " << std::get<0>(lrange).error().msg;
+        ADD_FAILURE() << "LRANGE failed: " << std::get<0>(lrange).error().message;
         co_return;
       }
       auto const& v = std::get<0>(lrange).value();
@@ -254,7 +254,7 @@ TEST_F(ConnectionTest, ServerErrorAndTypeMismatchAreCapturedInResult) {
       response<ignore_t> out;
       co_await conn.execute(r, out);
       EXPECT_FALSE(std::get<0>(out).has_value());
-      EXPECT_FALSE(std::get<0>(out).error().msg.empty());
+      EXPECT_FALSE(std::get<0>(out).error().message.empty());
     }
 
     // Type mismatch: ECHO returns string, parse as int => error in result.
@@ -264,7 +264,7 @@ TEST_F(ConnectionTest, ServerErrorAndTypeMismatchAreCapturedInResult) {
       response<int> out;
       co_await conn.execute(r, out);
       EXPECT_FALSE(std::get<0>(out).has_value());
-      EXPECT_FALSE(std::get<0>(out).error().msg.empty());
+      EXPECT_FALSE(std::get<0>(out).error().message.empty());
     }
   });
 }

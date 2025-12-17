@@ -107,7 +107,7 @@ TEST_F(AdapterTest, VectorResponseStoresPerElementError) {
   EXPECT_TRUE(res[0].has_value());
   EXPECT_EQ(res[0].value(), 10);
   EXPECT_FALSE(res[1].has_value());
-  EXPECT_EQ(res[1].error().msg, "ERR nope");
+  EXPECT_EQ(res[1].error().message, "ERR nope");
 }
 
 TEST_F(AdapterTest, VectorOfInts) {

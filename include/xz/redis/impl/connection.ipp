@@ -227,7 +227,7 @@ auto connection::handshake() -> io::awaitable<void> {
   for (std::size_t i = 0; i < resp.size(); ++i) {
     if (!resp[i].has_value()) {
       auto const& op = (i < ops.size() ? ops[i] : std::string("HANDSHAKE"));
-      throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error), op + ": " + resp[i].error().msg);
+      throw std::system_error(make_error_code(xz::redis::error::resp3_simple_error), op + ": " + resp[i].error().message);
     }
   }
 }
