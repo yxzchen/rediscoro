@@ -1,26 +1,20 @@
 #pragma once
 
-#include <xz/io/co_spawn.hpp>
+#include <xz/io/awaitable.hpp>
 #include <xz/io/io_context.hpp>
-#include <xz/io/tcp_socket.hpp>
 #include <xz/redis/adapter/any_adapter.hpp>
 #include <xz/redis/config.hpp>
+#include <xz/redis/detail/connection_impl.hpp>
 #include <xz/redis/request.hpp>
-#include <xz/redis/resp3/parser.hpp>
 #include <xz/redis/response.hpp>
 
-#include <coroutine>
 #include <memory>
-#include <optional>
-#include <string>
 #include <system_error>
 #include <tuple>
 
 namespace xz::redis {
 
 namespace detail {
-class pipeline;  // internal: request scheduling / response dispatch
-
 template <class... Ts>
 struct execute_result;
 
@@ -36,21 +30,15 @@ struct execute_result<T1, T2, Ts...> {
 }
 
 /**
- * @brief Connection handles TCP and RESP parsing
+ * @brief Lightweight RAII handle to a Redis connection
  *
- * Responsibilities:
- * - TCP connection management
- * - RESP3 parsing
- * - Read loop for incoming data
+ * - Destructor calls `stop()` but does NOT block
+ * - Background tasks (read_loop, reconnect_loop) are kept alive by shared impl state
+ * - For graceful shutdown that waits for tasks, call `graceful_stop()` before destruction
  *
  * Thread Safety:
  * - connection is NOT thread-safe
  * - All public methods must be called from the same io_context thread
- *
- * Does NOT handle:
- * - Handshake (HELLO/AUTH/SELECT/SETNAME is performed in run() after connect)
- * - User request queueing (handled by pipeline/scheduler)
- * - Response dispatching (handled by pipeline/scheduler)
  */
 class connection {
  public:
@@ -67,42 +55,24 @@ class connection {
 
   connection(connection const&) = delete;
   auto operator=(connection const&) -> connection& = delete;
-  connection(connection&&) = delete;
-  auto operator=(connection&&) -> connection& = delete;
+  connection(connection&&) = default;
+  auto operator=(connection&&) -> connection& = default;
 
   /**
-   * @brief Start the connection (TCP connect + read loop)
-   *
-   * Steps:
-   * 1. TCP connect
-   * 2. Start read loop (background)
-   *
-   * Post-condition:
-   * - On success: TCP connection established and read loop running
-   * - On failure: exception is thrown with error code
-   *
-   * @warning Calling run() more than once is undefined behavior.
-   *          Concretely: calling run() while not in state::idle/state::stopped/state::failed is UB.
-   *          (In debug builds we assert; in release builds behavior is unspecified.)
+   * @brief Start the connection (TCP connect + handshake + read loop)
    */
   auto run() -> io::awaitable<void>;
 
   /// Execute a request and adapt its responses into `resp`.
-  ///
-  /// If `resp` is omitted, defaults to `std::ignore` (errors still propagate).
   template <class Response = ignore_t>
   auto execute(request const& req, Response& resp = std::ignore) -> io::awaitable<void> {
-    co_await execute_any(req, adapter::any_adapter{resp});
+    co_await impl_->execute(req, resp);
   }
 
   /// Execute a request and return its adapted reply object by value.
   ///
-  /// - For one reply type: returns `response0<T>` (i.e. `adapter::result<T>`)
-  /// - For multiple reply types: returns `response<Ts...>` (tuple of `adapter::result<Ti>`)
-  ///
-  /// Example:
-  /// - `auto r = co_await conn.execute_one<int>(req);`
-  /// - `auto tup = co_await conn.execute_one<int, std::string>(req);`
+  /// - For one reply type: returns `response0<T>`
+  /// - For multiple reply types: returns `response<Ts...>`
   template <class... Ts>
   auto execute_one(request const& req) -> io::awaitable<typename detail::execute_result<Ts...>::type> {
     static_assert(sizeof...(Ts) > 0, "execute_one<Ts...> requires at least one reply type");
@@ -111,38 +81,26 @@ class connection {
     co_return resp;
   }
 
+  /// Stop the connection (non-blocking).
+  ///
+  /// Background tasks will exit soon, but this returns immediately.
   void stop();
-  [[nodiscard]] auto current_state() const noexcept -> state { return state_; }
-  [[nodiscard]] auto is_running() const noexcept -> bool { return state_ == state::running; }
-  auto error() const -> std::error_code;
 
-  auto get_executor() noexcept -> io::io_context& { return ctx_; }
+  /// Stop and wait for all background tasks to complete.
+  ///
+  /// Use this before destruction if you need guaranteed cleanup.
+  auto graceful_stop() -> io::awaitable<void>;
+
+  [[nodiscard]] auto current_state() const noexcept -> state;
+  [[nodiscard]] auto is_running() const noexcept -> bool;
+  auto error() const -> std::error_code;
+  auto get_executor() noexcept -> io::io_context&;
 
  private:
-  auto ensure_pipeline() -> void;
-  auto handshake() -> io::awaitable<void>;
-  void close_transport() noexcept;
-
-  auto async_write(request const& req) -> io::awaitable<void>;
-
   auto execute_any(request const& req, adapter::any_adapter adapter) -> io::awaitable<void>;
 
-  auto read_loop() -> io::awaitable<void>;
-  void fail(std::error_code ec);
-
-  [[nodiscard]] auto is_inactive_state() const noexcept -> bool {
-    return state_ == state::idle || state_ == state::stopped || state_ == state::failed;
-  }
-
  private:
-  state state_{state::idle};
-  config cfg_;
-  std::error_code error_;
-
-  io::io_context& ctx_;
-  io::tcp_socket socket_;
-  resp3::parser parser_;
-  std::shared_ptr<detail::pipeline> pipeline_{};
+  std::shared_ptr<detail::connection_impl> impl_;
 };
 
 }  // namespace xz::redis

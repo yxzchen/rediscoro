@@ -8,5 +8,6 @@
 #include <xz/redis/resp3/impl/parser.ipp>
 #include <xz/redis/resp3/impl/serializer.ipp>
 #include <xz/redis/resp3/impl/type.ipp>
+#include <xz/redis/impl/connection_impl.ipp>
 
 #include <xz/io/src.hpp>
