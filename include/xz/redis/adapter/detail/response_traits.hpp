@@ -118,6 +118,14 @@ struct response_traits<response<Ts...>> {
   static auto adapt(response_type& r) noexcept { return adapter_type{r}; }
 };
 
+template <class T>
+struct response_traits<result<T>> {
+  using response_type = result<T>;
+  using adapter_type = result_traits<response_type>;
+
+  static auto adapt(response_type& v) noexcept { return adapter_type::adapt(v); }
+};
+
 template <class T, class Allocator>
 struct response_traits<std::vector<result<T>, Allocator>> {
   using response_type = std::vector<result<T>, Allocator>;

@@ -44,17 +44,17 @@ TEST_F(ConnectionTest, RunBasic) {
     // Verify handshake applied client name.
     request req;
     req.push("CLIENT", "GETNAME");
-    response<std::optional<std::string>> name;
+    response0<std::optional<std::string>> name;
     co_await conn.execute(req, name);
-    if (!std::get<0>(name).has_value()) {
-      ADD_FAILURE() << "CLIENT GETNAME failed: " << std::get<0>(name).error().message;
+    if (!name.has_value()) {
+      ADD_FAILURE() << "CLIENT GETNAME failed: " << name.error().message;
       co_return;
     }
-    if (!std::get<0>(name).value().has_value()) {
+    if (!name.value().has_value()) {
       ADD_FAILURE() << "CLIENT GETNAME returned null (name not set)";
       co_return;
     }
-    EXPECT_EQ(std::get<0>(name).value().value(), "redisxz-test");
+    EXPECT_EQ(name.value().value(), "redisxz-test");
   });
 }
 

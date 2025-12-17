@@ -10,6 +10,9 @@ namespace xz::redis {
 template <class... Ts>
 using response = std::tuple<adapter::result<Ts>...>;
 
+template <class T>
+using response0 = adapter::result<T>;
+
 /// A "generic" response that preserves message boundaries:
 /// one owning `resp3::message` per received reply.
 using generic_response = adapter::result<std::vector<resp3::msg>>;
