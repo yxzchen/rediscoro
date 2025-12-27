@@ -105,6 +105,11 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
   };
 
   struct op_awaiter {
+    // IMPORTANT: Explicit constructor to avoid GCC/ASan use-after-free issues observed with
+    // aggregate initialization of awaiters containing shared_ptr members.
+    // See iocoro's own comments in `iocoro/detail/spawn.hpp`.
+    explicit op_awaiter(std::shared_ptr<op_state> op_) : op(std::move(op_)) {}
+
     std::shared_ptr<op_state> op{};
 
     auto await_ready() const noexcept -> bool { return !op || op->done; }
