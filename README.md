@@ -1,4 +1,4 @@
-# redisxz
+# rediscoro
 
 A modern C++20 Redis client built on coroutines and the [ioxz](https://github.com/yxzchen/ioxz) async I/O library.
 
@@ -15,12 +15,12 @@ This project is under development. It has not been fully tested and its API is n
 ## Example Usage
 
 ```cpp
-#include <xz/redis/src.hpp>  // Include once in one .cpp file
-#include <xz/redis.hpp>
+#include <rediscoro/src.hpp>  // Include once in one .cpp file
+#include <rediscoro.hpp>
 #include <xz/io/io_context.hpp>
 #include <iostream>
 
-using namespace xz::redis;
+using namespace rediscoro;
 using namespace xz::io;
 
 awaitable<void> example() {
@@ -74,15 +74,15 @@ int main() {
 ### CMake
 
 ```cmake
-add_subdirectory(redisxz)
-target_link_libraries(your_app PRIVATE redisxz)
+add_subdirectory(rediscoro)
+target_link_libraries(your_app PRIVATE rediscoro)
 ```
 
 ### Manual
 
-1. Add `redisxz/include` to your include path
-2. In your headers: `#include <xz/redis.hpp>`
-3. In exactly **one** source file: `#include <xz/redis/src.hpp>`
+1. Add `rediscoro/include` to your include path
+2. In your headers: `#include <rediscoro.hpp>`
+3. In exactly **one** source file: `#include <rediscoro/src.hpp>`
 
 ## Supported Features
 

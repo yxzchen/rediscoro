@@ -1,9 +1,9 @@
 #include <xz/io/io_context.hpp>
 #include <xz/io/error.hpp>
-#include <xz/redis/config.hpp>
-#include <xz/redis/connection.hpp>
-#include <xz/redis/request.hpp>
-#include <xz/redis/response.hpp>
+#include <rediscoro/config.hpp>
+#include <rediscoro/connection.hpp>
+#include <rediscoro/request.hpp>
+#include <rediscoro/response.hpp>
 
 #include <gtest/gtest.h>
 
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-using namespace xz::redis;
+using namespace rediscoro;
 using namespace xz::io;
 
 class ConnectionTest : public ::testing::Test {
@@ -28,7 +28,7 @@ class ConnectionTest : public ::testing::Test {
     cfg.auto_reconnect = false;  // Disable for most tests
     // Exercise handshake steps against local Redis.
     cfg.database = 1;
-    cfg.client_name = std::string{"redisxz-test"};
+    cfg.client_name = std::string{"rediscoro-test"};
   }
 
   config cfg;
@@ -55,7 +55,7 @@ TEST_F(ConnectionTest, RunBasic) {
       ADD_FAILURE() << "CLIENT GETNAME returned null (name not set)";
       co_return;
     }
-    EXPECT_EQ(name.value().value(), "redisxz-test");
+    EXPECT_EQ(name.value().value(), "rediscoro-test");
   });
 }
 
@@ -114,7 +114,7 @@ TEST_F(ConnectionTest, CommandTimeoutOnBlockingCommand) {
 
     // BLPOP blocks up to 1s; with request_timeout=50ms this should timeout.
     request req;
-    req.push("BLPOP", "redisxz-test-nonexistent-key", "1");
+    req.push("BLPOP", "rediscoro-test-nonexistent-key", "1");
     response0<ignore_t> resp;
 
     try {
@@ -136,9 +136,9 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
     co_await conn.run();
 
     // Use DB=cfg.database (handshake already SELECTed it); keep keys under a test prefix.
-    std::string const key_counter = "redisxz-test:counter";
-    std::string const key_hash = "redisxz-test:hash";
-    std::string const key_list = "redisxz-test:list";
+    std::string const key_counter = "rediscoro-test:counter";
+    std::string const key_hash = "rediscoro-test:hash";
+    std::string const key_list = "rediscoro-test:list";
 
     // DEL keys (best-effort).
     {
@@ -178,7 +178,7 @@ TEST_F(ConnectionTest, ExecuteVariousTypes) {
     // GET missing -> optional<string> == null
     {
       request r;
-      r.push("GET", "redisxz-test:missing-key");
+      r.push("GET", "rediscoro-test:missing-key");
       response0<std::optional<std::string>> out;
       co_await conn.execute(r, out);
       if (!out.has_value()) {
@@ -281,7 +281,7 @@ TEST_F(ConnectionTest, MultiCommandSingleRequestAllOk) {
     request req;
     req.push("PING");
     req.push("ECHO", "hello");
-    req.push("INCR", "redisxz-test:multi:counter");
+    req.push("INCR", "rediscoro-test:multi:counter");
 
     dynamic_response<ignore_t> resp;
     co_await conn.execute(req, resp);
@@ -350,8 +350,8 @@ TEST_F(ConnectionTest, TupleResponseIntStringVectorStringWorks) {
     connection conn{ctx, cfg};
     co_await conn.run();
 
-    std::string const key_counter = "redisxz-test:multi:tuple:counter";
-    std::string const key_list = "redisxz-test:multi:tuple:list";
+    std::string const key_counter = "rediscoro-test:multi:tuple:counter";
+    std::string const key_list = "rediscoro-test:multi:tuple:list";
 
     // Best-effort cleanup.
     {
@@ -413,7 +413,7 @@ TEST_F(ConnectionTest, ExecuteOneSingleTypeWorks) {
     connection conn{ctx, cfg};
     co_await conn.run();
 
-    std::string const key_counter = "redisxz-test:execute_one:counter";
+    std::string const key_counter = "rediscoro-test:execute_one:counter";
 
     request req;
     req.push("INCR", key_counter);
@@ -434,7 +434,7 @@ TEST_F(ConnectionTest, ExecuteOneMultipleTypesWorkWithGenericContainers) {
     connection conn{ctx, cfg};
     co_await conn.run();
 
-    std::string const key_list = "redisxz-test:execute_one:list";
+    std::string const key_list = "rediscoro-test:execute_one:list";
 
     // Seed list for LRANGE.
     {
@@ -448,7 +448,7 @@ TEST_F(ConnectionTest, ExecuteOneMultipleTypesWorkWithGenericContainers) {
     request req;
     req.push("ECHO", "hello");
     req.push("LRANGE", key_list, "0", "-1");
-    req.push("GET", "redisxz-test:execute_one:missing");
+    req.push("GET", "rediscoro-test:execute_one:missing");
 
     auto resp = co_await conn.execute_one<std::string, std::vector<std::string>, std::optional<std::string>>(req);
     auto& r0 = std::get<0>(resp);

@@ -1,16 +1,16 @@
-#include <xz/redis/adapter/any_adapter.hpp>
-#include <xz/redis/adapter/detail/impl.hpp>
-#include <xz/redis/adapter/detail/result_traits.hpp>
-#include <xz/redis/adapter/result.hpp>
-#include <xz/redis/resp3/node.hpp>
-#include <xz/redis/response.hpp>
+#include <rediscoro/adapter/any_adapter.hpp>
+#include <rediscoro/adapter/detail/impl.hpp>
+#include <rediscoro/adapter/detail/result_traits.hpp>
+#include <rediscoro/adapter/result.hpp>
+#include <rediscoro/resp3/node.hpp>
+#include <rediscoro/response.hpp>
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace xz::redis;
-using namespace xz::redis::adapter;
+using namespace rediscoro;
+using namespace rediscoro::adapter;
 
 class AdapterTest : public ::testing::Test {
  protected:

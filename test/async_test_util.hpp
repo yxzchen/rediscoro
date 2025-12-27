@@ -10,7 +10,7 @@
 #include <memory>
 #include <utility>
 
-namespace xz::redis::test_util {
+namespace rediscoro::test_util {
 
 inline void fail_and_stop_on_exception(std::exception_ptr eptr) {
   if (!eptr) return;
@@ -36,4 +36,4 @@ inline void run_async(xz::io::io_context& ctx, Factory&& factory) {
   ctx.run();
 }
 
-}  // namespace xz::redis::test_util
+}  // namespace rediscoro::test_util
