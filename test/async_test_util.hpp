@@ -4,6 +4,8 @@
 #include <xz/io/io_context.hpp>
 #include <xz/io/work_guard.hpp>
 
+#include <rediscoro/src.hpp>
+
 #include <gtest/gtest.h>
 
 #include <exception>
@@ -29,8 +31,7 @@ inline void fail_and_stop_on_exception(std::exception_ptr eptr) {
 template <class Factory>
 inline void run_async(xz::io::io_context& ctx, Factory&& factory) {
   xz::io::co_spawn(
-      ctx, 
-      [f = std::forward<Factory>(factory)]() mutable -> xz::io::awaitable<void> { co_await f(); },
+      ctx, [f = std::forward<Factory>(factory)]() mutable -> xz::io::awaitable<void> { co_await f(); },
       [&](std::exception_ptr eptr) mutable { fail_and_stop_on_exception(eptr); });
 
   ctx.run();

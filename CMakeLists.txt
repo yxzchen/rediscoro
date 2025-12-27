@@ -4,7 +4,6 @@ project(rediscoro VERSION 1.0.0 LANGUAGES CXX)
 # Options
 option(REDISCORO_ENABLE_ASSERTS "Enable assertions in rediscoro library" OFF)
 option(REDISCORO_BUILD_TESTS "Build tests" ON)
-option(REDISCORO_USE_STDFMT "Use std::format instead of libfmt" OFF)
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 # Create interface library (header-only)

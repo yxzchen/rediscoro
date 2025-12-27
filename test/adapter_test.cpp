@@ -5,6 +5,8 @@
 #include <rediscoro/resp3/node.hpp>
 #include <rediscoro/response.hpp>
 
+#include <rediscoro/src.hpp>
+
 #include <gtest/gtest.h>
 
 #include <string>

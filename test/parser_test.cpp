@@ -2,6 +2,8 @@
 #include <rediscoro/resp3/parser.hpp>
 #include <gtest/gtest.h>
 
+#include <rediscoro/src.hpp>
+
 class ParserTest : public ::testing::Test {
 protected:
   void SetUp() override {}

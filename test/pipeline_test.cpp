@@ -5,6 +5,8 @@
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
 
+#include <rediscoro/src.hpp>
+
 #include <gtest/gtest.h>
 
 #include "async_test_util.hpp"
