@@ -1,16 +1,16 @@
 #include <xz/io/io_context.hpp>
 #include <xz/io/when_all.hpp>
-#include <xz/redis/config.hpp>
-#include <xz/redis/connection.hpp>
-#include <xz/redis/request.hpp>
-#include <xz/redis/response.hpp>
+#include <rediscoro/config.hpp>
+#include <rediscoro/connection.hpp>
+#include <rediscoro/request.hpp>
+#include <rediscoro/response.hpp>
 
 #include <gtest/gtest.h>
 
 #include "async_test_util.hpp"
 
 using namespace xz::io;
-using namespace xz::redis;
+using namespace rediscoro;
 
 class PipelineTest : public ::testing::Test {
  protected:
@@ -21,7 +21,7 @@ class PipelineTest : public ::testing::Test {
     cfg.request_timeout = std::chrono::milliseconds{1000};
     // Exercise handshake steps against local Redis.
     cfg.database = 1;
-    cfg.client_name = std::string{"redisxz-test"};
+    cfg.client_name = std::string{"rediscoro-test"};
 
     // cfg.host = "153.3.238.127";
     // cfg.port = 80;

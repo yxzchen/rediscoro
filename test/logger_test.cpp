@@ -1,4 +1,4 @@
-#include <xz/redis/logger.hpp>
+#include <rediscoro/logger.hpp>
 #include <gtest/gtest.h>
 
 #include <mutex>
@@ -9,8 +9,8 @@ class LoggerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Reset logger to default state before each test
-    xz::redis::logger::instance().set_log_function(nullptr);
-    xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
+    rediscoro::logger::instance().set_log_function(nullptr);
+    rediscoro::logger::instance().set_log_level(rediscoro::log_level::info);
 
     // Clear captured logs
     captured_logs_.clear();
@@ -18,21 +18,21 @@ class LoggerTest : public ::testing::Test {
 
   void TearDown() override {
     // Reset logger after each test
-    xz::redis::logger::instance().set_log_function(nullptr);
-    xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
+    rediscoro::logger::instance().set_log_function(nullptr);
+    rediscoro::logger::instance().set_log_level(rediscoro::log_level::info);
   }
 
   // Helper to capture log messages (thread-safe for concurrent tests)
   void setup_capture_logger() {
-    auto capture_fn = [this](xz::redis::log_context const& ctx) {
+    auto capture_fn = [this](rediscoro::log_context const& ctx) {
       std::lock_guard<std::mutex> lock(captured_logs_mutex_);
       captured_logs_.push_back({ctx.level, std::string(ctx.message)});
     };
-    xz::redis::logger::instance().set_log_function(capture_fn);
+    rediscoro::logger::instance().set_log_function(capture_fn);
   }
 
   struct LogEntry {
-    xz::redis::log_level level;
+    rediscoro::log_level level;
     std::string message;
   };
 
@@ -44,12 +44,12 @@ class LoggerTest : public ::testing::Test {
 
 TEST_F(LoggerTest, LogDebugMessage) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::debug);
 
   REDIS_LOG_DEBUG("Debug message");
 
   ASSERT_EQ(captured_logs_.size(), 1);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::debug);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::debug);
   EXPECT_EQ(captured_logs_[0].message, "Debug message");
 }
 
@@ -59,7 +59,7 @@ TEST_F(LoggerTest, LogInfoMessage) {
   REDIS_LOG_INFO("Info message");
 
   ASSERT_EQ(captured_logs_.size(), 1);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::info);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::info);
   EXPECT_EQ(captured_logs_[0].message, "Info message");
 }
 
@@ -69,7 +69,7 @@ TEST_F(LoggerTest, LogWarningMessage) {
   REDIS_LOG_WARNING("Warning message");
 
   ASSERT_EQ(captured_logs_.size(), 1);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::warning);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::warning);
   EXPECT_EQ(captured_logs_[0].message, "Warning message");
 }
 
@@ -79,7 +79,7 @@ TEST_F(LoggerTest, LogErrorMessage) {
   REDIS_LOG_ERROR("Error message");
 
   ASSERT_EQ(captured_logs_.size(), 1);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::error);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::error);
   EXPECT_EQ(captured_logs_[0].message, "Error message");
 }
 
@@ -127,7 +127,7 @@ TEST_F(LoggerTest, FormatWithNamedArgs) {
 
 TEST_F(LoggerTest, MinLevelFilteringInfo) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::info);
 
   REDIS_LOG_DEBUG("Should not appear");
   REDIS_LOG_INFO("Should appear");
@@ -135,14 +135,14 @@ TEST_F(LoggerTest, MinLevelFilteringInfo) {
   REDIS_LOG_ERROR("Should appear");
 
   ASSERT_EQ(captured_logs_.size(), 3);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::info);
-  EXPECT_EQ(captured_logs_[1].level, xz::redis::log_level::warning);
-  EXPECT_EQ(captured_logs_[2].level, xz::redis::log_level::error);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::info);
+  EXPECT_EQ(captured_logs_[1].level, rediscoro::log_level::warning);
+  EXPECT_EQ(captured_logs_[2].level, rediscoro::log_level::error);
 }
 
 TEST_F(LoggerTest, MinLevelFilteringWarning) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::warning);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::warning);
 
   REDIS_LOG_DEBUG("Should not appear");
   REDIS_LOG_INFO("Should not appear");
@@ -150,13 +150,13 @@ TEST_F(LoggerTest, MinLevelFilteringWarning) {
   REDIS_LOG_ERROR("Should appear");
 
   ASSERT_EQ(captured_logs_.size(), 2);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::warning);
-  EXPECT_EQ(captured_logs_[1].level, xz::redis::log_level::error);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::warning);
+  EXPECT_EQ(captured_logs_[1].level, rediscoro::log_level::error);
 }
 
 TEST_F(LoggerTest, MinLevelFilteringError) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::error);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::error);
 
   REDIS_LOG_DEBUG("Should not appear");
   REDIS_LOG_INFO("Should not appear");
@@ -164,12 +164,12 @@ TEST_F(LoggerTest, MinLevelFilteringError) {
   REDIS_LOG_ERROR("Should appear");
 
   ASSERT_EQ(captured_logs_.size(), 1);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::error);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::error);
 }
 
 TEST_F(LoggerTest, MinLevelFilteringDebug) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::debug);
 
   REDIS_LOG_DEBUG("Should appear");
   REDIS_LOG_INFO("Should appear");
@@ -184,11 +184,11 @@ TEST_F(LoggerTest, MinLevelFilteringDebug) {
 TEST_F(LoggerTest, CustomLogFunction) {
   std::vector<std::string> custom_logs;
 
-  auto custom_fn = [&custom_logs](xz::redis::log_context const& ctx) {
-    custom_logs.push_back(std::string("[CUSTOM:") + xz::redis::to_string(ctx.level) + "] " + std::string(ctx.message));
+  auto custom_fn = [&custom_logs](rediscoro::log_context const& ctx) {
+    custom_logs.push_back(std::string("[CUSTOM:") + rediscoro::to_string(ctx.level) + "] " + std::string(ctx.message));
   };
 
-  xz::redis::logger::instance().set_log_function(custom_fn);
+  rediscoro::logger::instance().set_log_function(custom_fn);
   REDIS_LOG_INFO("Custom log");
 
   ASSERT_EQ(custom_logs.size(), 1);
@@ -202,7 +202,7 @@ TEST_F(LoggerTest, ResetToDefaultLogger) {
   ASSERT_EQ(captured_logs_.size(), 1);
 
   // Reset to default (stderr)
-  xz::redis::logger::instance().set_log_function(nullptr);
+  rediscoro::logger::instance().set_log_function(nullptr);
 
   // This should go to stderr, not captured
   REDIS_LOG_INFO("To stderr");
@@ -214,11 +214,11 @@ TEST_F(LoggerTest, ResetToDefaultLogger) {
 TEST_F(LoggerTest, SetLogFunctionViaConvenienceFunction) {
   std::vector<std::string> custom_logs;
 
-  auto custom_fn = [&custom_logs](xz::redis::log_context const& ctx) {
+  auto custom_fn = [&custom_logs](rediscoro::log_context const& ctx) {
     custom_logs.push_back(std::string(ctx.message));
   };
 
-  xz::redis::set_log_function(custom_fn);
+  rediscoro::set_log_function(custom_fn);
   REDIS_LOG_INFO("Test");
 
   ASSERT_EQ(custom_logs.size(), 1);
@@ -228,17 +228,17 @@ TEST_F(LoggerTest, SetLogFunctionViaConvenienceFunction) {
 // === Level Conversion Tests ===
 
 TEST_F(LoggerTest, LogLevelToString) {
-  EXPECT_STREQ(xz::redis::to_string(xz::redis::log_level::debug), "debug");
-  EXPECT_STREQ(xz::redis::to_string(xz::redis::log_level::info), "info");
-  EXPECT_STREQ(xz::redis::to_string(xz::redis::log_level::warning), "warning");
-  EXPECT_STREQ(xz::redis::to_string(xz::redis::log_level::error), "error");
+  EXPECT_STREQ(rediscoro::to_string(rediscoro::log_level::debug), "debug");
+  EXPECT_STREQ(rediscoro::to_string(rediscoro::log_level::info), "info");
+  EXPECT_STREQ(rediscoro::to_string(rediscoro::log_level::warning), "warning");
+  EXPECT_STREQ(rediscoro::to_string(rediscoro::log_level::error), "error");
 }
 
 // === Thread Safety Tests (Lock-Free) ===
 
 TEST_F(LoggerTest, ConcurrentLogging) {
   setup_capture_logger();
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::debug);
 
   constexpr int num_threads = 10;
   constexpr int logs_per_thread = 100;
@@ -268,8 +268,8 @@ TEST_F(LoggerTest, ConcurrentLogLevelChanges) {
   // Thread that changes log level (lock-free atomic operations)
   threads.emplace_back([]() {
     for (int i = 0; i < 100; ++i) {
-      xz::redis::logger::instance().set_log_level(xz::redis::log_level::debug);
-      xz::redis::logger::instance().set_log_level(xz::redis::log_level::info);
+      rediscoro::logger::instance().set_log_level(rediscoro::log_level::debug);
+      rediscoro::logger::instance().set_log_level(rediscoro::log_level::info);
     }
   });
 
@@ -296,20 +296,20 @@ TEST_F(LoggerTest, ConcurrentLogLevelChanges) {
 TEST_F(LoggerTest, SetMinLogLevelConvenience) {
   setup_capture_logger();
 
-  xz::redis::set_log_level(xz::redis::log_level::warning);
+  rediscoro::set_log_level(rediscoro::log_level::warning);
 
   REDIS_LOG_INFO("Should not appear");
   REDIS_LOG_WARNING("Should appear");
 
   ASSERT_EQ(captured_logs_.size(), 1);
-  EXPECT_EQ(captured_logs_[0].level, xz::redis::log_level::warning);
+  EXPECT_EQ(captured_logs_[0].level, rediscoro::log_level::warning);
 }
 
 TEST_F(LoggerTest, GetMinLogLevel) {
-  xz::redis::logger::instance().set_log_level(xz::redis::log_level::warning);
+  rediscoro::logger::instance().set_log_level(rediscoro::log_level::warning);
 
-  auto level = xz::redis::logger::instance().get_log_level();
-  EXPECT_EQ(level, xz::redis::log_level::warning);
+  auto level = rediscoro::logger::instance().get_log_level();
+  EXPECT_EQ(level, rediscoro::log_level::warning);
 }
 
 // === Edge Cases ===

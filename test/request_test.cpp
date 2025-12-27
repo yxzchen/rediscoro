@@ -1,4 +1,4 @@
-#include <xz/redis/request.hpp>
+#include <rediscoro/request.hpp>
 #include <gtest/gtest.h>
 
 #include <deque>
@@ -10,7 +10,7 @@ class RequestTest : public ::testing::Test {
   void SetUp() override {}
   void TearDown() override {}
 
-  xz::redis::request req;
+  rediscoro::request req;
 };
 
 // === Basic Push Tests ===

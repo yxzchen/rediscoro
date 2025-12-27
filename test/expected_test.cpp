@@ -1,10 +1,10 @@
-#include <xz/redis/expected.hpp>
+#include <rediscoro/expected.hpp>
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace xz::redis;
+using namespace rediscoro;
 
 TEST(ExpectedTest, DefaultConstruction) {
   expected<int, std::string> e;
