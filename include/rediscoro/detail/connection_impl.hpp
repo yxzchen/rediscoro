@@ -1,8 +1,8 @@
 #pragma once
 
-#include <xz/io/awaitable.hpp>
-#include <xz/io/io_context.hpp>
-#include <xz/io/tcp_socket.hpp>
+#include <iocoro/awaitable.hpp>
+#include <iocoro/executor.hpp>
+#include <iocoro/ip/tcp.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
 #include <rediscoro/config.hpp>
 #include <rediscoro/request.hpp>
@@ -32,7 +32,7 @@ class connection_impl : public std::enable_shared_from_this<connection_impl> {
     failed,
   };
 
-  connection_impl(xz::io::io_context& ctx, config cfg);
+  connection_impl(iocoro::executor ex, config cfg);
   ~connection_impl();
 
   connection_impl(connection_impl const&) = delete;
@@ -40,30 +40,30 @@ class connection_impl : public std::enable_shared_from_this<connection_impl> {
   connection_impl(connection_impl&&) = delete;
   auto operator=(connection_impl&&) -> connection_impl& = delete;
 
-  auto run() -> xz::io::awaitable<void>;
+  auto run() -> iocoro::awaitable<void>;
 
   template <class Response>
-  auto execute(request const& req, Response& resp) -> xz::io::awaitable<void> {
+  auto execute(request const& req, Response& resp) -> iocoro::awaitable<void> {
     co_await execute_any(req, adapter::any_adapter{resp});
   }
 
-  auto execute_any(request const& req, adapter::any_adapter adapter) -> xz::io::awaitable<void>;
+  auto execute_any(request const& req, adapter::any_adapter adapter) -> iocoro::awaitable<void>;
 
   void stop();
-  auto graceful_stop() -> xz::io::awaitable<void>;
+  auto graceful_stop() -> iocoro::awaitable<void>;
 
   [[nodiscard]] auto current_state() const noexcept -> state;
   [[nodiscard]] auto is_running() const noexcept -> bool;
   auto error() const -> std::error_code;
-  auto get_executor() noexcept -> xz::io::io_context&;
+  auto get_executor() noexcept -> iocoro::executor;
 
  private:
   auto ensure_pipeline() -> void;
-  auto handshake() -> xz::io::awaitable<void>;
-  auto async_write(request const& req) -> xz::io::awaitable<void>;
+  auto handshake() -> iocoro::awaitable<void>;
+  auto async_write(request const& req) -> iocoro::awaitable<void>;
 
-  auto read_loop() -> xz::io::awaitable<void>;
-  auto reconnect_loop() -> xz::io::awaitable<void>;
+  auto read_loop() -> iocoro::awaitable<void>;
+  auto reconnect_loop() -> iocoro::awaitable<void>;
 
   void fail(std::error_code ec);
   void close_transport() noexcept;
@@ -77,14 +77,14 @@ class connection_impl : public std::enable_shared_from_this<connection_impl> {
   config cfg_;
   std::error_code error_;
 
-  xz::io::io_context& ctx_;
-  xz::io::tcp_socket socket_;
+  iocoro::executor ex_;
+  iocoro::ip::tcp::socket socket_;
   resp3::parser parser_;
   std::shared_ptr<detail::pipeline> pipeline_{};
 
   bool reconnect_active_{false};
-  std::optional<xz::io::awaitable<void>> reconnect_task_{};
-  std::optional<xz::io::awaitable<void>> read_task_{};
+  std::optional<iocoro::awaitable<void>> reconnect_task_{};
+  std::optional<iocoro::awaitable<void>> read_task_{};
 };
 
 }  // namespace rediscoro::detail

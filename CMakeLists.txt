@@ -27,13 +27,13 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 FetchContent_Declare(
     iocoro
     GIT_REPOSITORY https://github.com/yxzchen/iocoro.git
-    GIT_TAG archive/0.2.0
+    GIT_TAG dev
 )
 
 FetchContent_MakeAvailable(iocoro)
 
 # Link dependencies
-target_link_libraries(rediscoro INTERFACE ioxz)
+target_link_libraries(rediscoro INTERFACE iocoro::iocoro)
 target_compile_options(rediscoro INTERFACE -fcoroutines)
 
 # Apply assertion enable flag if option is enabled

@@ -4,14 +4,14 @@
 
 namespace rediscoro {
 
-connection::connection(xz::io::io_context& ctx, config cfg)
-    : impl_{std::make_shared<detail::connection_impl>(ctx, std::move(cfg))} {}
+connection::connection(iocoro::executor ex, config cfg)
+    : impl_{std::make_shared<detail::connection_impl>(ex, std::move(cfg))} {}
 
 connection::~connection() {
   impl_->stop();
 }
 
-auto connection::run() -> xz::io::awaitable<void> {
+auto connection::run() -> iocoro::awaitable<void> {
   co_await impl_->run();
 }
 
@@ -19,7 +19,7 @@ void connection::stop() {
   impl_->stop();
 }
 
-auto connection::graceful_stop() -> xz::io::awaitable<void> {
+auto connection::graceful_stop() -> iocoro::awaitable<void> {
   co_await impl_->graceful_stop();
 }
 
@@ -35,7 +35,7 @@ auto connection::error() const -> std::error_code {
   return impl_->error();
 }
 
-auto connection::get_executor() noexcept -> xz::io::io_context& {
+auto connection::get_executor() noexcept -> iocoro::executor {
   return impl_->get_executor();
 }
 

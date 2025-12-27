@@ -1,10 +1,13 @@
 #pragma once
 
-#include <xz/io/co_sleep.hpp>
-#include <xz/io/co_spawn.hpp>
-#include <xz/io/error.hpp>
-#include <xz/io/tcp_socket.hpp>
-#include <xz/io/when_all.hpp>
+#include <iocoro/co_sleep.hpp>
+#include <iocoro/co_spawn.hpp>
+#include <iocoro/error.hpp>
+#include <iocoro/io/async_write.hpp>
+#include <iocoro/io/with_timeout.hpp>
+#include <iocoro/ip/address.hpp>
+#include <iocoro/ip/tcp.hpp>
+#include <iocoro/when_all.hpp>
 #include <rediscoro/adapter/result.hpp>
 #include <rediscoro/detail/assert.hpp>
 #include <rediscoro/detail/connection_impl.hpp>
@@ -14,19 +17,26 @@
 #include <rediscoro/resp3/node.hpp>
 #include <rediscoro/response.hpp>
 
+#include <cerrno>
+#include <cstddef>
+#include <span>
+#include <system_error>
+
 namespace rediscoro::detail {
 
-connection_impl::connection_impl(xz::io::io_context& ctx, config cfg)
-    : ctx_{ctx}, cfg_{std::move(cfg)}, socket_{ctx_}, parser_{} {}
+connection_impl::connection_impl(iocoro::executor ex, config cfg)
+    : cfg_{std::move(cfg)}, ex_{ex}, socket_{ex_}, parser_{} {}
 
 connection_impl::~connection_impl() { stop(); }
 
 auto connection_impl::ensure_pipeline() -> void {
-  if (pipeline_ && !pipeline_->stopped()) return;
+  if (pipeline_ && !pipeline_->stopped()) {
+    return;
+  }
 
   pipeline_config pcfg{
-      .ex = ctx_,
-      .write_fn = [this](request const& req) -> xz::io::awaitable<void> { co_await this->async_write(req); },
+      .ex = ex_,
+      .write_fn = [this](request const& req) -> iocoro::awaitable<void> { co_await this->async_write(req); },
       .error_fn = [this](std::error_code ec) { this->fail(ec); },
       .request_timeout = cfg_.request_timeout,
       .max_inflight = 0,
@@ -34,9 +44,9 @@ auto connection_impl::ensure_pipeline() -> void {
   pipeline_ = std::make_shared<pipeline>(std::move(pcfg));
 }
 
-auto connection_impl::run() -> xz::io::awaitable<void> {
+auto connection_impl::run() -> iocoro::awaitable<void> {
   if (!is_inactive_state()) {
-    throw std::system_error(xz::io::error::operation_failed);
+    throw std::system_error(std::make_error_code(std::errc::operation_not_permitted));
   }
 
   state_ = state::connecting;
@@ -44,8 +54,24 @@ auto connection_impl::run() -> xz::io::awaitable<void> {
   parser_.reset();
 
   try {
-    auto endpoint = xz::io::ip::tcp_endpoint{xz::io::ip::address_v4::from_string(cfg_.host), cfg_.port};
-    co_await socket_.async_connect(endpoint, cfg_.connect_timeout);
+    auto addr_r = iocoro::ip::address::from_string(cfg_.host);
+    if (!addr_r) {
+      throw std::system_error(addr_r.error());
+    }
+    auto endpoint = iocoro::ip::tcp::endpoint{*addr_r, cfg_.port};
+
+    auto connect_op = [this, endpoint]() -> iocoro::awaitable<iocoro::expected<void, std::error_code>> {
+      auto ec = co_await socket_.async_connect(endpoint);
+      if (ec) {
+        co_return iocoro::unexpected(ec);
+      }
+      co_return iocoro::expected<void, std::error_code>{};
+    };
+
+    auto r = co_await iocoro::io::with_timeout(socket_, connect_op(), cfg_.connect_timeout);
+    if (!r) {
+      throw std::system_error(r.error());
+    }
 
     // Connected. Mark running before starting read_loop/handshake so internal pipeline executes are allowed.
     // (run() doesn't complete until handshake is done, so callers still can't issue requests early.)
@@ -56,7 +82,7 @@ auto connection_impl::run() -> xz::io::awaitable<void> {
 
     // Spawn read_loop with shared_from_this() - keeps impl alive
     auto self = shared_from_this();
-    read_task_ = xz::io::co_spawn(ctx_, [self]() { return self->read_loop(); }, xz::io::use_awaitable);
+    read_task_ = iocoro::co_spawn(ex_, [self]() { return self->read_loop(); }, iocoro::use_awaitable);
 
     co_await handshake();
   } catch (std::system_error const& e) {
@@ -65,70 +91,77 @@ auto connection_impl::run() -> xz::io::awaitable<void> {
     throw;
   } catch (...) {
     // Normalize unknown failures into an error_code-based exception.
-    fail(xz::io::error::operation_failed);
+    fail(std::make_error_code(std::errc::io_error));
     throw std::system_error(error_);
   }
 }
 
-auto connection_impl::execute_any(request const& req, adapter::any_adapter adapter) -> xz::io::awaitable<void> {
+auto connection_impl::execute_any(request const& req, adapter::any_adapter adapter) -> iocoro::awaitable<void> {
   if (state_ != state::running) {
-    throw std::system_error(xz::io::error::not_connected);
+    throw std::system_error(iocoro::error::not_connected);
   }
   ensure_pipeline();
   co_await pipeline_->execute_any(req, std::move(adapter));
 }
 
-auto connection_impl::read_loop() -> xz::io::awaitable<void> {
+auto connection_impl::read_loop() -> iocoro::awaitable<void> {
   auto gen = parser_.parse();
 
-  try {
-    for (;;) {
-      auto span = parser_.prepare(4096);
-      auto n = co_await socket_.async_read_some(std::span<char>{span.data(), span.size()}, {});
+  for (;;) {
+    auto span = parser_.prepare(4096);
+    auto buf = std::as_writable_bytes(std::span<char>{span.data(), span.size()});
+    auto r = co_await socket_.async_read_some(buf);
+    if (!r) {
+      auto ec = r.error();
 
-      parser_.commit(n);
-
-      // Process all complete messages in buffer
-      while (gen.next()) {
-        auto& msg_opt = gen.value();
-        if (!msg_opt) {
-          // Parser needs more data
-          break;
-        }
-        if (pipeline_) {
-          pipeline_->on_msg(*msg_opt);
-        }
-      }
-
-      // Check for parser error
-      if (auto ec = parser_.error()) {
-        fail(ec);
+      // treat abort/not_connected as teardown signals and just exit.
+      // The lifecycle layer (run()/handshake()/write/pipeline) is responsible for reporting failures via fail().
+      if (ec == iocoro::error::operation_aborted || ec == iocoro::error::not_connected) {
         co_return;
       }
-    }
-  } catch (std::system_error const& e) {
-    auto ec = e.code();
-
-    // treat abort/not_connected as teardown signals and just exit.
-    // The lifecycle layer (run()/handshake()/write/pipeline) is responsible for reporting failures via fail().
-    if (ec == xz::io::error::operation_aborted || ec == xz::io::error::not_connected) {
+      fail(ec);
       co_return;
     }
-    fail(ec);
-    co_return;
-  } catch (...) {
-    fail(xz::io::error::operation_failed);
-    co_return;
+
+    auto const n = *r;
+    if (n == 0) {
+      fail(iocoro::error::eof);
+      co_return;
+    }
+
+    parser_.commit(n);
+
+    // Process all complete messages in buffer
+    while (gen.next()) {
+      auto& msg_opt = gen.value();
+      if (!msg_opt) {
+        // Parser needs more data
+        break;
+      }
+      if (pipeline_) {
+        pipeline_->on_msg(*msg_opt);
+      }
+    }
+
+    // Check for parser error
+    if (auto ec = parser_.error()) {
+      fail(ec);
+      co_return;
+    }
   }
 }
 
-auto connection_impl::async_write(request const& req) -> xz::io::awaitable<void> {
+auto connection_impl::async_write(request const& req) -> iocoro::awaitable<void> {
   if (state_ != state::running) {
-    throw std::system_error(xz::io::error::not_connected);
+    throw std::system_error(iocoro::error::not_connected);
   }
 
   auto payload = req.payload();
-  co_await xz::io::async_write(socket_, std::span<char const>{payload.data(), payload.size()}, cfg_.request_timeout);
+  auto bytes = std::as_bytes(std::span<char const>{payload.data(), payload.size()});
+  auto r = co_await iocoro::io::async_write_timeout(socket_, bytes, cfg_.request_timeout);
+  if (!r) {
+    throw std::system_error(r.error());
+  }
 }
 
 void connection_impl::fail(std::error_code ec) {
@@ -149,7 +182,7 @@ void connection_impl::fail(std::error_code ec) {
   if (cfg_.auto_reconnect && !reconnect_active_) {
     reconnect_active_ = true;
     auto self = shared_from_this();
-    reconnect_task_ = xz::io::co_spawn(ctx_, [self]() { return self->reconnect_loop(); }, xz::io::use_awaitable);
+    reconnect_task_ = iocoro::co_spawn(ex_, [self]() { return self->reconnect_loop(); }, iocoro::use_awaitable);
   }
 }
 
@@ -169,11 +202,11 @@ void connection_impl::stop() {
   close_transport();
 }
 
-auto connection_impl::graceful_stop() -> xz::io::awaitable<void> {
+auto connection_impl::graceful_stop() -> iocoro::awaitable<void> {
   stop();
 
   // Wait for background tasks to complete
-  std::vector<xz::io::awaitable<void>> tasks;
+  std::vector<iocoro::awaitable<void>> tasks;
   if (read_task_.has_value()) {
     tasks.push_back(std::move(*read_task_));
     read_task_.reset();
@@ -184,7 +217,7 @@ auto connection_impl::graceful_stop() -> xz::io::awaitable<void> {
   }
 
   if (!tasks.empty()) {
-    co_await xz::io::when_all(std::move(tasks));
+    (void)co_await iocoro::when_all(std::move(tasks));
   }
 }
 
@@ -194,20 +227,17 @@ auto connection_impl::is_running() const noexcept -> bool { return state_ == sta
 
 auto connection_impl::error() const -> std::error_code { return error_; }
 
-auto connection_impl::get_executor() noexcept -> xz::io::io_context& { return ctx_; }
+auto connection_impl::get_executor() noexcept -> iocoro::executor { return ex_; }
 
 void connection_impl::close_transport() noexcept {
-  try {
-    socket_.close();
-  } catch (...) {
-  }
+  socket_.close();
   parser_.reset();
 }
 
-auto connection_impl::reconnect_loop() -> xz::io::awaitable<void> {
+auto connection_impl::reconnect_loop() -> iocoro::awaitable<void> {
   while (reconnect_active_) {
     if (cfg_.reconnect_delay.count() > 0) {
-      co_await xz::io::co_sleep(ctx_, cfg_.reconnect_delay);
+      co_await iocoro::co_sleep(cfg_.reconnect_delay);
     }
 
     if (!reconnect_active_ || state_ == state::stopped) {
@@ -228,7 +258,7 @@ auto connection_impl::reconnect_loop() -> xz::io::awaitable<void> {
   }
 }
 
-auto connection_impl::handshake() -> xz::io::awaitable<void> {
+auto connection_impl::handshake() -> iocoro::awaitable<void> {
   request req;
   req.reserve(256);
   std::vector<std::string> ops;
@@ -270,7 +300,7 @@ auto connection_impl::handshake() -> xz::io::awaitable<void> {
   co_await execute(req, resp);
 
   if (resp.size() != req.expected_responses()) {
-    throw std::system_error(xz::io::error::operation_failed);
+    throw std::system_error(std::make_error_code(std::errc::io_error));
   }
 
   for (std::size_t i = 0; i < resp.size(); ++i) {

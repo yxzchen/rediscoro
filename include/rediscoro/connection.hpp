@@ -1,7 +1,8 @@
 #pragma once
 
-#include <xz/io/awaitable.hpp>
-#include <xz/io/io_context.hpp>
+#include <iocoro/awaitable.hpp>
+#include <iocoro/executor.hpp>
+#include <iocoro/io_context.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
 #include <rediscoro/config.hpp>
 #include <rediscoro/detail/connection_impl.hpp>
@@ -44,7 +45,8 @@ class connection {
  public:
   using state = detail::connection_impl::state;
 
-  connection(xz::io::io_context& ctx, config cfg);
+  connection(iocoro::executor ex, config cfg);
+  connection(iocoro::io_context& ctx, config cfg) : connection(ctx.get_executor(), std::move(cfg)) {}
   ~connection();
 
   connection(connection const&) = delete;
@@ -55,11 +57,11 @@ class connection {
   /**
    * @brief Start the connection (TCP connect + handshake + read loop)
    */
-  auto run() -> xz::io::awaitable<void>;
+  auto run() -> iocoro::awaitable<void>;
 
   /// Execute a request and adapt its responses into `resp`.
   template <class Response>
-  auto execute(request const& req, Response& resp) -> xz::io::awaitable<void> {
+  auto execute(request const& req, Response& resp) -> iocoro::awaitable<void> {
     co_await impl_->execute_any(req, adapter::any_adapter{resp});
   }
 
@@ -68,7 +70,8 @@ class connection {
   /// - For one reply type: returns `response0<T>`
   /// - For multiple reply types: returns `response<Ts...>`
   template <class... Ts>
-  auto execute_one(request const& req) -> xz::io::awaitable<typename detail::execute_result<Ts...>::type> {
+  auto execute_one(request const& req)
+    -> iocoro::awaitable<typename detail::execute_result<Ts...>::type> {
     static_assert(sizeof...(Ts) > 0, "execute_one<Ts...> requires at least one reply type");
     typename detail::execute_result<Ts...>::type resp{};
     co_await execute(req, resp);
@@ -83,12 +86,12 @@ class connection {
   /// Stop and wait for all background tasks to complete.
   ///
   /// Use this before destruction if you need guaranteed cleanup.
-  auto graceful_stop() -> xz::io::awaitable<void>;
+  auto graceful_stop() -> iocoro::awaitable<void>;
 
   [[nodiscard]] auto current_state() const noexcept -> state;
   [[nodiscard]] auto is_running() const noexcept -> bool;
   auto error() const -> std::error_code;
-  auto get_executor() noexcept -> xz::io::io_context&;
+  auto get_executor() noexcept -> iocoro::executor;
 
  private:
   std::shared_ptr<detail::connection_impl> impl_;

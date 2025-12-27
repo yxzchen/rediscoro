@@ -1,8 +1,11 @@
 #include <rediscoro/detail/pipeline.hpp>
 
-#include <xz/io/co_spawn.hpp>
-#include <xz/io/error.hpp>
+#include <iocoro/co_spawn.hpp>
+#include <iocoro/error.hpp>
 #include <rediscoro/resp3/type.hpp>
+
+#include <cerrno>
+#include <system_error>
 
 namespace rediscoro::detail {
 
@@ -14,12 +17,12 @@ pipeline::pipeline(pipeline_config const& cfg)
       max_inflight_{cfg.max_inflight} {}
 
 pipeline::~pipeline() {
-  stop_impl(xz::io::error::operation_aborted, false);
+  stop_impl(iocoro::error::operation_aborted, false);
 }
 
-auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> xz::io::awaitable<void> {
+auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> iocoro::awaitable<void> {
   if (stopped_) {
-    throw std::system_error(xz::io::error::operation_aborted);
+    throw std::system_error(iocoro::error::operation_aborted);
   }
 
   auto op = std::make_shared<op_state>();
@@ -27,7 +30,7 @@ auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> 
   op->adapter = std::move(adapter);
   op->remaining = req.expected_responses();
   op->timeout = request_timeout_;
-  op->ex = &ex_;
+  op->ex = ex_;
 
   pending_.push_back(op);
   notify_pump();
@@ -61,7 +64,7 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
   try {
     op->adapter.on_msg(msg);
   } catch (...) {
-    stop_impl(xz::io::error::operation_failed, true);
+    stop_impl(std::make_error_code(std::errc::io_error), true);
     return;
   }
 
@@ -77,25 +80,36 @@ void pipeline::on_msg(resp3::msg_view const& msg) {
 }
 
 void pipeline::notify_pump() {
-  if (stopped_ || pump_scheduled_) return;
+  if (stopped_ || pump_scheduled_) {
+    return;
+  }
   pump_scheduled_ = true;
 
   auto self = shared_from_this();
-  ex_.post([self]() mutable {
+  ex_.post([self, ex = ex_]() mutable {
+    iocoro::detail::executor_guard g{ex};
     self->pump_scheduled_ = false;
     self->pump();
   });
 }
 
 void pipeline::pump() {
-  if (stopped_) return;
+  if (stopped_) {
+    return;
+  }
 
   // Only one outstanding write at a time (preserve strict write ordering).
-  if (writing_) return;
+  if (writing_) {
+    return;
+  }
 
   // Respect max_inflight_ (0 = unlimited).
-  if (pending_.empty()) return;
-  if (max_inflight_ != 0 && inflight_.size() >= max_inflight_) return;
+  if (pending_.empty()) {
+    return;
+  }
+  if (max_inflight_ != 0 && inflight_.size() >= max_inflight_) {
+    return;
+  }
 
   // Move one op to inflight and start its write. This ensures responses will have a FIFO target
   // even if they arrive immediately after the coroutine yields.
@@ -111,37 +125,44 @@ void pipeline::pump() {
 
 void pipeline::start_write_one(std::shared_ptr<op_state> const& op) {
   auto self = shared_from_this();
-  xz::io::co_spawn(
+  iocoro::co_spawn(
       ex_,
-      [self, op]() -> xz::io::awaitable<void> {
+      [self, op]() -> iocoro::awaitable<void> {
         co_await self->write_fn_(*op->req);
 
         self->writing_ = false;
         self->notify_pump();
       },
-      [self](std::exception_ptr eptr) {
+      [self](iocoro::expected<void, std::exception_ptr> r) {
+        if (r) {
+          return;
+        }
         try {
-          if (eptr) std::rethrow_exception(eptr);
+          std::rethrow_exception(r.error());
         } catch (std::system_error const& e) {
           self->stop_impl(e.code(), true);
         } catch (...) {
-          self->stop_impl(xz::io::error::operation_failed, true);
+          self->stop_impl(std::make_error_code(std::errc::io_error), true);
         }
       });
 }
 
 void pipeline::set_timeout(std::shared_ptr<op_state> const& op) {
-  if (op->timeout.count() <= 0) return;
+  if (op->timeout.count() <= 0) {
+    return;
+  }
 
   auto self = shared_from_this();
   op->timeout_handle = ex_.schedule_timer(op->timeout, [self, op]() mutable { self->on_timeout(op); });
 }
 
 void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {
-  if (stopped_ || !op || op->done) return;
+  if (stopped_ || !op || op->done) {
+    return;
+  }
 
   // Timeout while inflight is response-pollution risk => treat as connection error.
-  stop_impl(xz::io::error::timeout, true);
+  stop_impl(iocoro::error::timed_out, true);
 }
 
 void pipeline::stop(std::error_code ec) {
@@ -149,7 +170,9 @@ void pipeline::stop(std::error_code ec) {
 }
 
 void pipeline::stop_impl(std::error_code ec, bool call_error_fn) {
-  if (stopped_) return;
+  if (stopped_) {
+    return;
+  }
   stopped_ = true;
   writing_ = false;
 

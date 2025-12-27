@@ -1,5 +1,5 @@
-#include <xz/io/io_context.hpp>
-#include <xz/io/error.hpp>
+#include <iocoro/error.hpp>
+#include <iocoro/io_context.hpp>
 #include <rediscoro/config.hpp>
 #include <rediscoro/connection.hpp>
 #include <rediscoro/request.hpp>
@@ -16,7 +16,7 @@
 #include <vector>
 
 using namespace rediscoro;
-using namespace xz::io;
+using namespace iocoro;
 
 class ConnectionTest : public ::testing::Test {
  protected:
@@ -75,7 +75,7 @@ TEST_F(ConnectionTest, ConnectTimeoutToHttpServer) {
       co_await conn.run();
       ADD_FAILURE() << "Expected connect timeout, but run() succeeded";
     } catch (std::system_error const& e) {
-      EXPECT_EQ(e.code(), xz::io::error::timeout);
+      EXPECT_EQ(e.code(), iocoro::error::timed_out);
     } catch (...) {
       ADD_FAILURE() << "Expected std::system_error for connect timeout";
     }
@@ -123,7 +123,7 @@ TEST_F(ConnectionTest, CommandTimeoutOnBlockingCommand) {
       co_await conn.execute(req, resp);
       ADD_FAILURE() << "Expected command timeout, but execute succeeded";
     } catch (std::system_error const& e) {
-      EXPECT_EQ(e.code(), xz::io::error::timeout);
+      EXPECT_EQ(e.code(), iocoro::error::timed_out);
     } catch (...) {
       ADD_FAILURE() << "Expected std::system_error for command timeout";
     }

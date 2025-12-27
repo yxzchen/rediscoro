@@ -1,6 +1,6 @@
 # rediscoro
 
-A modern C++20 Redis client built on coroutines and the [ioxz](https://github.com/yxzchen/ioxz) async I/O library.
+A modern C++20 Redis client built on coroutines and the [iocoro](https://github.com/yxzchen/iocoro) async I/O library.
 
 This project is under development. It has not been fully tested and its API is not yet considered stable.
 
@@ -17,11 +17,12 @@ This project is under development. It has not been fully tested and its API is n
 ```cpp
 #include <rediscoro/src.hpp>  // Include once in one .cpp file
 #include <rediscoro.hpp>
-#include <xz/io/io_context.hpp>
+#include <iocoro/io_context.hpp>
+#include <iocoro/co_spawn.hpp>
 #include <iostream>
 
 using namespace rediscoro;
-using namespace xz::io;
+using namespace iocoro;
 
 awaitable<void> example() {
   // Configure and connect
@@ -58,7 +59,7 @@ awaitable<void> example() {
 
 int main() {
   io_context ctx;
-  co_spawn(ctx, example(), use_detached);
+  co_spawn(ctx.get_executor(), example(), detached);
   ctx.run();
 }
 ```
@@ -66,7 +67,7 @@ int main() {
 ## Dependencies
 
 - C++20 compiler (GCC 10+, Clang 12+)
-- [ioxz](https://github.com/yxzchen/ioxz) - io_uring/epoll async I/O library
+- [iocoro](https://github.com/yxzchen/iocoro) - io_uring/epoll async I/O library
 - [GoogleTest](https://github.com/google/googletest) (tests only)
 
 ## Integration
