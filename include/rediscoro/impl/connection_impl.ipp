@@ -60,17 +60,9 @@ auto connection_impl::run() -> iocoro::awaitable<void> {
     }
     auto endpoint = iocoro::ip::tcp::endpoint{*addr_r, cfg_.port};
 
-    auto connect_op = [this, endpoint]() -> iocoro::awaitable<iocoro::expected<void, std::error_code>> {
-      auto ec = co_await socket_.async_connect(endpoint);
-      if (ec) {
-        co_return iocoro::unexpected(ec);
-      }
-      co_return iocoro::expected<void, std::error_code>{};
-    };
-
-    auto r = co_await iocoro::io::with_timeout(socket_, connect_op(), cfg_.connect_timeout);
-    if (!r) {
-      throw std::system_error(r.error());
+    auto r = co_await iocoro::io::with_timeout(socket_, socket_.async_connect(endpoint), cfg_.connect_timeout);
+    if (r) {
+      throw std::system_error(r);
     }
 
     // Connected. Mark running before starting read_loop/handshake so internal pipeline executes are allowed.
