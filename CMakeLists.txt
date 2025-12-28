@@ -1,43 +1,25 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 project(rediscoro VERSION 1.0.0 LANGUAGES CXX)
 
-# Options
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+option(REDISCORO_BUILD_TESTS "Build tests" ${PROJECT_IS_TOP_LEVEL})
+option(REDISCORO_ENABLE_WARNINGS "Enable warning flags for rediscoro tests/examples" ${PROJECT_IS_TOP_LEVEL})
 option(REDISCORO_ENABLE_ASSERTS "Enable assertions in rediscoro library" OFF)
-option(REDISCORO_BUILD_TESTS "Build tests" ON)
-option(REDISCORO_USE_STDFMT "Use std::format instead of libfmt" OFF)
-option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(REDISCORO_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
-# Create interface library (header-only)
 add_library(rediscoro INTERFACE)
-
-# Set C++ standard
-target_compile_features(rediscoro INTERFACE cxx_std_20)
-
-# Add include directories
+add_library(rediscoro::rediscoro ALIAS rediscoro)
 target_include_directories(rediscoro INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+target_compile_features(rediscoro INTERFACE cxx_std_20)
 
-# Fetch external dependencies
-include(FetchContent)
+find_package(Threads REQUIRED)
+target_link_libraries(rediscoro INTERFACE Threads::Threads)
 
-# CI / offline-friendly builds: do not try to update FetchContent deps from the network
-set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
-
-FetchContent_Declare(
-    iocoro
-    GIT_REPOSITORY https://github.com/yxzchen/iocoro.git
-    GIT_TAG archive/0.2.0
-)
-
-FetchContent_MakeAvailable(iocoro)
-
-# Link dependencies
-target_link_libraries(rediscoro INTERFACE ioxz)
-target_compile_options(rediscoro INTERFACE -fcoroutines)
-
-# Apply assertion enable flag if option is enabled
 if(REDISCORO_ENABLE_ASSERTS)
     target_compile_definitions(rediscoro INTERFACE REDISCORO_ENABLE_ASSERTS)
     message(STATUS "rediscoro: Assertions are ENABLED")
@@ -45,20 +27,72 @@ else()
     message(STATUS "rediscoro: Assertions are DISABLED")
 endif()
 
-# Tests
+if(REDISCORO_ENABLE_WARNINGS)
+    add_library(rediscoro_warnings INTERFACE)
+    target_compile_options(rediscoro_warnings INTERFACE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Wno-unused-parameter>
+    )
+endif()
+
+if(REDISCORO_ENABLE_ASAN)
+    target_compile_options(rediscoro INTERFACE
+        -g
+        -fno-omit-frame-pointer
+        -fsanitize=address
+    )
+    target_link_options(rediscoro INTERFACE
+        -fsanitize=address
+    )
+    message(STATUS "rediscoro: AddressSanitizer is ENABLED")
+endif()
+
+include(FetchContent)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+
+find_package(iocoro CONFIG QUIET)
+if(NOT iocoro_FOUND)
+    FetchContent_Declare(
+        iocoro
+        GIT_REPOSITORY https://github.com/yxzchen/iocoro.git
+        GIT_TAG dev
+    )
+    FetchContent_MakeAvailable(iocoro)
+endif()
+target_link_libraries(rediscoro INTERFACE iocoro::iocoro)
+
+# Some toolchains still require an explicit coroutines flag even in C++20 mode.
+target_compile_options(rediscoro INTERFACE
+    $<$<CXX_COMPILER_ID:GNU>:-fcoroutines>
+)
+
 if(REDISCORO_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
 endif()
 
-if (ENABLE_ASAN)
-  target_compile_options(rediscoro INTERFACE
-    -g
-    -fno-omit-frame-pointer
-    -fsanitize=address
-  )  
-    target_link_options(rediscoro INTERFACE
-    -fsanitize=address
-  )
-  message(STATUS "rediscoro: AddressSanitizer is ENABLED")
-endif()
+install(TARGETS rediscoro EXPORT rediscoroTargets)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+
+install(EXPORT rediscoroTargets
+    NAMESPACE rediscoro::
+    FILE rediscoroTargets.cmake
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rediscoro"
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rediscoroConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/rediscoroConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rediscoro"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/rediscoroConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/rediscoroConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/rediscoroConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rediscoro"
+)

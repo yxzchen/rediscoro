@@ -12,6 +12,9 @@
 namespace rediscoro {
 namespace format_impl = std;
 #else
+#ifndef FMT_HEADER_ONLY
+#define FMT_HEADER_ONLY
+#endif
 #include <fmt/format.h>
 namespace rediscoro {
 namespace format_impl = fmt;

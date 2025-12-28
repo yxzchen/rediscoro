@@ -1,6 +1,8 @@
 #include <rediscoro/request.hpp>
 #include <gtest/gtest.h>
 
+#include <rediscoro/impl.hpp>
+
 #include <deque>
 #include <list>
 #include <vector>

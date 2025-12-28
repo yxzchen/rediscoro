@@ -1,7 +1,10 @@
 #pragma once
 
-#include <xz/io/awaitable.hpp>
-#include <xz/io/io_context.hpp>
+#include <iocoro/awaitable.hpp>
+#include <iocoro/detail/executor_guard.hpp>
+#include <iocoro/error.hpp>
+#include <iocoro/executor.hpp>
+#include <iocoro/timer_handle.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
 #include <rediscoro/detail/assert.hpp>
 #include <rediscoro/ignore.hpp>
@@ -18,12 +21,12 @@
 
 namespace rediscoro::detail {
 
-using write_fn_t = std::function<xz::io::awaitable<void>(request const&)>;
+using write_fn_t = std::function<iocoro::awaitable<void>(request const&)>;
 using error_fn_t = std::function<void(std::error_code)>;
 
 /// Configuration for `detail::pipeline`.
 struct pipeline_config {
-  xz::io::io_context& ex;
+  iocoro::executor ex;
   write_fn_t write_fn;
   error_fn_t error_fn;
   std::chrono::milliseconds request_timeout{};
@@ -56,12 +59,12 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
 
   /// Execute a request and dispatch responses into `adapter`.
   /// This is the non-template entrypoint used by `connection::execute_any()`.
-  auto execute_any(request const& req, adapter::any_adapter adapter) -> xz::io::awaitable<void>;
+  auto execute_any(request const& req, adapter::any_adapter adapter) -> iocoro::awaitable<void>;
 
   /// Called by `connection` for each parsed RESP message (single-threaded: io_context thread).
   void on_msg(resp3::msg_view const& msg);
 
-  void stop(std::error_code ec = xz::io::error::operation_aborted);
+  void stop(std::error_code ec = iocoro::error::operation_aborted);
 
  private:
   struct op_state {
@@ -70,31 +73,43 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
     std::size_t remaining = 0;
 
     std::chrono::milliseconds timeout{};
-    xz::io::detail::timer_handle timeout_handle{};
+    iocoro::timer_handle timeout_handle{};
 
     std::error_code ec{};
     bool done = false;
 
     std::coroutine_handle<> waiter{};
-    xz::io::io_context* ex = nullptr;
+    iocoro::executor ex{};
 
     void finish(std::error_code e = {}) {
-      if (done) return;
+      if (done) {
+        return;
+      }
       done = true;
-      if (!ec) ec = e;
+      if (!ec) {
+        ec = e;
+      }
       if (timeout_handle) {
-        ex->cancel_timer(timeout_handle);
-        timeout_handle.reset();
+        (void)timeout_handle.cancel();
+        timeout_handle = {};
       }
       if (waiter) {
         auto h = waiter;
         waiter = {};
-        ex->post([h]() mutable { h.resume(); });
+        ex.post([h, ex = ex]() mutable {
+          iocoro::detail::executor_guard g{ex};
+          h.resume();
+        });
       }
     }
   };
 
   struct op_awaiter {
+    // IMPORTANT: Explicit constructor to avoid GCC/ASan use-after-free issues observed with
+    // aggregate initialization of awaiters containing shared_ptr members.
+    // See iocoro's own comments in `iocoro/detail/spawn.hpp`.
+    explicit op_awaiter(std::shared_ptr<op_state> op_) : op(std::move(op_)) {}
+
     std::shared_ptr<op_state> op{};
 
     auto await_ready() const noexcept -> bool { return !op || op->done; }
@@ -115,7 +130,7 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
   void finish_all(std::error_code ec);
 
  private:
-  xz::io::io_context& ex_;
+  iocoro::executor ex_;
   write_fn_t write_fn_;
   error_fn_t error_fn_;
   std::chrono::milliseconds request_timeout_{};

@@ -1,15 +1,17 @@
-#include <xz/io/io_context.hpp>
-#include <xz/io/when_all.hpp>
+#include <iocoro/io_context.hpp>
+#include <iocoro/when_all.hpp>
 #include <rediscoro/config.hpp>
 #include <rediscoro/connection.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
 
+#include <rediscoro/impl.hpp>
+
 #include <gtest/gtest.h>
 
 #include "async_test_util.hpp"
 
-using namespace xz::io;
+using namespace iocoro;
 using namespace rediscoro;
 
 class PipelineTest : public ::testing::Test {
