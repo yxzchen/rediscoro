@@ -15,7 +15,7 @@ This project is under development. It has not been fully tested and its API is n
 ## Example Usage
 
 ```cpp
-#include <rediscoro/src.hpp>  // Include once in one .cpp file
+#include <rediscoro/impl.hpp>  // Include once in one .cpp file
 #include <rediscoro.hpp>
 #include <iocoro/io_context.hpp>
 #include <iocoro/co_spawn.hpp>
@@ -83,7 +83,7 @@ target_link_libraries(your_app PRIVATE rediscoro)
 
 1. Add `rediscoro/include` to your include path
 2. In your headers: `#include <rediscoro.hpp>`
-3. In exactly **one** source file: `#include <rediscoro/src.hpp>`
+3. In exactly **one** source file: `#include <rediscoro/impl.hpp>`
 
 ## Supported Features
 

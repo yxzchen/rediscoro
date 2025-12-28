@@ -5,7 +5,7 @@
 #include <iocoro/io_context.hpp>
 #include <iocoro/work_guard.hpp>
 
-#include <rediscoro/src.hpp>
+#include <rediscoro/impl.hpp>
 
 #include <gtest/gtest.h>
 

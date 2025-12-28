@@ -2,7 +2,7 @@
 #include <rediscoro/resp3/parser.hpp>
 #include <gtest/gtest.h>
 
-#include <rediscoro/src.hpp>
+#include <rediscoro/impl.hpp>
 
 class ParserTest : public ::testing::Test {
 protected:

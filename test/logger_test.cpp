@@ -1,7 +1,7 @@
 #include <rediscoro/logger.hpp>
 #include <gtest/gtest.h>
 
-#include <rediscoro/src.hpp>
+#include <rediscoro/impl.hpp>
 
 #include <mutex>
 #include <thread>

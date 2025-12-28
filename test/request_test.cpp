@@ -1,7 +1,7 @@
 #include <rediscoro/request.hpp>
 #include <gtest/gtest.h>
 
-#include <rediscoro/src.hpp>
+#include <rediscoro/impl.hpp>
 
 #include <deque>
 #include <list>

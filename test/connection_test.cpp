@@ -5,7 +5,7 @@
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
 
-#include <rediscoro/src.hpp>
+#include <rediscoro/impl.hpp>
 
 #include <gtest/gtest.h>
 
