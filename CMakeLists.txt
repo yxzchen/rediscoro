@@ -6,7 +6,6 @@ include(CMakePackageConfigHelpers)
 
 option(REDISCORO_BUILD_TESTS "Build tests" ${PROJECT_IS_TOP_LEVEL})
 option(REDISCORO_ENABLE_WARNINGS "Enable warning flags for rediscoro tests/examples" ${PROJECT_IS_TOP_LEVEL})
-option(REDISCORO_ENABLE_ASSERTS "Enable assertions in rediscoro library" OFF)
 option(REDISCORO_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 add_library(rediscoro INTERFACE)
@@ -19,13 +18,6 @@ target_compile_features(rediscoro INTERFACE cxx_std_20)
 
 find_package(Threads REQUIRED)
 target_link_libraries(rediscoro INTERFACE Threads::Threads)
-
-if(REDISCORO_ENABLE_ASSERTS)
-    target_compile_definitions(rediscoro INTERFACE REDISCORO_ENABLE_ASSERTS)
-    message(STATUS "rediscoro: Assertions are ENABLED")
-else()
-    message(STATUS "rediscoro: Assertions are DISABLED")
-endif()
 
 if(REDISCORO_ENABLE_WARNINGS)
     add_library(rediscoro_warnings INTERFACE)

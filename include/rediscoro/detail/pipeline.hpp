@@ -6,7 +6,7 @@
 #include <iocoro/executor.hpp>
 #include <iocoro/timer_handle.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
-#include <rediscoro/detail/assert.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/ignore.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/node.hpp>

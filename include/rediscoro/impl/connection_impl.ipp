@@ -9,7 +9,7 @@
 #include <iocoro/ip/tcp.hpp>
 #include <iocoro/when_all.hpp>
 #include <rediscoro/adapter/result.hpp>
-#include <rediscoro/detail/assert.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/detail/connection_impl.hpp>
 #include <rediscoro/detail/pipeline.hpp>
 #include <rediscoro/error.hpp>

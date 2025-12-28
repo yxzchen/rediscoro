@@ -1,4 +1,4 @@
-#include <rediscoro/detail/assert.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/error.hpp>
 #include <rediscoro/resp3/parser.hpp>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <rediscoro/detail/assert.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/resp3/parser.hpp>
 #include <rediscoro/resp3/type.hpp>
 
