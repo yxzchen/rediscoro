@@ -1,7 +1,7 @@
 #pragma once
 
 #include <iocoro/awaitable.hpp>
-#include <iocoro/executor.hpp>
+#include <iocoro/io_executor.hpp>
 #include <iocoro/io_context.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
 #include <rediscoro/config.hpp>
@@ -45,7 +45,7 @@ class connection {
  public:
   using state = detail::connection_impl::state;
 
-  connection(iocoro::executor ex, config cfg);
+  connection(iocoro::io_executor ex, config cfg);
   connection(iocoro::io_context& ctx, config cfg) : connection(ctx.get_executor(), std::move(cfg)) {}
   ~connection();
 
@@ -91,7 +91,7 @@ class connection {
   [[nodiscard]] auto current_state() const noexcept -> state;
   [[nodiscard]] auto is_running() const noexcept -> bool;
   auto error() const -> std::error_code;
-  auto get_executor() noexcept -> iocoro::executor;
+  auto get_executor() noexcept -> iocoro::io_executor;
 
  private:
   std::shared_ptr<detail::connection_impl> impl_;

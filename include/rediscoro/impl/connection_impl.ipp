@@ -24,7 +24,7 @@
 
 namespace rediscoro::detail {
 
-connection_impl::connection_impl(iocoro::executor ex, config cfg)
+connection_impl::connection_impl(iocoro::io_executor ex, config cfg)
     : cfg_{std::move(cfg)}, ex_{ex}, socket_{ex_}, parser_{} {}
 
 connection_impl::~connection_impl() { stop(); }
@@ -219,7 +219,7 @@ auto connection_impl::is_running() const noexcept -> bool { return state_ == sta
 
 auto connection_impl::error() const -> std::error_code { return error_; }
 
-auto connection_impl::get_executor() noexcept -> iocoro::executor { return ex_; }
+auto connection_impl::get_executor() noexcept -> iocoro::io_executor { return ex_; }
 
 void connection_impl::close_transport() noexcept {
   socket_.close();

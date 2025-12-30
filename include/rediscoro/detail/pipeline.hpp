@@ -3,7 +3,7 @@
 #include <iocoro/awaitable.hpp>
 #include <iocoro/detail/executor_guard.hpp>
 #include <iocoro/error.hpp>
-#include <iocoro/executor.hpp>
+#include <iocoro/io_executor.hpp>
 #include <iocoro/timer_handle.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
 #include <rediscoro/assert.hpp>
@@ -26,7 +26,7 @@ using error_fn_t = std::function<void(std::error_code)>;
 
 /// Configuration for `detail::pipeline`.
 struct pipeline_config {
-  iocoro::executor ex;
+  iocoro::io_executor ex;
   write_fn_t write_fn;
   error_fn_t error_fn;
   std::chrono::milliseconds request_timeout{};
@@ -79,7 +79,7 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
     bool done = false;
 
     std::coroutine_handle<> waiter{};
-    iocoro::executor ex{};
+    iocoro::io_executor ex{};
 
     void finish(std::error_code e = {}) {
       if (done) {
@@ -130,7 +130,7 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
   void finish_all(std::error_code ec);
 
  private:
-  iocoro::executor ex_;
+  iocoro::io_executor ex_;
   write_fn_t write_fn_;
   error_fn_t error_fn_;
   std::chrono::milliseconds request_timeout_{};
