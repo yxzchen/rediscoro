@@ -151,19 +151,27 @@ void pipeline::set_timeout(std::shared_ptr<op_state> const& op) {
     return;
   }
 
-  // TODO rewrite timeout
-  iocoro::steady_timer t(ex_);
-  t.expires_after(op->timeout);
+  // Create timer with shared ownership for lifetime management
+  op->timer = std::make_shared<iocoro::steady_timer>(ex_);
+  op->timer->expires_after(op->timeout);
 
+  // Spawn a detached coroutine to wait for the timer
   auto self = shared_from_this();
-  t.async_wait([self, op](std::error_code ec) mutable {
-    if (!ec) {
-      self->on_timeout(op);
-    }
-  });
+  auto timer = op->timer;  // Capture shared_ptr by value
 
-  // op->timeout_handle = ex_.schedule_timer(op->timeout, [self, op]() mutable {
-  // self->on_timeout(op); });
+  iocoro::co_spawn(
+    ex_,
+    [timer, self, op]() -> iocoro::awaitable<void> {
+      auto ec = co_await timer->async_wait(iocoro::use_awaitable);
+      if (!ec) {
+        self->on_timeout(op);
+      }
+      // Timer is automatically destroyed after callback completes
+    },
+    [](iocoro::expected<void, std::exception_ptr>) {
+      // Completion handler - we don't care about the result
+    }
+  );
 }
 
 void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {

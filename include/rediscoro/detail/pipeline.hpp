@@ -4,7 +4,7 @@
 #include <iocoro/detail/executor_guard.hpp>
 #include <iocoro/error.hpp>
 #include <iocoro/io_executor.hpp>
-#include <iocoro/timer_handle.hpp>
+#include <iocoro/steady_timer.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
 #include <rediscoro/assert.hpp>
 #include <rediscoro/ignore.hpp>
@@ -73,7 +73,7 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
     std::size_t remaining = 0;
 
     std::chrono::milliseconds timeout{};
-    iocoro::timer_handle timeout_handle{};
+    std::shared_ptr<iocoro::steady_timer> timer{};
 
     std::error_code ec{};
     bool done = false;
@@ -89,9 +89,9 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
       if (!ec) {
         ec = e;
       }
-      if (timeout_handle) {
-        (void)timeout_handle.cancel();
-        timeout_handle = {};
+      if (timer) {
+        timer->cancel();
+        timer.reset();
       }
       if (waiter) {
         auto h = waiter;
