@@ -3,8 +3,8 @@
 #include <iocoro/co_sleep.hpp>
 #include <iocoro/co_spawn.hpp>
 #include <iocoro/error.hpp>
-#include <iocoro/io/async_write.hpp>
-#include <iocoro/with_timeout.hpp>
+#include <iocoro/io/write.hpp>
+#include <iocoro/io/connect.hpp>
 #include <iocoro/ip/address.hpp>
 #include <iocoro/ip/tcp.hpp>
 #include <iocoro/when_all.hpp>
@@ -60,11 +60,7 @@ auto connection_impl::run() -> iocoro::awaitable<void> {
     }
     auto endpoint = iocoro::ip::tcp::endpoint{*addr_r, cfg_.port};
 
-    auto r = co_await iocoro::with_timeout(
-        socket_.async_connect(endpoint),
-        cfg_.connect_timeout,
-        [&]() { socket_.cancel(); }
-    );
+    auto r = co_await iocoro::io::async_connect_timeout(socket_, endpoint, cfg_.connect_timeout);
     if (r) {
       throw std::system_error(r);
     }
