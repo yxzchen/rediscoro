@@ -77,6 +77,12 @@ struct set {
   std::vector<node> elements;
 };
 
+/// Attribute value (|)
+/// Attributes are metadata that can be attached to any RESP3 value
+struct attribute {
+  std::vector<std::pair<node, node>> entries;
+};
+
 /// Push value (>)
 struct push {
   std::vector<node> elements;

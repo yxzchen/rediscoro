@@ -22,6 +22,7 @@ enum class type {
   array,           // *
   map,             // %
   set,             // ~
+  attribute,       // | (metadata for other types)
   push,            // >
 };
 
