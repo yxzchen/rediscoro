@@ -17,3 +17,4 @@ endmacro()
 
 make_test(test_resp3_types)
 make_test(test_resp3_visitor)
+make_test(test_resp3_encoder)

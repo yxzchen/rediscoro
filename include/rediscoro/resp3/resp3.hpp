@@ -7,3 +7,4 @@
 #include <rediscoro/resp3/value.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/visitor.hpp>
+#include <rediscoro/resp3/encoder.hpp>
