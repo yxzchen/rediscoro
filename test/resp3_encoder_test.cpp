@@ -5,7 +5,7 @@ using namespace rediscoro::resp3;
 
 namespace {
 
-TEST(resp3_encoder, simple_types) {
+TEST(resp3_encoder_test, encode_all_simple_types) {
   // Simple string
   message str{simple_string{"OK"}};
   EXPECT_EQ(encode(str), "+OK\r\n");
@@ -43,7 +43,7 @@ TEST(resp3_encoder, simple_types) {
   EXPECT_EQ(encode(null_msg), "_\r\n");
 }
 
-TEST(resp3_encoder, bulk_types) {
+TEST(resp3_encoder_test, encode_bulk_types_with_length) {
   // Bulk string
   message bulk{bulk_string{"hello"}};
   EXPECT_EQ(encode(bulk), "$5\r\nhello\r\n");
@@ -63,7 +63,7 @@ TEST(resp3_encoder, bulk_types) {
   EXPECT_EQ(encode(vstr_msg), "=9\r\ntxt:hello\r\n");
 }
 
-TEST(resp3_encoder, array) {
+TEST(resp3_encoder_test, encode_array_aggregate) {
   // Simple array
   array arr;
   arr.elements.push_back(message{integer{1}});
@@ -87,7 +87,7 @@ TEST(resp3_encoder, array) {
   EXPECT_EQ(encode(mixed_msg), "*3\r\n+hello\r\n:42\r\n_\r\n");
 }
 
-TEST(resp3_encoder, map) {
+TEST(resp3_encoder_test, encode_map_with_ordered_entries) {
   map m;
   m.entries.emplace_back(
     message{simple_string{"key1"}},
@@ -106,7 +106,7 @@ TEST(resp3_encoder, map) {
   EXPECT_EQ(encode(empty_map), "%0\r\n");
 }
 
-TEST(resp3_encoder, set) {
+TEST(resp3_encoder_test, encode_set_aggregate) {
   set s;
   s.elements.push_back(message{simple_string{"a"}});
   s.elements.push_back(message{simple_string{"b"}});
@@ -116,7 +116,7 @@ TEST(resp3_encoder, set) {
   EXPECT_EQ(encode(set_msg), "~3\r\n+a\r\n+b\r\n+c\r\n");
 }
 
-TEST(resp3_encoder, push) {
+TEST(resp3_encoder_test, encode_push_message) {
   push p;
   p.elements.push_back(message{simple_string{"pubsub"}});
   p.elements.push_back(message{simple_string{"message"}});
@@ -126,7 +126,7 @@ TEST(resp3_encoder, push) {
   EXPECT_EQ(encode(push_msg), ">3\r\n+pubsub\r\n+message\r\n+hello\r\n");
 }
 
-TEST(resp3_encoder, nested_structures) {
+TEST(resp3_encoder_test, encode_nested_arrays) {
   // Nested array
   array inner;
   inner.elements.push_back(message{integer{1}});
@@ -141,7 +141,7 @@ TEST(resp3_encoder, nested_structures) {
   EXPECT_EQ(encode(nested), "*3\r\n+start\r\n*2\r\n:1\r\n:2\r\n+end\r\n");
 }
 
-TEST(resp3_encoder, attributes) {
+TEST(resp3_encoder_test, encode_message_with_attributes) {
   attribute attrs;
   attrs.entries.emplace_back(
     message{simple_string{"ttl"}},
@@ -152,7 +152,7 @@ TEST(resp3_encoder, attributes) {
   EXPECT_EQ(encode(msg), "|1\r\n+ttl\r\n:3600\r\n+cached_value\r\n");
 }
 
-TEST(resp3_encoder, complex_example) {
+TEST(resp3_encoder_test, encode_complex_redis_response) {
   // HGETALL response with attributes
   map m;
   m.entries.emplace_back(
@@ -178,7 +178,7 @@ TEST(resp3_encoder, complex_example) {
   EXPECT_TRUE(encoded.find("%2\r\n") != std::string::npos);
 }
 
-TEST(resp3_encoder, encoder_reuse) {
+TEST(resp3_encoder_test, encoder_reuse_clears_buffer) {
   encoder enc;
 
   message msg1{simple_string{"test1"}};
@@ -193,7 +193,7 @@ TEST(resp3_encoder, encoder_reuse) {
   EXPECT_EQ(result1, "+test1\r\n");
 }
 
-TEST(resp3_encoder, encode_to_buffer) {
+TEST(resp3_encoder_test, encode_to_appends_to_buffer) {
   encoder enc;
   std::string buffer;
 

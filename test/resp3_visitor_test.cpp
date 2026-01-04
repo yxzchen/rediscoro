@@ -5,7 +5,7 @@ using namespace rediscoro::resp3;
 
 namespace {
 
-TEST(resp3_visitor, visit_with_lambda) {
+TEST(resp3_visitor_test, visit_with_lambda_callback) {
   message msg{integer{123}};
 
   bool visited = false;
@@ -20,7 +20,7 @@ TEST(resp3_visitor, visit_with_lambda) {
   EXPECT_TRUE(visited);
 }
 
-TEST(resp3_visitor, visit_return_value) {
+TEST(resp3_visitor_test, visit_with_return_value) {
   message msg{simple_string{"hello"}};
 
   auto result = visit([](const auto& val) -> std::string {
@@ -35,7 +35,7 @@ TEST(resp3_visitor, visit_return_value) {
   EXPECT_EQ(result, "hello");
 }
 
-TEST(resp3_visitor, walk_tree) {
+TEST(resp3_visitor_test, walk_recursive_tree_traversal) {
   array inner;
   inner.elements.push_back(message{integer{1}});
   inner.elements.push_back(message{simple_string{"hello"}});
@@ -55,7 +55,7 @@ TEST(resp3_visitor, walk_tree) {
   EXPECT_EQ(count, 5);
 }
 
-TEST(resp3_visitor, walk_with_attributes) {
+TEST(resp3_visitor_test, walk_with_attributes_included) {
   attribute attrs;
   attrs.entries.emplace_back(
     message{simple_string{"key"}},
@@ -73,7 +73,7 @@ TEST(resp3_visitor, walk_with_attributes) {
   EXPECT_EQ(count, 4);
 }
 
-TEST(resp3_visitor, generic_visitor) {
+TEST(resp3_visitor_test, generic_visitor_inheritance) {
   struct counter : generic_visitor {
     int int_count = 0;
     int str_count = 0;

@@ -5,7 +5,7 @@ using namespace rediscoro::resp3;
 
 namespace {
 
-TEST(resp3_types, basic_types) {
+TEST(resp3_types_test, simple_and_bulk_type_creation) {
   // Simple types
   message str{simple_string{"OK"}};
   EXPECT_EQ(str.get_type(), type::simple_string);
@@ -25,7 +25,7 @@ TEST(resp3_types, basic_types) {
   EXPECT_EQ(bulk.as<bulk_string>().data, "hello");
 }
 
-TEST(resp3_types, aggregate_types) {
+TEST(resp3_types_test, aggregate_types_array_and_map) {
   // Array
   array arr;
   arr.elements.push_back(message{integer{1}});
@@ -49,7 +49,7 @@ TEST(resp3_types, aggregate_types) {
   EXPECT_EQ(map_msg.as<map>().entries[0].second.as<integer>().value, 100);
 }
 
-TEST(resp3_types, attributes) {
+TEST(resp3_types_test, attributes_attachment_and_access) {
   attribute attrs;
   attrs.entries.emplace_back(
     message{simple_string{"ttl"}},
@@ -66,7 +66,7 @@ TEST(resp3_types, attributes) {
   EXPECT_FALSE(no_attrs.has_attributes());
 }
 
-TEST(resp3_types, nested_structures) {
+TEST(resp3_types_test, nested_array_structures) {
   array inner;
   inner.elements.push_back(message{integer{1}});
   inner.elements.push_back(message{integer{2}});
@@ -82,7 +82,7 @@ TEST(resp3_types, nested_structures) {
   EXPECT_EQ(nested.as<array>().elements[1].as<array>().elements.size(), 2);
 }
 
-TEST(resp3_types, type_helpers) {
+TEST(resp3_types_test, type_helper_methods) {
   message str{simple_string{"test"}};
   EXPECT_TRUE(str.is_string());
   EXPECT_TRUE(str.is_simple());
@@ -96,7 +96,7 @@ TEST(resp3_types, type_helpers) {
   EXPECT_TRUE(arr.is_aggregate());
 }
 
-TEST(resp3_types, static_type_id) {
+TEST(resp3_types_test, static_type_id_correctness) {
   static_assert(simple_string::type_id == type::simple_string);
   static_assert(integer::type_id == type::integer);
   static_assert(array::type_id == type::array);
