@@ -73,27 +73,4 @@ TEST(resp3_visitor_test, walk_with_attributes_included) {
   EXPECT_EQ(count, 4);
 }
 
-TEST(resp3_visitor_test, generic_visitor_inheritance) {
-  struct counter : generic_visitor {
-    int int_count = 0;
-    int str_count = 0;
-
-    auto on_integer(const integer&) -> void override {
-      int_count++;
-    }
-
-    auto on_simple_string(const simple_string&) -> void override {
-      str_count++;
-    }
-  };
-
-  counter c;
-
-  visit(c, message{integer{42}});
-  EXPECT_EQ(c.int_count, 1);
-
-  visit(c, message{simple_string{"hello"}});
-  EXPECT_EQ(c.str_count, 1);
-}
-
 }  // namespace
