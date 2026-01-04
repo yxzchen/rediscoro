@@ -3,10 +3,10 @@
 #include <iocoro/awaitable.hpp>
 #include <iocoro/detail/executor_guard.hpp>
 #include <iocoro/error.hpp>
-#include <iocoro/executor.hpp>
-#include <iocoro/timer_handle.hpp>
+#include <iocoro/io_executor.hpp>
+#include <iocoro/steady_timer.hpp>
 #include <rediscoro/adapter/any_adapter.hpp>
-#include <rediscoro/detail/assert.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/ignore.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/node.hpp>
@@ -26,7 +26,7 @@ using error_fn_t = std::function<void(std::error_code)>;
 
 /// Configuration for `detail::pipeline`.
 struct pipeline_config {
-  iocoro::executor ex;
+  iocoro::io_executor ex;
   write_fn_t write_fn;
   error_fn_t error_fn;
   std::chrono::milliseconds request_timeout{};
@@ -73,13 +73,13 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
     std::size_t remaining = 0;
 
     std::chrono::milliseconds timeout{};
-    iocoro::timer_handle timeout_handle{};
+    std::shared_ptr<iocoro::steady_timer> timer{};
 
     std::error_code ec{};
     bool done = false;
 
     std::coroutine_handle<> waiter{};
-    iocoro::executor ex{};
+    iocoro::io_executor ex{};
 
     void finish(std::error_code e = {}) {
       if (done) {
@@ -89,9 +89,9 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
       if (!ec) {
         ec = e;
       }
-      if (timeout_handle) {
-        (void)timeout_handle.cancel();
-        timeout_handle = {};
+      if (timer) {
+        timer->cancel();
+        timer.reset();
       }
       if (waiter) {
         auto h = waiter;
@@ -130,7 +130,7 @@ class pipeline : public std::enable_shared_from_this<pipeline> {
   void finish_all(std::error_code ec);
 
  private:
-  iocoro::executor ex_;
+  iocoro::io_executor ex_;
   write_fn_t write_fn_;
   error_fn_t error_fn_;
   std::chrono::milliseconds request_timeout_{};

@@ -33,7 +33,7 @@ inline void fail_and_stop_on_exception(std::exception_ptr eptr) {
 /// - Uses completion-token `co_spawn` so exceptions are captured and reported
 template <class Factory>
 inline void run_async(iocoro::io_context& ctx, Factory&& factory) {
-  auto guard = std::make_shared<iocoro::work_guard<iocoro::executor>>(ctx.get_executor());
+  auto guard = std::make_shared<iocoro::work_guard<iocoro::io_executor>>(ctx.get_executor());
 
   iocoro::co_spawn(
       ctx.get_executor(),

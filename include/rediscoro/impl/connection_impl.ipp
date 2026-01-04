@@ -3,13 +3,13 @@
 #include <iocoro/co_sleep.hpp>
 #include <iocoro/co_spawn.hpp>
 #include <iocoro/error.hpp>
-#include <iocoro/io/async_write.hpp>
-#include <iocoro/io/with_timeout.hpp>
+#include <iocoro/io/write.hpp>
+#include <iocoro/io/connect.hpp>
 #include <iocoro/ip/address.hpp>
 #include <iocoro/ip/tcp.hpp>
 #include <iocoro/when_all.hpp>
 #include <rediscoro/adapter/result.hpp>
-#include <rediscoro/detail/assert.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/detail/connection_impl.hpp>
 #include <rediscoro/detail/pipeline.hpp>
 #include <rediscoro/error.hpp>
@@ -24,7 +24,7 @@
 
 namespace rediscoro::detail {
 
-connection_impl::connection_impl(iocoro::executor ex, config cfg)
+connection_impl::connection_impl(iocoro::io_executor ex, config cfg)
     : cfg_{std::move(cfg)}, ex_{ex}, socket_{ex_}, parser_{} {}
 
 connection_impl::~connection_impl() { stop(); }
@@ -60,7 +60,7 @@ auto connection_impl::run() -> iocoro::awaitable<void> {
     }
     auto endpoint = iocoro::ip::tcp::endpoint{*addr_r, cfg_.port};
 
-    auto r = co_await iocoro::io::with_timeout(socket_, socket_.async_connect(endpoint), cfg_.connect_timeout);
+    auto r = co_await iocoro::io::async_connect_timeout(socket_, endpoint, cfg_.connect_timeout);
     if (r) {
       throw std::system_error(r);
     }
@@ -219,7 +219,7 @@ auto connection_impl::is_running() const noexcept -> bool { return state_ == sta
 
 auto connection_impl::error() const -> std::error_code { return error_; }
 
-auto connection_impl::get_executor() noexcept -> iocoro::executor { return ex_; }
+auto connection_impl::get_executor() noexcept -> iocoro::io_executor { return ex_; }
 
 void connection_impl::close_transport() noexcept {
   socket_.close();

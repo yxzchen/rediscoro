@@ -14,9 +14,6 @@ namespace detail {
 auto is_subscribe(std::string_view cmd) -> bool;
 }  // namespace detail
 
-template <class Iterator>
-concept forward_iterator = std::forward_iterator<Iterator>;
-
 template <class Range>
 concept range = requires(Range& r) {
   std::begin(r);
@@ -46,7 +43,7 @@ class request {
     check_cmd(cmd);
   }
 
-  template <forward_iterator Iterator>
+  template <std::forward_iterator Iterator>
   void push_range(std::string_view cmd, std::string_view key, Iterator begin, Iterator end) {
     using value_type = typename std::iterator_traits<Iterator>::value_type;
 
@@ -63,7 +60,7 @@ class request {
     check_cmd(cmd);
   }
 
-  template <forward_iterator Iterator>
+  template <std::forward_iterator Iterator>
   void push_range(std::string_view cmd, Iterator begin, Iterator end) {
     using value_type = typename std::iterator_traits<Iterator>::value_type;
 

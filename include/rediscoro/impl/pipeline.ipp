@@ -16,11 +16,10 @@ pipeline::pipeline(pipeline_config const& cfg)
       request_timeout_{cfg.request_timeout},
       max_inflight_{cfg.max_inflight} {}
 
-pipeline::~pipeline() {
-  stop_impl(iocoro::error::operation_aborted, false);
-}
+pipeline::~pipeline() { stop_impl(iocoro::error::operation_aborted, false); }
 
-auto pipeline::execute_any(request const& req, adapter::any_adapter adapter) -> iocoro::awaitable<void> {
+auto pipeline::execute_any(request const& req, adapter::any_adapter adapter)
+  -> iocoro::awaitable<void> {
   if (stopped_) {
     throw std::system_error(iocoro::error::operation_aborted);
   }
@@ -126,25 +125,25 @@ void pipeline::pump() {
 void pipeline::start_write_one(std::shared_ptr<op_state> const& op) {
   auto self = shared_from_this();
   iocoro::co_spawn(
-      ex_,
-      [self, op]() -> iocoro::awaitable<void> {
-        co_await self->write_fn_(*op->req);
+    ex_,
+    [self, op]() -> iocoro::awaitable<void> {
+      co_await self->write_fn_(*op->req);
 
-        self->writing_ = false;
-        self->notify_pump();
-      },
-      [self](iocoro::expected<void, std::exception_ptr> r) {
-        if (r) {
-          return;
-        }
-        try {
-          std::rethrow_exception(r.error());
-        } catch (std::system_error const& e) {
-          self->stop_impl(e.code(), true);
-        } catch (...) {
-          self->stop_impl(std::make_error_code(std::errc::io_error), true);
-        }
-      });
+      self->writing_ = false;
+      self->notify_pump();
+    },
+    [self](iocoro::expected<void, std::exception_ptr> r) {
+      if (r) {
+        return;
+      }
+      try {
+        std::rethrow_exception(r.error());
+      } catch (std::system_error const& e) {
+        self->stop_impl(e.code(), true);
+      } catch (...) {
+        self->stop_impl(std::make_error_code(std::errc::io_error), true);
+      }
+    });
 }
 
 void pipeline::set_timeout(std::shared_ptr<op_state> const& op) {
@@ -152,8 +151,27 @@ void pipeline::set_timeout(std::shared_ptr<op_state> const& op) {
     return;
   }
 
+  // Create timer with shared ownership for lifetime management
+  op->timer = std::make_shared<iocoro::steady_timer>(ex_);
+  op->timer->expires_after(op->timeout);
+
+  // Spawn a detached coroutine to wait for the timer
   auto self = shared_from_this();
-  op->timeout_handle = ex_.schedule_timer(op->timeout, [self, op]() mutable { self->on_timeout(op); });
+  auto timer = op->timer;  // Capture shared_ptr by value
+
+  iocoro::co_spawn(
+    ex_,
+    [timer, self, op]() -> iocoro::awaitable<void> {
+      auto ec = co_await timer->async_wait(iocoro::use_awaitable);
+      if (!ec) {
+        self->on_timeout(op);
+      }
+      // Timer is automatically destroyed after callback completes
+    },
+    [](iocoro::expected<void, std::exception_ptr>) {
+      // Completion handler - we don't care about the result
+    }
+  );
 }
 
 void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {
@@ -165,9 +183,7 @@ void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {
   stop_impl(iocoro::error::timed_out, true);
 }
 
-void pipeline::stop(std::error_code ec) {
-  stop_impl(ec, false);
-}
+void pipeline::stop(std::error_code ec) { stop_impl(ec, false); }
 
 void pipeline::stop_impl(std::error_code ec, bool call_error_fn) {
   if (stopped_) {

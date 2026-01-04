@@ -35,7 +35,18 @@ struct converter<T, true> {
 
 template <>
 struct converter<bool, false> {
-  static void apply(bool& t, resp3::node_view const& node, std::error_code&) { t = *node.value().data() == 't'; }
+  static void apply(bool& t, resp3::node_view const& node, std::error_code& ec) {
+    auto const& view = node.value();
+    if (view == "t") {
+      t = true;
+      return;
+    }
+    if (view == "f") {
+      t = false;
+      return;
+    }
+    ec = rediscoro::error::unexpected_bool_value;
+  }
 };
 
 template <>

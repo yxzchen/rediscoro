@@ -9,74 +9,43 @@
 #include <limits>
 #include <string_view>
 #include <tuple>
-#include <variant>
+#include <utility>
 
 namespace rediscoro::adapter::detail {
-
-template <template <class> class Adapter, typename Tuple>
-struct transform_tuple;
-
-template <template <class> class Adapter, typename... Ts>
-struct transform_tuple<Adapter, std::tuple<Ts...>> {
-  using type = std::tuple<Adapter<Ts>...>;
-};
-
-template <typename Tuple>
-struct tuple_to_variant;
-
-template <typename... Ts>
-struct tuple_to_variant<std::tuple<Ts...>> {
-  using type = std::variant<Ts...>;
-};
 
 template <class T>
 auto internal_adapt(T& t) noexcept {
   return result_traits<std::decay_t<T>>::adapt(t);
 }
 
-template <std::size_t N>
-struct assigner {
-  template <class T1, class T2>
-  static void assign(T1& dest, T2& from) {
-    dest[N].template emplace<N>(internal_adapt(std::get<N>(from)));
-    assigner<N - 1>::assign(dest, from);
-  }
-};
-
-template <>
-struct assigner<0> {
-  template <class T1, class T2>
-  static void assign(T1& dest, T2& from) {
-    dest[0].template emplace<0>(internal_adapt(std::get<0>(from)));
-  }
-};
-
 template <class R>
 class static_adapter {
  private:
   static constexpr auto size = std::tuple_size<R>::value;
-  using adapter_tuple = transform_tuple<adapter_t, R>::type;
-  using variant_type = tuple_to_variant<adapter_tuple>::type;
-  using adapters_array_type = std::array<variant_type, size>;
+  using adapters_tuple_type =
+      decltype([]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return std::tuple{adapter_t<std::tuple_element_t<Is, R>>{}...};
+      }(std::make_index_sequence<size>{}));
 
-  adapters_array_type adapters_;
+  adapters_tuple_type adapters_;
   std::size_t i_ = 0;
 
  public:
-  explicit static_adapter(R& r) { assigner<size - 1>::assign(adapters_, r); }
+  explicit static_adapter(R& r)
+      : adapters_([]<std::size_t... Is>(R& rr, std::index_sequence<Is...>) {
+          return std::tuple{internal_adapt(std::get<Is>(rr))...};
+        }(r, std::make_index_sequence<size>{})) {}
 
-  // clang-format off
   void on_msg(resp3::msg_view const& msg) {
-    REDISCORO_ASSERT(i_ < adapters_.size());
-    std::visit(
-      [&](auto& arg) {
-         arg.on_msg(msg);
-      },
-      adapters_.at(i_)
-    );
-    i_++;
+    REDISCORO_ASSERT(i_ < size);
+
+    []<std::size_t... Is>(std::size_t idx, adapters_tuple_type& adapters, resp3::msg_view const& m,
+                          std::index_sequence<Is...>) {
+      (void)(((idx == Is) ? (std::get<Is>(adapters).on_msg(m), true) : false) || ...);
+    }(i_, adapters_, msg, std::make_index_sequence<size>{});
+
+    ++i_;
   }
-  // clang-format on
 };
 
 template <class R>
@@ -86,7 +55,7 @@ class vector_adapter {
   adapter_type adapter_;
 
  public:
-  explicit vector_adapter(R& r) { adapter_ = internal_adapt(r); }
+  explicit vector_adapter(R& r) : adapter_(internal_adapt(r)) {}
 
   void on_msg(resp3::msg_view const& msg) { adapter_.on_msg(msg); }
 };

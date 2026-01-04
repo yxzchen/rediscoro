@@ -4,7 +4,7 @@
 
 namespace rediscoro {
 
-connection::connection(iocoro::executor ex, config cfg)
+connection::connection(iocoro::io_executor ex, config cfg)
     : impl_{std::make_shared<detail::connection_impl>(ex, std::move(cfg))} {}
 
 connection::~connection() {
@@ -35,7 +35,7 @@ auto connection::error() const -> std::error_code {
   return impl_->error();
 }
 
-auto connection::get_executor() noexcept -> iocoro::executor {
+auto connection::get_executor() noexcept -> iocoro::io_executor {
   return impl_->get_executor();
 }
 
