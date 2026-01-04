@@ -2,6 +2,8 @@
 
 namespace rediscoro::resp3 {
 
+// clang-format off
+
 /// RESP3 protocol data types
 enum class type {
   // Simple types
@@ -25,5 +27,7 @@ enum class type {
   attribute,       // | (metadata for other types)
   push,            // >
 };
+
+// clang-format on
 
 }  // namespace rediscoro::resp3

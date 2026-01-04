@@ -1,11 +1,29 @@
 #pragma once
 
-#include <optional>
 #include <rediscoro/resp3/type.hpp>
 #include <rediscoro/resp3/value.hpp>
+
+#include <optional>
+#include <type_traits>
 #include <variant>
 
 namespace rediscoro::resp3 {
+
+namespace detail {
+
+// Concept to verify that a type has a static type_id member
+template <typename T>
+concept has_type_id = requires {
+  { T::type_id } -> std::convertible_to<type>;
+};
+
+// Compile-time verification that all value types have type_id
+template <typename... Ts>
+constexpr bool all_have_type_id = (has_type_id<Ts> && ...);
+
+}  // namespace detail
+
+// clang-format off
 
 /// RESP3 message representing a complete RESP3 value
 /// This structure represents a fully parsed RESP3 message with optional attributes
@@ -40,6 +58,13 @@ struct message {
     push
   >;
 
+  // Compile-time check: ensure all variant alternatives have type_id
+  static_assert(detail::all_have_type_id<
+    simple_string, simple_error, integer, double_type, boolean, big_number, null,
+    bulk_string, bulk_error, verbatim_string,
+    array, map, set, attribute, push
+  >, "All RESP3 value types must have a static type_id member");
+
   // The actual value
   value_type value;
 
@@ -60,8 +85,13 @@ struct message {
     : value(std::forward<T>(val)), attrs(std::move(attributes)) {}
 
   /// Get the type of this message
+  /// Uses std::visit to retrieve the type_id from the actual value type
+  /// This ensures type safety and doesn't rely on variant index ordering
   [[nodiscard]] auto get_type() const -> type {
-    return static_cast<type>(value.index());
+    return std::visit([](const auto& val) -> type {
+      using T = std::decay_t<decltype(val)>;
+      return T::type_id;
+    }, value);
   }
 
   /// Check if this message is of a specific type
@@ -148,5 +178,7 @@ struct message {
     return is<simple_string>() || is<bulk_string>() || is<verbatim_string>();
   }
 };
+
+// clang-format on
 
 }  // namespace rediscoro::resp3
