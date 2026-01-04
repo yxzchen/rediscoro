@@ -3,6 +3,7 @@
 #include <rediscoro/resp3/type.hpp>
 #include <rediscoro/resp3/value.hpp>
 
+#include <concepts>
 #include <optional>
 #include <type_traits>
 #include <variant>
