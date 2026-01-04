@@ -10,7 +10,7 @@
 namespace rediscoro::resp3 {
 
 // Forward declaration
-struct node;
+struct message;
 
 /// Simple string value (+)
 struct simple_string {
@@ -63,29 +63,29 @@ struct verbatim_string {
 
 /// Array value (*)
 struct array {
-  std::vector<node> elements;
+  std::vector<message> elements;
 };
 
 /// Map value (%)
 /// Stored as vector of key-value pairs to preserve order
 struct map {
-  std::vector<std::pair<node, node>> entries;
+  std::vector<std::pair<message, message>> entries;
 };
 
 /// Set value (~)
 struct set {
-  std::vector<node> elements;
+  std::vector<message> elements;
 };
 
 /// Attribute value (|)
 /// Attributes are metadata that can be attached to any RESP3 value
 struct attribute {
-  std::vector<std::pair<node, node>> entries;
+  std::vector<std::pair<message, message>> entries;
 };
 
 /// Push value (>)
 struct push {
-  std::vector<node> elements;
+  std::vector<message> elements;
 };
 
 }  // namespace rediscoro::resp3

@@ -7,13 +7,16 @@
 
 namespace rediscoro::resp3 {
 
-/// RESP3 node representing a complete RESP3 object
-/// This structure represents a fully parsed RESP3 value with optional attributes
+/// RESP3 message representing a complete RESP3 value
+/// This structure represents a fully parsed RESP3 message with optional attributes
 ///
 /// Note: In the RESP3 protocol, during deserialization, data is parsed line by line
-/// (between \r\n delimiters). This `node` structure represents the final, complete
-/// parsed object after all lines have been processed, not the intermediate parsing state.
-struct node {
+/// (between \r\n delimiters). This `message` structure represents the final, complete
+/// parsed result after all lines have been processed, not the intermediate parsing state.
+///
+/// The parser will maintain its own state machine and intermediate data structures,
+/// and construct `message` objects as the final output.
+struct message {
   using value_type = std::variant<
     // Simple types
     simple_string,
@@ -44,24 +47,24 @@ struct node {
   // In RESP3, attributes (|) can appear before any value to provide metadata
   std::optional<attribute> attrs;
 
-  // Default constructor - creates a null node
-  node() : value(null{}), attrs(std::nullopt) {}
+  // Default constructor - creates a null message
+  message() : value(null{}), attrs(std::nullopt) {}
 
   // Constructor from any supported type
   template <typename T>
-  explicit node(T&& val) : value(std::forward<T>(val)), attrs(std::nullopt) {}
+  explicit message(T&& val) : value(std::forward<T>(val)), attrs(std::nullopt) {}
 
   // Constructor with value and attributes
   template <typename T>
-  node(T&& val, attribute&& attributes)
+  message(T&& val, attribute&& attributes)
     : value(std::forward<T>(val)), attrs(std::move(attributes)) {}
 
-  /// Get the type of this node
+  /// Get the type of this message
   [[nodiscard]] auto get_type() const -> type {
     return static_cast<type>(value.index());
   }
 
-  /// Check if this node is of a specific type
+  /// Check if this message is of a specific type
   template <typename T>
   [[nodiscard]] auto is() const -> bool {
     return std::holds_alternative<T>(value);
@@ -91,7 +94,7 @@ struct node {
     return std::get_if<T>(&value);
   }
 
-  /// Check if this node has attributes
+  /// Check if this message has attributes
   [[nodiscard]] auto has_attributes() const -> bool {
     return attrs.has_value();
   }
@@ -114,7 +117,7 @@ struct node {
     return attrs.has_value() ? &(*attrs) : nullptr;
   }
 
-  /// Check if this is a null node
+  /// Check if this is a null message
   [[nodiscard]] auto is_null() const -> bool {
     return is<null>();
   }
