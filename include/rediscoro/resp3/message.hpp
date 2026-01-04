@@ -77,10 +77,12 @@ struct message {
 
   // Constructor from any supported type
   template <typename T>
+    requires std::constructible_from<value_type, T>
   explicit message(T&& val) : value(std::forward<T>(val)), attrs(std::nullopt) {}
 
   // Constructor with value and attributes
   template <typename T>
+    requires std::constructible_from<value_type, T>
   message(T&& val, attribute&& attributes)
     : value(std::forward<T>(val)), attrs(std::move(attributes)) {}
 
