@@ -20,3 +20,5 @@ template <>
 struct is_error_code_enum<rediscoro::error> : std::true_type {};
 
 }  // namespace std
+
+#include <rediscoro/impl/error.ipp>
