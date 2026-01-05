@@ -68,9 +68,9 @@ using parse_expected = expected<message, std::error_code>;
 class attribute_value_parser;
 
 [[nodiscard]] auto make_message_parser(std::size_t depth) -> std::unique_ptr<value_parser>;
-[[nodiscard]] auto make_value_body_parser(type t, std::size_t depth) -> std::unique_ptr<value_parser>;
+[[nodiscard]] auto make_value_parser(type t, std::size_t depth) -> std::unique_ptr<value_parser>;
 
-class simple_string_body_parser final : public value_parser {
+class simple_string_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -84,7 +84,7 @@ public:
   }
 };
 
-class simple_error_body_parser final : public value_parser {
+class simple_error_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -98,7 +98,7 @@ public:
   }
 };
 
-class integer_body_parser final : public value_parser {
+class integer_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -115,7 +115,7 @@ public:
   }
 };
 
-class double_body_parser final : public value_parser {
+class double_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -132,7 +132,7 @@ public:
   }
 };
 
-class boolean_body_parser final : public value_parser {
+class boolean_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -154,7 +154,7 @@ public:
   }
 };
 
-class big_number_body_parser final : public value_parser {
+class big_number_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -168,7 +168,7 @@ public:
   }
 };
 
-class null_body_parser final : public value_parser {
+class null_parser final : public value_parser {
 public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
@@ -183,7 +183,7 @@ public:
   }
 };
 
-class bulk_string_body_parser final : public value_parser {
+class bulk_string_parser final : public value_parser {
   enum class stage { read_len, read_data };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -231,7 +231,7 @@ public:
   }
 };
 
-class bulk_error_body_parser final : public value_parser {
+class bulk_error_parser final : public value_parser {
   enum class stage { read_len, read_data };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -276,7 +276,7 @@ public:
   }
 };
 
-class verbatim_string_body_parser final : public value_parser {
+class verbatim_string_parser final : public value_parser {
   enum class stage { read_len, read_data };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -438,7 +438,7 @@ public:
   }
 };
 
-class array_body_parser final : public value_parser {
+class array_parser final : public value_parser {
   enum class stage { read_len, read_elements };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -447,7 +447,7 @@ class array_body_parser final : public value_parser {
   std::size_t depth_{0};
 
 public:
-  explicit array_body_parser(std::size_t depth) : depth_(depth) {}
+  explicit array_parser(std::size_t depth) : depth_(depth) {}
 
   auto parse(buffer& buf) -> parse_expected override {
     while (true) {
@@ -500,7 +500,7 @@ public:
   }
 };
 
-class set_body_parser final : public value_parser {
+class set_parser final : public value_parser {
   enum class stage { read_len, read_elements };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -509,7 +509,7 @@ class set_body_parser final : public value_parser {
   std::size_t depth_{0};
 
 public:
-  explicit set_body_parser(std::size_t depth) : depth_(depth) {}
+  explicit set_parser(std::size_t depth) : depth_(depth) {}
 
   auto parse(buffer& buf) -> parse_expected override {
     while (true) {
@@ -562,7 +562,7 @@ public:
   }
 };
 
-class push_body_parser final : public value_parser {
+class push_parser final : public value_parser {
   enum class stage { read_len, read_elements };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -571,7 +571,7 @@ class push_body_parser final : public value_parser {
   std::size_t depth_{0};
 
 public:
-  explicit push_body_parser(std::size_t depth) : depth_(depth) {}
+  explicit push_parser(std::size_t depth) : depth_(depth) {}
 
   auto parse(buffer& buf) -> parse_expected override {
     while (true) {
@@ -624,7 +624,7 @@ public:
   }
 };
 
-class map_body_parser final : public value_parser {
+class map_parser final : public value_parser {
   enum class stage { read_len, read_key, read_value };
   stage stage_{stage::read_len};
   std::int64_t expected_{0};
@@ -634,7 +634,7 @@ class map_body_parser final : public value_parser {
   std::size_t depth_{0};
 
 public:
-  explicit map_body_parser(std::size_t depth) : depth_(depth) {}
+  explicit map_parser(std::size_t depth) : depth_(depth) {}
 
   auto parse(buffer& buf) -> parse_expected override {
     while (true) {
@@ -760,7 +760,7 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
         if (depth_ + 1 > max_nesting_depth) {
           return unexpected(error::nesting_too_deep);
         }
-        child_ = make_value_body_parser(*maybe_t, depth_ + 1);
+        child_ = make_value_parser(*maybe_t, depth_ + 1);
         if (!child_) {
           return unexpected(error::invalid_format);
         }
@@ -792,25 +792,25 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
   return std::make_unique<message_parser>(depth);
 }
 
-[[nodiscard]] auto make_value_body_parser(type t, std::size_t depth) -> std::unique_ptr<value_parser> {
+[[nodiscard]] auto make_value_parser(type t, std::size_t depth) -> std::unique_ptr<value_parser> {
   if (depth > max_nesting_depth) {
     return nullptr;
   }
   switch (t) {
-    case type::simple_string:   return std::make_unique<simple_string_body_parser>();
-    case type::simple_error:    return std::make_unique<simple_error_body_parser>();
-    case type::integer:         return std::make_unique<integer_body_parser>();
-    case type::double_type:     return std::make_unique<double_body_parser>();
-    case type::boolean:         return std::make_unique<boolean_body_parser>();
-    case type::big_number:      return std::make_unique<big_number_body_parser>();
-    case type::null:            return std::make_unique<null_body_parser>();
-    case type::bulk_string:     return std::make_unique<bulk_string_body_parser>();
-    case type::bulk_error:      return std::make_unique<bulk_error_body_parser>();
-    case type::verbatim_string: return std::make_unique<verbatim_string_body_parser>();
-    case type::array:           return std::make_unique<array_body_parser>(depth);
-    case type::map:             return std::make_unique<map_body_parser>(depth);
-    case type::set:             return std::make_unique<set_body_parser>(depth);
-    case type::push:            return std::make_unique<push_body_parser>(depth);
+    case type::simple_string:   return std::make_unique<simple_string_parser>();
+    case type::simple_error:    return std::make_unique<simple_error_parser>();
+    case type::integer:         return std::make_unique<integer_parser>();
+    case type::double_type:     return std::make_unique<double_parser>();
+    case type::boolean:         return std::make_unique<boolean_parser>();
+    case type::big_number:      return std::make_unique<big_number_parser>();
+    case type::null:            return std::make_unique<null_parser>();
+    case type::bulk_string:     return std::make_unique<bulk_string_parser>();
+    case type::bulk_error:      return std::make_unique<bulk_error_parser>();
+    case type::verbatim_string: return std::make_unique<verbatim_string_parser>();
+    case type::array:           return std::make_unique<array_parser>(depth);
+    case type::map:             return std::make_unique<map_parser>(depth);
+    case type::set:             return std::make_unique<set_parser>(depth);
+    case type::push:            return std::make_unique<push_parser>(depth);
     case type::attribute:
       // Attribute is a prefix handled by message_parser.
       return nullptr;
