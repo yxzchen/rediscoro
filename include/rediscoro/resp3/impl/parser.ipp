@@ -71,7 +71,7 @@ struct value_result {
 
 auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
   if (failed_) {
-    return unexpected(error::invalid_format);
+    return unexpected(error::parser_failed);
   }
 
   if (stack_.empty()) {
@@ -256,7 +256,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       if (data[1] != '\r' || data[2] != '\n') {
         failed_ = true;
-        return unexpected(error::invalid_format);
+        return unexpected(error::invalid_null);
       }
       buf.consume(3);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -272,7 +272,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       if (data[2] != '\r' || data[3] != '\n') {
         failed_ = true;
-        return unexpected(error::invalid_format);
+        return unexpected(error::invalid_boolean);
       }
       bool b{};
       if (data[1] == 't') {
@@ -281,7 +281,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         b = false;
       } else {
         failed_ = true;
-        return unexpected(error::invalid_format);
+        return unexpected(error::invalid_boolean);
       }
       buf.consume(4);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -321,7 +321,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto payload = data.substr(header_bytes, static_cast<std::size_t>(len));
       if (data.substr(header_bytes + static_cast<std::size_t>(len), 2) != "\r\n") {
         failed_ = true;
-        return unexpected(error::invalid_format);
+        return unexpected(error::invalid_bulk_trailer);
       }
       buf.consume(need);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -363,7 +363,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       double v{};
       if (!detail::parse_double(line, v)) {
         failed_ = true;
-        return unexpected(error::invalid_format);
+        return unexpected(error::invalid_double);
       }
       buf.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -373,12 +373,13 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     }
 
     failed_ = true;
-    return unexpected(error::invalid_format);
+    return unexpected(error::invalid_type_byte);
   };
 
   while (true) {
     if (stack_.empty()) {
-      return unexpected(error::invalid_format);
+      failed_ = true;
+      return unexpected(error::invalid_state);
     }
     auto& f = stack_.back();
     switch (f.kind) {
@@ -444,7 +445,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
             REDISCORO_ASSERT(parent.container_type == type3::map);
             if (!parent.has_pending_key) {
               failed_ = true;
-              return unexpected(error::invalid_format);
+              return unexpected(error::invalid_map_pairs);
             }
             auto& node = tree_.nodes.at(parent.node_index);
             if (node.child_count == 0) {

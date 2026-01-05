@@ -11,9 +11,20 @@ enum class error {
 
   // Protocol errors
   invalid_type_byte,
-  invalid_format,
+
+  // Generic format error
+  invalid_null,
+  invalid_boolean,
+  invalid_bulk_trailer,
+  invalid_double,
   invalid_integer,
   invalid_length,
+  invalid_map_pairs,
+
+  invalid_state,
+
+  // Parser is in failed state (prior protocol error)
+  parser_failed,
 };
 
 auto make_error_code(error e) -> std::error_code;

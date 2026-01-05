@@ -16,12 +16,24 @@ public:
         return "needs more";
       case error::invalid_type_byte:
         return "invalid type byte";
-      case error::invalid_format:
-        return "invalid format";
+      case error::invalid_null:
+        return "invalid null";
+      case error::invalid_boolean:
+        return "invalid boolean";
+      case error::invalid_bulk_trailer:
+        return "invalid bulk trailer";
+      case error::invalid_double:
+        return "invalid double";
       case error::invalid_integer:
         return "invalid integer";
       case error::invalid_length:
         return "invalid length";
+      case error::invalid_map_pairs:
+        return "invalid map pairs";
+      case error::invalid_state:
+        return "invalid state";
+      case error::parser_failed:
+        return "parser failed";
       default:
         return "unknown error";
     }
