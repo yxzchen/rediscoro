@@ -72,14 +72,14 @@ class message_parser;
 
 class simple_string_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
       return false;
     }
     if (data.empty() || data[0] != type_to_code(type::simple_string)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     out = message(simple_string{std::string(data.substr(1, pos - 1))});
@@ -90,14 +90,14 @@ public:
 
 class simple_error_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
       return false;
     }
     if (data.empty() || data[0] != type_to_code(type::simple_error)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     out = message(simple_error{std::string(data.substr(1, pos - 1))});
@@ -108,19 +108,19 @@ public:
 
 class integer_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
       return false;
     }
     if (data.empty() || data[0] != type_to_code(type::integer)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     std::int64_t v{};
     if (!parse_i64(data.substr(1, pos - 1), v)) {
-      ec = make_error_code(error::invalid_integer);
+      err = error::invalid_integer;
       return true;
     }
     out = message(integer{v});
@@ -131,19 +131,19 @@ public:
 
 class double_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
       return false;
     }
     if (data.empty() || data[0] != type_to_code(type::double_type)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     double v{};
     if (!parse_double(data.substr(1, pos - 1), v)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     out = message(double_type{v});
@@ -154,17 +154,17 @@ public:
 
 class boolean_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     if (data.size() < 4) {
       return false;
     }
     if (data[0] != type_to_code(type::boolean)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     if (data[3] != '\n' || data[2] != '\r') {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     if (data[1] == 't') {
@@ -172,7 +172,7 @@ public:
     } else if (data[1] == 'f') {
       out = message(boolean{false});
     } else {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     buf.consume(4);
@@ -182,14 +182,14 @@ public:
 
 class big_number_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
       return false;
     }
     if (data.empty() || data[0] != type_to_code(type::big_number)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     out = message(big_number{std::string(data.substr(1, pos - 1))});
@@ -200,17 +200,17 @@ public:
 
 class null_parser final : public value_parser {
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     auto data = buf.data();
     if (data.size() < 3) {
       return false;
     }
     if (data[0] != type_to_code(type::null)) {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     if (data[1] != '\r' || data[2] != '\n') {
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return true;
     }
     out = message(null{});
@@ -229,7 +229,7 @@ class bulk_string_parser final : public value_parser {
   std::int64_t expected_{0};
 
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     while (true) {
       if (stage_ == stage::read_len) {
         auto data = buf.data();
@@ -238,16 +238,16 @@ public:
           return false;
         }
         if (data.empty() || data[0] != type_to_code(type::bulk_string)) {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         std::int64_t len{};
         if (!parse_len(data.substr(1, pos - 1), len)) {
-          ec = make_error_code(error::invalid_length);
+          err = error::invalid_length;
           return true;
         }
         if (len < -1) {
-          ec = make_error_code(error::invalid_length);
+          err = error::invalid_length;
           return true;
         }
         buf.consume(pos + 2);
@@ -266,7 +266,7 @@ public:
           return false;
         }
         if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         out = message(bulk_string{std::string(data.substr(0, static_cast<std::size_t>(expected_)))});
@@ -287,7 +287,7 @@ class bulk_error_parser final : public value_parser {
   std::int64_t expected_{0};
 
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     while (true) {
       if (stage_ == stage::read_len) {
         auto data = buf.data();
@@ -296,16 +296,16 @@ public:
           return false;
         }
         if (data.empty() || data[0] != type_to_code(type::bulk_error)) {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         std::int64_t len{};
         if (!parse_len(data.substr(1, pos - 1), len)) {
-          ec = make_error_code(error::invalid_length);
+          err = error::invalid_length;
           return true;
         }
         if (len < 0) {
-          ec = make_error_code(error::invalid_length);
+          err = error::invalid_length;
           return true;
         }
         buf.consume(pos + 2);
@@ -320,7 +320,7 @@ public:
           return false;
         }
         if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         out = message(bulk_error{std::string(data.substr(0, static_cast<std::size_t>(expected_)))});
@@ -341,7 +341,7 @@ class verbatim_string_parser final : public value_parser {
   std::int64_t expected_{0};
 
 public:
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     while (true) {
       if (stage_ == stage::read_len) {
         auto data = buf.data();
@@ -350,16 +350,16 @@ public:
           return false;
         }
         if (data.empty() || data[0] != type_to_code(type::verbatim_string)) {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         std::int64_t len{};
         if (!parse_len(data.substr(1, pos - 1), len)) {
-          ec = make_error_code(error::invalid_length);
+          err = error::invalid_length;
           return true;
         }
         if (len < -1) {
-          ec = make_error_code(error::invalid_length);
+          err = error::invalid_length;
           return true;
         }
         buf.consume(pos + 2);
@@ -378,16 +378,16 @@ public:
           return false;
         }
         if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         auto payload = data.substr(0, static_cast<std::size_t>(expected_));
         if (payload.size() < 4) {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         if (payload[3] != ':') {
-          ec = make_error_code(error::invalid_format);
+          err = error::invalid_format;
           return true;
         }
         verbatim_string v{};
@@ -416,7 +416,7 @@ class array_parser final : public value_parser {
 public:
   explicit array_parser(std::size_t depth) : depth_(depth) {}
 
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override;
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
 };
 
 class set_parser final : public value_parser {
@@ -433,7 +433,7 @@ class set_parser final : public value_parser {
 
 public:
   explicit set_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override;
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
 };
 
 class push_parser final : public value_parser {
@@ -450,7 +450,7 @@ class push_parser final : public value_parser {
 
 public:
   explicit push_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override;
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
 };
 
 class map_parser final : public value_parser {
@@ -469,7 +469,7 @@ class map_parser final : public value_parser {
 
 public:
   explicit map_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override;
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
 };
 
 class attribute_value_parser final {
@@ -488,21 +488,21 @@ class attribute_value_parser final {
 
 public:
   explicit attribute_value_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, attribute& out, std::error_code& ec) -> bool;
+  auto parse(buffer& buf, attribute& out, std::optional<error>& err) -> bool;
 };
 
 [[nodiscard]] auto make_message_parser(std::size_t depth) -> std::unique_ptr<value_parser>;
 
-[[nodiscard]] auto make_value_parser_for_type(char type_byte, std::size_t depth, std::error_code& ec)
+[[nodiscard]] auto make_value_parser_for_type(char type_byte, std::size_t depth, std::optional<error>& err)
   -> std::unique_ptr<value_parser> {
   if (depth > max_nesting_depth) {
-    ec = make_error_code(error::nesting_too_deep);
+    err = error::nesting_too_deep;
     return nullptr;
   }
 
   auto maybe_t = code_to_type(type_byte);
   if (!maybe_t.has_value()) {
-    ec = make_error_code(error::invalid_type_byte);
+    err = error::invalid_type_byte;
     return nullptr;
   }
 
@@ -523,11 +523,11 @@ public:
     case type::push:            return std::make_unique<push_parser>(depth);
     case type::attribute:
       // Attributes are handled as a prefix by message_parser, never as a "value".
-      ec = make_error_code(error::invalid_format);
+      err = error::invalid_format;
       return nullptr;
   }
 
-  ec = make_error_code(error::invalid_type_byte);
+  err = error::invalid_type_byte;
   return nullptr;
 }
 
@@ -546,7 +546,7 @@ class message_parser final : public value_parser {
 public:
   explicit message_parser(std::size_t depth) : depth_(depth) {}
 
-  auto parse(buffer& buf, message& out, std::error_code& ec) -> bool override {
+  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
     while (true) {
       auto data = buf.data();
       if (data.empty()) {
@@ -559,13 +559,13 @@ public:
             attr_child_ = std::make_unique<attribute_value_parser>(depth_);
           }
           attribute tmp_attr{};
-          std::error_code inner_ec{};
-          auto done = attr_child_->parse(buf, tmp_attr, inner_ec);
+          std::optional<error> inner_err{};
+          auto done = attr_child_->parse(buf, tmp_attr, inner_err);
           if (!done) {
             return false;
           }
-          if (inner_ec) {
-            ec = inner_ec;
+          if (inner_err.has_value()) {
+            err = *inner_err;
             return true;
           }
           if (!attrs_.has_value()) {
@@ -585,30 +585,30 @@ public:
 
       if (stage_ == stage::read_value) {
         if (!child_) {
-          std::error_code make_ec{};
+          std::optional<error> make_err{};
           if (data[0] == type_to_code(type::attribute)) {
             stage_ = stage::read_attrs;
             continue;
           }
-          child_ = make_value_parser_for_type(data[0], depth_, make_ec);
-          if (make_ec) {
-            ec = make_ec;
+          child_ = make_value_parser_for_type(data[0], depth_, make_err);
+          if (make_err.has_value()) {
+            err = *make_err;
             return true;
           }
           if (!child_) {
-            ec = make_error_code(error::invalid_format);
+            err = error::invalid_format;
             return true;
           }
         }
 
         message value_msg{};
-        std::error_code inner_ec{};
-        auto done = child_->parse(buf, value_msg, inner_ec);
+        std::optional<error> inner_err{};
+        auto done = child_->parse(buf, value_msg, inner_err);
         if (!done) {
           return false;
         }
-        if (inner_ec) {
-          ec = inner_ec;
+        if (inner_err.has_value()) {
+          err = *inner_err;
           return true;
         }
         if (attrs_.has_value()) {
@@ -628,7 +628,7 @@ public:
   return std::make_unique<message_parser>(depth);
 }
 
-auto array_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
+auto array_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
   while (true) {
     if (stage_ == stage::read_len) {
       auto data = buf.data();
@@ -637,16 +637,16 @@ auto array_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool
         return false;
       }
       if (data.empty() || data[0] != type_to_code(type::array)) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       std::int64_t len{};
       if (!parse_len(data.substr(1, pos - 1), len)) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       if (len < -1) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       buf.consume(pos + 2);
@@ -669,18 +669,18 @@ auto array_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool
         if (!child_) {
           child_ = make_message_parser(depth_ + 1);
           if (!child_) {
-            ec = make_error_code(error::nesting_too_deep);
+            err = error::nesting_too_deep;
             return true;
           }
         }
         message elem{};
-        std::error_code inner_ec{};
-        auto done = child_->parse(buf, elem, inner_ec);
+        std::optional<error> inner_err{};
+        auto done = child_->parse(buf, elem, inner_err);
         if (!done) {
           return false;
         }
-        if (inner_ec) {
-          ec = inner_ec;
+        if (inner_err.has_value()) {
+          err = *inner_err;
           return true;
         }
         elements_.push_back(std::move(elem));
@@ -692,7 +692,7 @@ auto array_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool
   }
 }
 
-auto set_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
+auto set_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
   while (true) {
     if (stage_ == stage::read_len) {
       auto data = buf.data();
@@ -701,16 +701,16 @@ auto set_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
         return false;
       }
       if (data.empty() || data[0] != type_to_code(type::set)) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       std::int64_t len{};
       if (!parse_len(data.substr(1, pos - 1), len)) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       if (len < -1) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       buf.consume(pos + 2);
@@ -733,18 +733,18 @@ auto set_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
         if (!child_) {
           child_ = make_message_parser(depth_ + 1);
           if (!child_) {
-            ec = make_error_code(error::nesting_too_deep);
+            err = error::nesting_too_deep;
             return true;
           }
         }
         message elem{};
-        std::error_code inner_ec{};
-        auto done = child_->parse(buf, elem, inner_ec);
+        std::optional<error> inner_err{};
+        auto done = child_->parse(buf, elem, inner_err);
         if (!done) {
           return false;
         }
-        if (inner_ec) {
-          ec = inner_ec;
+        if (inner_err.has_value()) {
+          err = *inner_err;
           return true;
         }
         elements_.push_back(std::move(elem));
@@ -756,7 +756,7 @@ auto set_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
   }
 }
 
-auto push_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
+auto push_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
   while (true) {
     if (stage_ == stage::read_len) {
       auto data = buf.data();
@@ -765,16 +765,16 @@ auto push_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool 
         return false;
       }
       if (data.empty() || data[0] != type_to_code(type::push)) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       std::int64_t len{};
       if (!parse_len(data.substr(1, pos - 1), len)) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       if (len < -1) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       buf.consume(pos + 2);
@@ -797,18 +797,18 @@ auto push_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool 
         if (!child_) {
           child_ = make_message_parser(depth_ + 1);
           if (!child_) {
-            ec = make_error_code(error::nesting_too_deep);
+            err = error::nesting_too_deep;
             return true;
           }
         }
         message elem{};
-        std::error_code inner_ec{};
-        auto done = child_->parse(buf, elem, inner_ec);
+        std::optional<error> inner_err{};
+        auto done = child_->parse(buf, elem, inner_err);
         if (!done) {
           return false;
         }
-        if (inner_ec) {
-          ec = inner_ec;
+        if (inner_err.has_value()) {
+          err = *inner_err;
           return true;
         }
         elements_.push_back(std::move(elem));
@@ -820,7 +820,7 @@ auto push_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool 
   }
 }
 
-auto map_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
+auto map_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
   while (true) {
     if (stage_ == stage::read_len) {
       auto data = buf.data();
@@ -829,16 +829,16 @@ auto map_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
         return false;
       }
       if (data.empty() || data[0] != type_to_code(type::map)) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       std::int64_t len{};
       if (!parse_len(data.substr(1, pos - 1), len)) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       if (len < -1) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       buf.consume(pos + 2);
@@ -865,18 +865,18 @@ auto map_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
       if (!child_) {
         child_ = make_message_parser(depth_ + 1);
         if (!child_) {
-          ec = make_error_code(error::nesting_too_deep);
+          err = error::nesting_too_deep;
           return true;
         }
       }
       message key{};
-      std::error_code inner_ec{};
-      auto done = child_->parse(buf, key, inner_ec);
+      std::optional<error> inner_err{};
+      auto done = child_->parse(buf, key, inner_err);
       if (!done) {
         return false;
       }
-      if (inner_ec) {
-        ec = inner_ec;
+      if (inner_err.has_value()) {
+        err = *inner_err;
         return true;
       }
       current_key_ = std::move(key);
@@ -887,24 +887,24 @@ auto map_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
 
     if (stage_ == stage::read_value) {
       if (!current_key_.has_value()) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       if (!child_) {
         child_ = make_message_parser(depth_ + 1);
         if (!child_) {
-          ec = make_error_code(error::nesting_too_deep);
+          err = error::nesting_too_deep;
           return true;
         }
       }
       message value{};
-      std::error_code inner_ec{};
-      auto done = child_->parse(buf, value, inner_ec);
+      std::optional<error> inner_err{};
+      auto done = child_->parse(buf, value, inner_err);
       if (!done) {
         return false;
       }
-      if (inner_ec) {
-        ec = inner_ec;
+      if (inner_err.has_value()) {
+        err = *inner_err;
         return true;
       }
       entries_.push_back({std::move(*current_key_), std::move(value)});
@@ -916,7 +916,7 @@ auto map_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
   }
 }
 
-auto attribute_value_parser::parse(buffer& buf, attribute& out, std::error_code& ec) -> bool {
+auto attribute_value_parser::parse(buffer& buf, attribute& out, std::optional<error>& err) -> bool {
   while (true) {
     if (stage_ == stage::read_len) {
       auto data = buf.data();
@@ -925,16 +925,16 @@ auto attribute_value_parser::parse(buffer& buf, attribute& out, std::error_code&
         return false;
       }
       if (data.empty() || data[0] != type_to_code(type::attribute)) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       std::int64_t len{};
       if (!parse_len(data.substr(1, pos - 1), len)) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       if (len < 0) {
-        ec = make_error_code(error::invalid_length);
+        err = error::invalid_length;
         return true;
       }
       buf.consume(pos + 2);
@@ -957,18 +957,18 @@ auto attribute_value_parser::parse(buffer& buf, attribute& out, std::error_code&
       if (!child_) {
         child_ = make_message_parser(depth_ + 1);
         if (!child_) {
-          ec = make_error_code(error::nesting_too_deep);
+          err = error::nesting_too_deep;
           return true;
         }
       }
       message key{};
-      std::error_code inner_ec{};
-      auto done = child_->parse(buf, key, inner_ec);
+      std::optional<error> inner_err{};
+      auto done = child_->parse(buf, key, inner_err);
       if (!done) {
         return false;
       }
-      if (inner_ec) {
-        ec = inner_ec;
+      if (inner_err.has_value()) {
+        err = *inner_err;
         return true;
       }
       current_key_ = std::move(key);
@@ -979,24 +979,24 @@ auto attribute_value_parser::parse(buffer& buf, attribute& out, std::error_code&
 
     if (stage_ == stage::read_value) {
       if (!current_key_.has_value()) {
-        ec = make_error_code(error::invalid_format);
+        err = error::invalid_format;
         return true;
       }
       if (!child_) {
         child_ = make_message_parser(depth_ + 1);
         if (!child_) {
-          ec = make_error_code(error::nesting_too_deep);
+          err = error::nesting_too_deep;
           return true;
         }
       }
       message value{};
-      std::error_code inner_ec{};
-      auto done = child_->parse(buf, value, inner_ec);
+      std::optional<error> inner_err{};
+      auto done = child_->parse(buf, value, inner_err);
       if (!done) {
         return false;
       }
-      if (inner_ec) {
-        ec = inner_ec;
+      if (inner_err.has_value()) {
+        err = *inner_err;
         return true;
       }
       entries_.push_back({std::move(*current_key_), std::move(value)});
@@ -1022,52 +1022,47 @@ inline auto parser::commit(std::size_t n) -> void {
   buffer_.commit(n);
 }
 
-inline auto parser::parse_one(message& out) -> parse_result {
-  if (state_ == state::failed) {
-    return parse_result{parse_status::protocol_error, last_error_};
+inline auto parser::parse_one() -> rediscoro::expected<message, error> {
+  if (failed_) {
+    return rediscoro::unexpected(failed_error_);
   }
 
   if (!current_) {
     current_ = detail::make_message_parser(0);
     if (!current_) {
-      state_ = state::failed;
-      last_error_ = make_error_code(error::nesting_too_deep);
-      return parse_result{parse_status::protocol_error, last_error_};
+      failed_ = true;
+      failed_error_ = error::nesting_too_deep;
+      return rediscoro::unexpected(failed_error_);
     }
   }
 
-  state_ = state::parsing;
-
   message tmp{};
-  std::error_code ec{};
-  auto done = current_->parse(buffer_, tmp, ec);
+  std::optional<error> err{};
+  auto done = current_->parse(buffer_, tmp, err);
   if (!done) {
-    state_ = state::idle;
-    return parse_result{parse_status::need_more_data, {}};
+    return rediscoro::unexpected(error::needs_more);
   }
 
   current_.reset();
 
-  if (ec) {
-    state_ = state::failed;
-    last_error_ = ec;
-    return parse_result{parse_status::protocol_error, ec};
+  if (err.has_value()) {
+    failed_ = true;
+    failed_error_ = *err;
+    return rediscoro::unexpected(failed_error_);
   }
 
-  out = std::move(tmp);
-  state_ = state::idle;
-  return parse_result{parse_status::ok, {}};
+  return tmp;
 }
 
 inline auto parser::failed() const noexcept -> bool {
-  return state_ == state::failed;
+  return failed_;
 }
 
 inline auto parser::reset() -> void {
   buffer_.reset();
   current_.reset();
-  last_error_.clear();
-  state_ = state::idle;
+  failed_ = false;
+  failed_error_ = error::invalid_format;
 }
 
 }  // namespace rediscoro::resp3

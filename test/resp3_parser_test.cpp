@@ -23,68 +23,59 @@ TEST(resp3_parser_test, parse_simple_string_ok) {
   parser p;
   append(p, "+OK\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::ok);
-  EXPECT_FALSE(r.error);
-
-  ASSERT_TRUE(msg.is<simple_string>());
-  EXPECT_EQ(msg.as<simple_string>().data, "OK");
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->is<simple_string>());
+  EXPECT_EQ(r->as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, need_more_data_does_not_modify_out) {
   parser p;
   append(p, "+OK\r");
 
-  message out{simple_string{"keep"}};
-  auto r = p.parse_one(out);
-  EXPECT_EQ(r.status, parse_status::need_more_data);
-  EXPECT_FALSE(r.error);
-
-  ASSERT_TRUE(out.is<simple_string>());
-  EXPECT_EQ(out.as<simple_string>().data, "keep");
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), error::needs_more);
 }
 
 TEST(resp3_parser_test, incremental_feed_completes_message) {
   parser p;
   append(p, "+O");
 
-  message msg;
-  auto r1 = p.parse_one(msg);
-  EXPECT_EQ(r1.status, parse_status::need_more_data);
+  auto r1 = p.parse_one();
+  ASSERT_FALSE(r1);
+  EXPECT_EQ(r1.error(), error::needs_more);
 
   append(p, "K\r\n");
-  auto r2 = p.parse_one(msg);
-  EXPECT_EQ(r2.status, parse_status::ok);
-  ASSERT_TRUE(msg.is<simple_string>());
-  EXPECT_EQ(msg.as<simple_string>().data, "OK");
+  auto r2 = p.parse_one();
+  ASSERT_TRUE(r2);
+  ASSERT_TRUE(r2->is<simple_string>());
+  EXPECT_EQ(r2->as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, parse_bulk_string_ok_and_split_payload) {
   parser p;
   append(p, "$5\r\nhe");
 
-  message msg;
-  auto r1 = p.parse_one(msg);
-  EXPECT_EQ(r1.status, parse_status::need_more_data);
+  auto r1 = p.parse_one();
+  ASSERT_FALSE(r1);
+  EXPECT_EQ(r1.error(), error::needs_more);
 
   append(p, "llo\r\n");
-  auto r2 = p.parse_one(msg);
-  EXPECT_EQ(r2.status, parse_status::ok);
-  ASSERT_TRUE(msg.is<bulk_string>());
-  EXPECT_EQ(msg.as<bulk_string>().data, "hello");
+  auto r2 = p.parse_one();
+  ASSERT_TRUE(r2);
+  ASSERT_TRUE(r2->is<bulk_string>());
+  EXPECT_EQ(r2->as<bulk_string>().data, "hello");
 }
 
 TEST(resp3_parser_test, parse_array_nested) {
   parser p;
   append(p, "*2\r\n+OK\r\n:1\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::ok);
-
-  ASSERT_TRUE(msg.is<array>());
-  const auto& elems = msg.as<array>().elements;
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->is<array>());
+  const auto& elems = r->as<array>().elements;
   ASSERT_EQ(elems.size(), 2u);
   ASSERT_TRUE(elems[0].is<simple_string>());
   EXPECT_EQ(elems[0].as<simple_string>().data, "OK");
@@ -96,15 +87,13 @@ TEST(resp3_parser_test, parse_message_with_attributes) {
   parser p;
   append(p, "|1\r\n+key\r\n+val\r\n+OK\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::ok);
-  EXPECT_TRUE(msg.has_attributes());
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  EXPECT_TRUE(r->has_attributes());
+  ASSERT_TRUE(r->is<simple_string>());
+  EXPECT_EQ(r->as<simple_string>().data, "OK");
 
-  ASSERT_TRUE(msg.is<simple_string>());
-  EXPECT_EQ(msg.as<simple_string>().data, "OK");
-
-  const auto& attrs = msg.get_attributes();
+  const auto& attrs = r->get_attributes();
   ASSERT_EQ(attrs.entries.size(), 1u);
   ASSERT_TRUE(attrs.entries[0].first.is<simple_string>());
   ASSERT_TRUE(attrs.entries[0].second.is<simple_string>());
@@ -116,12 +105,10 @@ TEST(resp3_parser_test, attributes_inside_aggregate_element) {
   parser p;
   append(p, "*1\r\n|1\r\n+meta\r\n+1\r\n+OK\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::ok);
-
-  ASSERT_TRUE(msg.is<array>());
-  const auto& elems = msg.as<array>().elements;
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->is<array>());
+  const auto& elems = r->as<array>().elements;
   ASSERT_EQ(elems.size(), 1u);
 
   EXPECT_TRUE(elems[0].has_attributes());
@@ -133,36 +120,33 @@ TEST(resp3_parser_test, parse_multiple_messages_from_one_feed) {
   parser p;
   append(p, "+OK\r\n:1\r\n");
 
-  message m1;
-  auto r1 = p.parse_one(m1);
-  EXPECT_EQ(r1.status, parse_status::ok);
-  ASSERT_TRUE(m1.is<simple_string>());
-  EXPECT_EQ(m1.as<simple_string>().data, "OK");
+  auto r1 = p.parse_one();
+  ASSERT_TRUE(r1);
+  ASSERT_TRUE(r1->is<simple_string>());
+  EXPECT_EQ(r1->as<simple_string>().data, "OK");
 
-  message m2;
-  auto r2 = p.parse_one(m2);
-  EXPECT_EQ(r2.status, parse_status::ok);
-  ASSERT_TRUE(m2.is<integer>());
-  EXPECT_EQ(m2.as<integer>().value, 1);
+  auto r2 = p.parse_one();
+  ASSERT_TRUE(r2);
+  ASSERT_TRUE(r2->is<integer>());
+  EXPECT_EQ(r2->as<integer>().value, 1);
 
-  message m3;
-  auto r3 = p.parse_one(m3);
-  EXPECT_EQ(r3.status, parse_status::need_more_data);
+  auto r3 = p.parse_one();
+  ASSERT_FALSE(r3);
+  EXPECT_EQ(r3.error(), error::needs_more);
 }
 
 TEST(resp3_parser_test, protocol_error_marks_failed) {
   parser p;
   append(p, "?oops\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::protocol_error);
-  EXPECT_TRUE(r.error);
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_NE(r.error(), error::needs_more);
   EXPECT_TRUE(p.failed());
 
   append(p, "+OK\r\n");
-  auto r2 = p.parse_one(msg);
-  EXPECT_EQ(r2.status, parse_status::protocol_error);
+  auto r2 = p.parse_one();
+  ASSERT_FALSE(r2);
   EXPECT_TRUE(p.failed());
 }
 
@@ -170,28 +154,26 @@ TEST(resp3_parser_test, reset_clears_failed_state) {
   parser p;
   append(p, "?oops\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::protocol_error);
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
   EXPECT_TRUE(p.failed());
 
   p.reset();
   EXPECT_FALSE(p.failed());
 
   append(p, "+OK\r\n");
-  auto r2 = p.parse_one(msg);
-  EXPECT_EQ(r2.status, parse_status::ok);
-  ASSERT_TRUE(msg.is<simple_string>());
-  EXPECT_EQ(msg.as<simple_string>().data, "OK");
+  auto r2 = p.parse_one();
+  ASSERT_TRUE(r2);
+  ASSERT_TRUE(r2->is<simple_string>());
+  EXPECT_EQ(r2->as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, protocol_error_on_bulk_string_bad_trailer) {
   parser p;
   append(p, "$5\r\nhelloX\r\n");
 
-  message msg;
-  auto r = p.parse_one(msg);
-  EXPECT_EQ(r.status, parse_status::protocol_error);
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
   EXPECT_TRUE(p.failed());
 }
 
@@ -210,10 +192,9 @@ TEST(resp3_parser_test, roundtrip_encoder_parser_for_complex_message) {
   parser p;
   append(p, wire);
 
-  message decoded;
-  auto r = p.parse_one(decoded);
-  EXPECT_EQ(r.status, parse_status::ok);
-  EXPECT_EQ(encode(decoded), wire);
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  EXPECT_EQ(encode(*r), wire);
 }
 
 }  // namespace
