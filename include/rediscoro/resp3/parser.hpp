@@ -4,9 +4,10 @@
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/error.hpp>
 
-#include <string_view>
 #include <system_error>
 #include <memory>
+#include <span>
+#include <cstddef>
 
 namespace rediscoro::resp3 {
 
@@ -39,8 +40,13 @@ class parser {
 public:
   parser();
 
-  /// Provide new data to the parser (data memory is owned by the caller)
-  auto feed(std::string_view data) -> void;
+  /// Zero-copy input: reserve writable space and then commit written bytes.
+  /// Typical usage:
+  ///   auto w = p.prepare(n);
+  ///   read(fd, w.data(), w.size());
+  ///   p.commit(bytes_read);
+  auto prepare(std::size_t min_size = 4096) -> std::span<char>;
+  auto commit(std::size_t n) -> void;
 
   /// Try to parse exactly one complete RESP3 message.
   /// - ok: out is filled

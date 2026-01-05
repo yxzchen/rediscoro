@@ -44,19 +44,19 @@ public:
 
   // Visitor interface
   auto operator()(const simple_string& val) -> void {
-    buffer_ += '+';
+    buffer_ += type_prefix(type::simple_string);
     buffer_ += val.data;
     buffer_ += "\r\n";
   }
 
   auto operator()(const simple_error& val) -> void {
-    buffer_ += '-';
+    buffer_ += type_prefix(type::simple_error);
     buffer_ += val.message;
     buffer_ += "\r\n";
   }
 
   auto operator()(const integer& val) -> void {
-    buffer_ += ':';
+    buffer_ += type_prefix(type::integer);
     buffer_ += std::to_string(val.value);
     buffer_ += "\r\n";
   }
@@ -66,23 +66,24 @@ public:
   }
 
   auto operator()(const boolean& val) -> void {
-    buffer_ += '#';
+    buffer_ += type_prefix(type::boolean);
     buffer_ += val.value ? 't' : 'f';
     buffer_ += "\r\n";
   }
 
   auto operator()(const big_number& val) -> void {
-    buffer_ += '(';
+    buffer_ += type_prefix(type::big_number);
     buffer_ += val.value;
     buffer_ += "\r\n";
   }
 
   auto operator()(const null&) -> void {
-    buffer_ += "_\r\n";
+    buffer_ += type_prefix(type::null);
+    buffer_ += "\r\n";
   }
 
   auto operator()(const bulk_string& val) -> void {
-    buffer_ += '$';
+    buffer_ += type_prefix(type::bulk_string);
     buffer_ += std::to_string(val.data.size());
     buffer_ += "\r\n";
     buffer_ += val.data;
@@ -90,7 +91,7 @@ public:
   }
 
   auto operator()(const bulk_error& val) -> void {
-    buffer_ += '!';
+    buffer_ += type_prefix(type::bulk_error);
     buffer_ += std::to_string(val.message.size());
     buffer_ += "\r\n";
     buffer_ += val.message;
@@ -101,7 +102,7 @@ public:
     // Format: =<length>\r\n<encoding>:<data>\r\n
     // encoding is 3 bytes
     auto total_len = val.encoding.size() + 1 + val.data.size(); // encoding + ':' + data
-    buffer_ += '=';
+    buffer_ += type_prefix(type::verbatim_string);
     buffer_ += std::to_string(total_len);
     buffer_ += "\r\n";
     buffer_ += val.encoding;
@@ -111,7 +112,7 @@ public:
   }
 
   auto operator()(const array& val) -> void {
-    buffer_ += '*';
+    buffer_ += type_prefix(type::array);
     buffer_ += std::to_string(val.elements.size());
     buffer_ += "\r\n";
 
@@ -121,7 +122,7 @@ public:
   }
 
   auto operator()(const map& val) -> void {
-    buffer_ += '%';
+    buffer_ += type_prefix(type::map);
     buffer_ += std::to_string(val.entries.size());
     buffer_ += "\r\n";
 
@@ -132,7 +133,7 @@ public:
   }
 
   auto operator()(const set& val) -> void {
-    buffer_ += '~';
+    buffer_ += type_prefix(type::set);
     buffer_ += std::to_string(val.elements.size());
     buffer_ += "\r\n";
 
@@ -142,7 +143,7 @@ public:
   }
 
   auto operator()(const push& val) -> void {
-    buffer_ += '>';
+    buffer_ += type_prefix(type::push);
     buffer_ += std::to_string(val.elements.size());
     buffer_ += "\r\n";
 
@@ -155,7 +156,7 @@ private:
   std::string buffer_;
 
   auto append_double(double v) -> void {
-    buffer_ += ',';
+    buffer_ += type_prefix(type::double_type);
 
     if (std::isnan(v)) {
       buffer_ += "nan";
@@ -195,7 +196,7 @@ private:
   }
 
   auto encode_attribute(const attribute& attr) -> void {
-    buffer_ += '|';
+    buffer_ += type_prefix(type::attribute);
     buffer_ += std::to_string(attr.entries.size());
     buffer_ += "\r\n";
 

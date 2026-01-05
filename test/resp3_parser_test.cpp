@@ -3,13 +3,25 @@
 #include <rediscoro/resp3/encoder.hpp>
 #include <rediscoro/resp3/parser.hpp>
 
+#include <cstring>
+#include <string_view>
+
 using namespace rediscoro::resp3;
 
 namespace {
 
+auto append(parser& p, std::string_view data) -> void {
+  if (data.empty()) {
+    return;
+  }
+  auto w = p.prepare(data.size());
+  std::memcpy(w.data(), data.data(), data.size());
+  p.commit(data.size());
+}
+
 TEST(resp3_parser_test, parse_simple_string_ok) {
   parser p;
-  p.feed("+OK\r\n");
+  append(p, "+OK\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -22,7 +34,7 @@ TEST(resp3_parser_test, parse_simple_string_ok) {
 
 TEST(resp3_parser_test, need_more_data_does_not_modify_out) {
   parser p;
-  p.feed("+OK\r");
+  append(p, "+OK\r");
 
   message out{simple_string{"keep"}};
   auto r = p.parse_one(out);
@@ -35,13 +47,13 @@ TEST(resp3_parser_test, need_more_data_does_not_modify_out) {
 
 TEST(resp3_parser_test, incremental_feed_completes_message) {
   parser p;
-  p.feed("+O");
+  append(p, "+O");
 
   message msg;
   auto r1 = p.parse_one(msg);
   EXPECT_EQ(r1.status, parse_status::need_more_data);
 
-  p.feed("K\r\n");
+  append(p, "K\r\n");
   auto r2 = p.parse_one(msg);
   EXPECT_EQ(r2.status, parse_status::ok);
   ASSERT_TRUE(msg.is<simple_string>());
@@ -50,13 +62,13 @@ TEST(resp3_parser_test, incremental_feed_completes_message) {
 
 TEST(resp3_parser_test, parse_bulk_string_ok_and_split_payload) {
   parser p;
-  p.feed("$5\r\nhe");
+  append(p, "$5\r\nhe");
 
   message msg;
   auto r1 = p.parse_one(msg);
   EXPECT_EQ(r1.status, parse_status::need_more_data);
 
-  p.feed("llo\r\n");
+  append(p, "llo\r\n");
   auto r2 = p.parse_one(msg);
   EXPECT_EQ(r2.status, parse_status::ok);
   ASSERT_TRUE(msg.is<bulk_string>());
@@ -65,7 +77,7 @@ TEST(resp3_parser_test, parse_bulk_string_ok_and_split_payload) {
 
 TEST(resp3_parser_test, parse_array_nested) {
   parser p;
-  p.feed("*2\r\n+OK\r\n:1\r\n");
+  append(p, "*2\r\n+OK\r\n:1\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -82,7 +94,7 @@ TEST(resp3_parser_test, parse_array_nested) {
 
 TEST(resp3_parser_test, parse_message_with_attributes) {
   parser p;
-  p.feed("|1\r\n+key\r\n+val\r\n+OK\r\n");
+  append(p, "|1\r\n+key\r\n+val\r\n+OK\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -102,7 +114,7 @@ TEST(resp3_parser_test, parse_message_with_attributes) {
 
 TEST(resp3_parser_test, attributes_inside_aggregate_element) {
   parser p;
-  p.feed("*1\r\n|1\r\n+meta\r\n+1\r\n+OK\r\n");
+  append(p, "*1\r\n|1\r\n+meta\r\n+1\r\n+OK\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -119,7 +131,7 @@ TEST(resp3_parser_test, attributes_inside_aggregate_element) {
 
 TEST(resp3_parser_test, parse_multiple_messages_from_one_feed) {
   parser p;
-  p.feed("+OK\r\n:1\r\n");
+  append(p, "+OK\r\n:1\r\n");
 
   message m1;
   auto r1 = p.parse_one(m1);
@@ -140,7 +152,7 @@ TEST(resp3_parser_test, parse_multiple_messages_from_one_feed) {
 
 TEST(resp3_parser_test, protocol_error_marks_failed) {
   parser p;
-  p.feed("?oops\r\n");
+  append(p, "?oops\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -148,7 +160,7 @@ TEST(resp3_parser_test, protocol_error_marks_failed) {
   EXPECT_TRUE(r.error);
   EXPECT_TRUE(p.failed());
 
-  p.feed("+OK\r\n");
+  append(p, "+OK\r\n");
   auto r2 = p.parse_one(msg);
   EXPECT_EQ(r2.status, parse_status::protocol_error);
   EXPECT_TRUE(p.failed());
@@ -156,7 +168,7 @@ TEST(resp3_parser_test, protocol_error_marks_failed) {
 
 TEST(resp3_parser_test, reset_clears_failed_state) {
   parser p;
-  p.feed("?oops\r\n");
+  append(p, "?oops\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -166,7 +178,7 @@ TEST(resp3_parser_test, reset_clears_failed_state) {
   p.reset();
   EXPECT_FALSE(p.failed());
 
-  p.feed("+OK\r\n");
+  append(p, "+OK\r\n");
   auto r2 = p.parse_one(msg);
   EXPECT_EQ(r2.status, parse_status::ok);
   ASSERT_TRUE(msg.is<simple_string>());
@@ -175,7 +187,7 @@ TEST(resp3_parser_test, reset_clears_failed_state) {
 
 TEST(resp3_parser_test, protocol_error_on_bulk_string_bad_trailer) {
   parser p;
-  p.feed("$5\r\nhelloX\r\n");
+  append(p, "$5\r\nhelloX\r\n");
 
   message msg;
   auto r = p.parse_one(msg);
@@ -196,7 +208,7 @@ TEST(resp3_parser_test, roundtrip_encoder_parser_for_complex_message) {
   auto wire = encode(original);
 
   parser p;
-  p.feed(wire);
+  append(p, wire);
 
   message decoded;
   auto r = p.parse_one(decoded);
