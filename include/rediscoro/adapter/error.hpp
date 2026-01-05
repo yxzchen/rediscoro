@@ -34,7 +34,7 @@ struct path_field {
 
 using path_element = std::variant<path_index, path_key, path_field>;
 
-struct adapter_error {
+struct error {
   adapter_error_kind kind{};
   resp3::type3 actual_type{};
   std::vector<resp3::type3> expected_types{};   // empty means "unknown / not applicable"
@@ -55,13 +55,13 @@ struct adapter_error {
     return *cached_message;
   }
 
-  [[nodiscard]] static auto format_message(const adapter_error& e) -> std::string;
+  [[nodiscard]] static auto format_message(const error& e) -> std::string;
 };
 
 namespace detail {
 
-inline auto make_type_mismatch(resp3::type3 actual, std::vector<resp3::type3> expected) -> adapter_error {
-  return adapter_error{
+inline auto make_type_mismatch(resp3::type3 actual, std::vector<resp3::type3> expected) -> error {
+  return error{
     .kind = adapter_error_kind::type_mismatch,
     .actual_type = actual,
     .expected_types = std::move(expected),
@@ -72,8 +72,8 @@ inline auto make_type_mismatch(resp3::type3 actual, std::vector<resp3::type3> ex
   };
 }
 
-inline auto make_unexpected_null(resp3::type3 expected) -> adapter_error {
-  return adapter_error{
+inline auto make_unexpected_null(resp3::type3 expected) -> error {
+  return error{
     .kind = adapter_error_kind::unexpected_null,
     .actual_type = resp3::type3::null,
     .expected_types = {expected},
@@ -84,8 +84,8 @@ inline auto make_unexpected_null(resp3::type3 expected) -> adapter_error {
   };
 }
 
-inline auto make_value_out_of_range(resp3::type3 t) -> adapter_error {
-  return adapter_error{
+inline auto make_value_out_of_range(resp3::type3 t) -> error {
+  return error{
     .kind = adapter_error_kind::value_out_of_range,
     .actual_type = t,
     .expected_types = {t},
@@ -96,8 +96,8 @@ inline auto make_value_out_of_range(resp3::type3 t) -> adapter_error {
   };
 }
 
-inline auto make_size_mismatch(resp3::type3 actual, std::size_t expected, std::size_t got) -> adapter_error {
-  return adapter_error{
+inline auto make_size_mismatch(resp3::type3 actual, std::size_t expected, std::size_t got) -> error {
+  return error{
     .kind = adapter_error_kind::size_mismatch,
     .actual_type = actual,
     .expected_types = {actual},
@@ -110,7 +110,7 @@ inline auto make_size_mismatch(resp3::type3 actual, std::size_t expected, std::s
 
 }  // namespace detail
 
-inline auto adapter_error::format_message(const adapter_error& e) -> std::string {
+inline auto error::format_message(const error& e) -> std::string {
   auto type_to_string = [](resp3::type3 t) -> std::string {
     return std::string(resp3::type_name(t));
   };

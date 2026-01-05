@@ -1,6 +1,6 @@
 #pragma once
 
-#include <rediscoro/adapter/adapter_error.hpp>
+#include <rediscoro/adapter/error.hpp>
 #include <rediscoro/ignore.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/resp3/message.hpp>
@@ -89,12 +89,12 @@ inline constexpr bool is_std_array_v = is_std_array<remove_cvref_t<T>>::value;
 }  // namespace detail
 
 template <typename T>
-auto adapt(const resp3::message& msg) -> rediscoro::expected<T, adapter_error>;
+auto adapt(const resp3::message& msg) -> rediscoro::expected<T, error>;
 
 namespace detail {
 
 template <typename T>
-auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
+auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, error> {
   using U = remove_cvref_t<T>;
 
   if constexpr (string_like<U>) {
@@ -160,7 +160,7 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, adapter_e
 }
 
 template <typename T>
-auto adapt_optional(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
+auto adapt_optional(const resp3::message& msg) -> rediscoro::expected<T, error> {
   using V = optional_value_type_t<T>;
   if (msg.is<resp3::null>()) {
     return T{std::nullopt};
@@ -173,7 +173,7 @@ auto adapt_optional(const resp3::message& msg) -> rediscoro::expected<T, adapter
 }
 
 template <typename T>
-auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
+auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, error> {
   using U = remove_cvref_t<T>;
   using V = typename U::value_type;
 
@@ -206,7 +206,7 @@ auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, adapter
 }
 
 template <typename T>
-auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
+auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, error> {
   using U = remove_cvref_t<T>;
   using K = typename U::key_type;
   using V = typename U::mapped_type;
@@ -244,12 +244,12 @@ auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, adapter_erro
 }
 
 template <typename T>
-auto adapt_ignore(const resp3::message&) -> rediscoro::expected<T, adapter_error> {
+auto adapt_ignore(const resp3::message&) -> rediscoro::expected<T, error> {
   return T{};
 }
 
 template <typename T>
-auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
+auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, error> {
   using U = remove_cvref_t<T>;
   using V = typename U::value_type;
   constexpr std::size_t N = std::tuple_size_v<U>;
@@ -278,7 +278,7 @@ auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, adapte
 }  // namespace detail
 
 template <typename T>
-auto adapt(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
+auto adapt(const resp3::message& msg) -> rediscoro::expected<T, error> {
   using U = detail::remove_cvref_t<T>;
 
   if constexpr (std::is_same_v<U, ignore_t>) {
