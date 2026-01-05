@@ -4,9 +4,8 @@
 
 namespace rediscoro::resp3 {
 
-namespace {
-
-struct error_category : std::error_category {
+class resp3_error_category final : public std::error_category {
+public:
   auto name() const noexcept -> const char* override {
     return "resp3";
   }
@@ -31,12 +30,10 @@ struct error_category : std::error_category {
   }
 };
 
-const error_category error_category_instance{};
-
-}  // namespace
+inline const resp3_error_category resp3_error_category_instance{};
 
 inline auto make_error_code(error e) -> std::error_code {
-  return {static_cast<int>(e), error_category_instance};
+  return {static_cast<int>(e), resp3_error_category_instance};
 }
 
 }  // namespace rediscoro::resp3

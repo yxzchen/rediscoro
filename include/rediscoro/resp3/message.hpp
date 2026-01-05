@@ -6,6 +6,7 @@
 #include <concepts>
 #include <optional>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace rediscoro::resp3 {
@@ -55,7 +56,6 @@ struct message {
     array,
     map,
     set,
-    attribute,
     push
   >;
 
@@ -63,7 +63,7 @@ struct message {
   static_assert(detail::all_have_type_id<
     simple_string, simple_error, integer, double_type, boolean, big_number, null,
     bulk_string, bulk_error, verbatim_string,
-    array, map, set, attribute, push
+    array, map, set, push
   >, "All RESP3 value types must have a static type_id member");
 
   // The actual value

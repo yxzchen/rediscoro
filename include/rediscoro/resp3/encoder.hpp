@@ -140,10 +140,6 @@ public:
     }
   }
 
-  auto operator()(const attribute& val) -> void {
-    encode_attribute(val);
-  }
-
   auto operator()(const push& val) -> void {
     buffer_ += '>';
     buffer_ += std::to_string(val.elements.size());

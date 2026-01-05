@@ -1,11 +1,14 @@
 #pragma once
 
+#include <rediscoro/assert.hpp>
+
 #include <span>
 #include <vector>
 #include <cstddef>
 #include <string_view>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 namespace rediscoro::resp3 {
 
@@ -16,6 +19,9 @@ public:
   buffer() : buffer(4096) {}
 
   explicit buffer(std::size_t initial_capacity) {
+    if (initial_capacity == 0) {
+      initial_capacity = 1;
+    }
     buffer_.resize(initial_capacity);
   }
 
@@ -28,11 +34,14 @@ public:
 
   /// Commit n bytes that have been written to the buffer
   auto commit(std::size_t n) -> void {
+    REDISCORO_ASSERT(write_pos_ <= buffer_.size());
+    REDISCORO_ASSERT(n <= buffer_.size() - write_pos_);
     write_pos_ += n;
   }
 
   /// Get current available readable data size
   [[nodiscard]] auto size() const -> std::size_t {
+    REDISCORO_ASSERT(write_pos_ >= read_pos_);
     return write_pos_ - read_pos_;
   }
 
@@ -43,6 +52,7 @@ public:
 
   /// Consume n bytes from the beginning of readable data
   auto consume(std::size_t n) -> void {
+    REDISCORO_ASSERT(n <= size());
     read_pos_ += n;
 
     // Auto-compact if we've consumed a lot and buffer is mostly empty
@@ -80,6 +90,16 @@ private:
 
   /// Ensure buffer has at least n bytes of writable space
   auto ensure_writable(std::size_t n) -> void {
+    REDISCORO_ASSERT(write_pos_ <= buffer_.size());
+
+    if (buffer_.empty()) {
+      // Prevent infinite growth loop on size==0
+      buffer_.resize(std::max<std::size_t>(n, 1));
+      read_pos_ = 0;
+      write_pos_ = 0;
+      return;
+    }
+
     auto available = buffer_.size() - write_pos_;
     if (available >= n) {
       return;
@@ -92,7 +112,14 @@ private:
     // If still not enough, resize
     if (available < n) {
       auto new_size = buffer_.size();
+      if (new_size == 0) {
+        new_size = 1;
+      }
       while (new_size - write_pos_ < n) {
+        if (new_size > (std::numeric_limits<std::size_t>::max)() / 2) {
+          new_size = write_pos_ + n;
+          break;
+        }
         new_size *= 2;
       }
       buffer_.resize(new_size);
