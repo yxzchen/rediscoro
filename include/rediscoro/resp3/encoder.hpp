@@ -2,8 +2,11 @@
 
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/visitor.hpp>
+
+#include <charconv>
+#include <cmath>
+#include <limits>
 #include <string>
-#include <vector>
 
 namespace rediscoro::resp3 {
 
@@ -59,9 +62,7 @@ public:
   }
 
   auto operator()(const double_type& val) -> void {
-    buffer_ += ',';
-    buffer_ += std::to_string(val.value);
-    buffer_ += "\r\n";
+    append_double(val.value);
   }
 
   auto operator()(const boolean& val) -> void {
@@ -152,6 +153,36 @@ public:
 
 private:
   std::string buffer_;
+
+  auto append_double(double v) -> void {
+    buffer_ += ',';
+
+    if (std::isnan(v)) {
+      buffer_ += "nan";
+    } else if (std::isinf(v)) {
+      if (v > 0) {
+        buffer_ += "inf";
+      } else {
+        buffer_ += "-inf";
+      }
+    } else {
+      char tmp[64]{};
+      auto res = std::to_chars(
+        tmp,
+        tmp + sizeof(tmp),
+        v,
+        std::chars_format::general,
+        std::numeric_limits<double>::max_digits10
+      );
+      if (res.ec != std::errc{}) {
+        buffer_ += "nan";
+      } else {
+        buffer_.append(tmp, res.ptr);
+      }
+    }
+
+    buffer_ += "\r\n";
+  }
 
   auto encode_message(const message& msg) -> void {
     // Encode attributes first if present

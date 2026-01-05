@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
-#include <rediscoro/resp3/resp3.hpp>
+#include <rediscoro/resp3/encoder.hpp>
+
+#include <cmath>
+#include <limits>
 
 using namespace rediscoro::resp3;
 
@@ -41,6 +44,17 @@ TEST(resp3_encoder_test, encode_all_simple_types) {
   // Null
   message null_msg{null{}};
   EXPECT_EQ(encode(null_msg), "_\r\n");
+}
+
+TEST(resp3_encoder_test, encode_double_special_values) {
+  message pos_inf{double_type{std::numeric_limits<double>::infinity()}};
+  EXPECT_EQ(encode(pos_inf), ",inf\r\n");
+
+  message neg_inf{double_type{-std::numeric_limits<double>::infinity()}};
+  EXPECT_EQ(encode(neg_inf), ",-inf\r\n");
+
+  message nan_msg{double_type{std::numeric_limits<double>::quiet_NaN()}};
+  EXPECT_EQ(encode(nan_msg), ",nan\r\n");
 }
 
 TEST(resp3_encoder_test, encode_bulk_types_with_length) {

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <rediscoro/resp3/resp3.hpp>
+#include <rediscoro/resp3/message.hpp>
 
 using namespace rediscoro::resp3;
 

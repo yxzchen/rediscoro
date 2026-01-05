@@ -3,7 +3,6 @@
 #include <rediscoro/resp3/type.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 

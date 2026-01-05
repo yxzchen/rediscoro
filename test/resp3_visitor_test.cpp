@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
-#include <rediscoro/resp3/resp3.hpp>
+#include <rediscoro/resp3/visitor.hpp>
+
+#include <type_traits>
 
 using namespace rediscoro::resp3;
 
