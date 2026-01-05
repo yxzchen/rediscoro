@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-namespace rediscoro::adapt {
+namespace rediscoro::adapter {
 
 enum class adapter_error_kind : std::uint8_t {
   type_mismatch,
@@ -162,6 +162,6 @@ inline auto adapter_error::format_message(const adapter_error& e) -> std::string
   return path + ": adapter error";
 }
 
-}  // namespace rediscoro::adapt
+}  // namespace rediscoro::adapter
 
 

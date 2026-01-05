@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace rediscoro::adapt {
+namespace rediscoro::adapter {
 
 namespace detail {
 
@@ -298,6 +298,6 @@ auto adapt(const resp3::message& msg) -> rediscoro::expected<T, adapter_error> {
   }
 }
 
-}  // namespace rediscoro::adapt
+}  // namespace rediscoro::adapter
 
 
