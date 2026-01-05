@@ -61,19 +61,9 @@ constexpr std::size_t max_nesting_depth = 64;
   return true;
 }
 
-template <typename T>
-[[nodiscard]] auto need_more() -> rediscoro::expected<T, std::error_code> {
-  return rediscoro::unexpected(error::needs_more);
-}
-
-template <typename T>
-[[nodiscard]] auto protocol_error(error e) -> rediscoro::expected<T, std::error_code> {
-  return rediscoro::unexpected(e);
-}
-
 }  // namespace
 
-using parse_expected = rediscoro::expected<message, std::error_code>;
+using parse_expected = expected<message, std::error_code>;
 
 class attribute_value_parser;
 
@@ -358,7 +348,7 @@ public:
   auto parse(buffer& buf) -> parse_expected override;
 };
 
-using attr_expected = rediscoro::expected<attribute, std::error_code>;
+using attr_expected = expected<attribute, std::error_code>;
 
 class attribute_value_parser final {
   enum class stage { read_len, read_key, read_value };
@@ -380,14 +370,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<attribute>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<attribute>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < 0) {
-            return protocol_error<attribute>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           expected_ = len;
@@ -411,12 +401,12 @@ public:
           if (!child_) {
             child_ = make_message_parser(depth_ + 1);
             if (!child_) {
-              return protocol_error<attribute>(error::nesting_too_deep);
+              return unexpected(error::nesting_too_deep);
             }
           }
           auto r = child_->parse(buf);
           if (!r) {
-            return rediscoro::unexpected(r.error());
+            return unexpected(r.error());
           }
           current_key_ = std::move(*r);
           child_.reset();
@@ -425,17 +415,17 @@ public:
         }
         case stage::read_value: {
           if (!current_key_.has_value()) {
-            return protocol_error<attribute>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           if (!child_) {
             child_ = make_message_parser(depth_ + 1);
             if (!child_) {
-              return protocol_error<attribute>(error::nesting_too_deep);
+              return unexpected(error::nesting_too_deep);
             }
           }
           auto r = child_->parse(buf);
           if (!r) {
-            return rediscoro::unexpected(r.error());
+            return unexpected(r.error());
           }
           entries_.push_back({std::move(*current_key_), std::move(*r)});
           current_key_.reset();
@@ -498,7 +488,7 @@ public:
             }
             auto r = child_->parse(buf);
             if (!r) {
-              return rediscoro::unexpected(r.error());
+              return unexpected(r.error());
             }
             elements_.push_back(std::move(*r));
             child_.reset();
@@ -560,7 +550,7 @@ public:
             }
             auto r = child_->parse(buf);
             if (!r) {
-              return rediscoro::unexpected(r.error());
+              return unexpected(r.error());
             }
             elements_.push_back(std::move(*r));
             child_.reset();
@@ -622,7 +612,7 @@ public:
             }
             auto r = child_->parse(buf);
             if (!r) {
-              return rediscoro::unexpected(r.error());
+              return unexpected(r.error());
             }
             elements_.push_back(std::move(*r));
             child_.reset();
@@ -688,7 +678,7 @@ public:
           }
           auto r = child_->parse(buf);
           if (!r) {
-            return rediscoro::unexpected(r.error());
+            return unexpected(r.error());
           }
           current_key_ = std::move(*r);
           child_.reset();
@@ -707,7 +697,7 @@ public:
           }
           auto r = child_->parse(buf);
           if (!r) {
-            return rediscoro::unexpected(r.error());
+            return unexpected(r.error());
           }
           entries_.push_back({std::move(*current_key_), std::move(*r)});
           current_key_.reset();
@@ -739,7 +729,7 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
         }
         auto r = attr_child_->parse(buf);
         if (!r) {
-          return rediscoro::unexpected(r.error());
+          return unexpected(r.error());
         }
         if (!attrs_.has_value()) {
           attrs_ = attribute{};
@@ -783,7 +773,7 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
         }
         auto r = child_->parse(buf);
         if (!r) {
-          return rediscoro::unexpected(r.error());
+          return unexpected(r.error());
         }
         auto msg = std::move(*r);
         if (attrs_.has_value()) {
@@ -842,9 +832,9 @@ inline auto parser::commit(std::size_t n) -> void {
   buffer_.commit(n);
 }
 
-inline auto parser::parse_one() -> rediscoro::expected<message, std::error_code> {
+inline auto parser::parse_one() -> expected<message, std::error_code> {
   if (failed_) {
-    return rediscoro::unexpected(failed_error_);
+    return unexpected(failed_error_);
   }
 
   if (!current_) {
@@ -852,7 +842,7 @@ inline auto parser::parse_one() -> rediscoro::expected<message, std::error_code>
     if (!current_) {
       failed_ = true;
       failed_error_ = error::nesting_too_deep;
-      return rediscoro::unexpected(failed_error_);
+      return unexpected(failed_error_);
     }
   }
 
