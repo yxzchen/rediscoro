@@ -12,7 +12,7 @@ TEST(response, preserves_order_and_detects_redis_error) {
   b.accept(message{integer{1}});
   b.accept(message{simple_error{"ERR wrongtype"}});
   ASSERT_TRUE(b.done());
-  auto resp = b.finish();
+  auto resp = b.take_results();
 
   auto& r0 = resp.get<0>();
   ASSERT_TRUE(r0.has_value());
@@ -27,7 +27,7 @@ TEST(response, preserves_order_and_detects_redis_error) {
 TEST(response, adapt_as_returns_adapter_error) {
   rediscoro::response_builder<std::int64_t> b;
   b.accept(message{simple_string{"OK"}});
-  auto resp = b.finish();
+  auto resp = b.take_results();
   auto& r = resp.get<0>();
   ASSERT_FALSE(r.has_value());
   EXPECT_TRUE(r.error().is_adapter_error());

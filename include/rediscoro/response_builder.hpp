@@ -37,7 +37,7 @@ public:
     next_index_ += 1;
   }
 
-  response<Ts...> finish() {
+  response<Ts...> take_results() {
     REDISCORO_ASSERT(done());
     return response<Ts...>{take_results(std::index_sequence_for<Ts...>{})};
   }
