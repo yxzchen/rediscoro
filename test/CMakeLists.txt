@@ -17,6 +17,7 @@ endmacro()
 
 make_test(adapter_test)
 make_test(request_test)
+make_test(response_test)
 make_test(resp3_types_test)
 make_test(resp3_visitor_test)
 make_test(resp3_encoder_test)

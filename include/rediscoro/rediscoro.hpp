@@ -5,3 +5,4 @@
 #include <rediscoro/expected.hpp>
 #include <rediscoro/logger.hpp>
 #include <rediscoro/request.hpp>
+#include <rediscoro/response.hpp>
