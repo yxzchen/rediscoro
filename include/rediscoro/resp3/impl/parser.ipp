@@ -86,7 +86,7 @@ public:
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     auto line = data.substr(0, pos);
     buf.consume(pos + 2);
@@ -100,7 +100,7 @@ public:
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     auto line = data.substr(0, pos);
     buf.consume(pos + 2);
@@ -114,11 +114,11 @@ public:
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     std::int64_t v{};
     if (!parse_i64(data.substr(0, pos), v)) {
-      return protocol_error<message>(error::invalid_integer);
+      return unexpected(error::invalid_integer);
     }
     buf.consume(pos + 2);
     return message(integer{v});
@@ -131,11 +131,11 @@ public:
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     double v{};
     if (!parse_double(data.substr(0, pos), v)) {
-      return protocol_error<message>(error::invalid_format);
+      return unexpected(error::invalid_format);
     }
     buf.consume(pos + 2);
     return message(double_type{v});
@@ -147,10 +147,10 @@ public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
     if (data.size() < 3) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     if (data[1] != '\r' || data[2] != '\n') {
-      return protocol_error<message>(error::invalid_format);
+      return unexpected(error::invalid_format);
     }
     if (data[0] == 't') {
       buf.consume(3);
@@ -160,7 +160,7 @@ public:
       buf.consume(3);
       return message(boolean{false});
     }
-    return protocol_error<message>(error::invalid_format);
+    return unexpected(error::invalid_format);
   }
 };
 
@@ -170,7 +170,7 @@ public:
     auto data = buf.data();
     auto pos = find_crlf(data);
     if (pos == std::string_view::npos) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     auto line = data.substr(0, pos);
     buf.consume(pos + 2);
@@ -183,10 +183,10 @@ public:
   auto parse(buffer& buf) -> parse_expected override {
     auto data = buf.data();
     if (data.size() < 2) {
-      return need_more<message>();
+      return unexpected(error::needs_more);
     }
     if (data[0] != '\r' || data[1] != '\n') {
-      return protocol_error<message>(error::invalid_format);
+      return unexpected(error::invalid_format);
     }
     buf.consume(2);
     return message(null{});
@@ -206,14 +206,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < -1) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           if (len == -1) {
@@ -227,10 +227,10 @@ public:
           auto data = buf.data();
           auto need = static_cast<std::size_t>(expected_) + 2;
           if (data.size() < need) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-            return protocol_error<message>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           auto payload = data.substr(0, static_cast<std::size_t>(expected_));
           buf.consume(need);
@@ -254,14 +254,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < 0) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           expected_ = len;
@@ -272,10 +272,10 @@ public:
           auto data = buf.data();
           auto need = static_cast<std::size_t>(expected_) + 2;
           if (data.size() < need) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-            return protocol_error<message>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           auto payload = data.substr(0, static_cast<std::size_t>(expected_));
           buf.consume(need);
@@ -299,14 +299,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < -1) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           if (len == -1) {
@@ -320,17 +320,17 @@ public:
           auto data = buf.data();
           auto need = static_cast<std::size_t>(expected_) + 2;
           if (data.size() < need) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-            return protocol_error<message>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           auto payload = data.substr(0, static_cast<std::size_t>(expected_));
           if (payload.size() < 4) {
-            return protocol_error<message>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           if (payload[3] != ':') {
-            return protocol_error<message>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           verbatim_string v{};
           v.encoding = std::string(payload.substr(0, 3));
@@ -466,14 +466,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < -1) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           if (len == -1) {
@@ -493,7 +493,7 @@ public:
             if (!child_) {
               child_ = make_message_parser(depth_ + 1);
               if (!child_) {
-                return protocol_error<message>(error::nesting_too_deep);
+                return unexpected(error::nesting_too_deep);
               }
             }
             auto r = child_->parse(buf);
@@ -528,14 +528,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < -1) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           if (len == -1) {
@@ -555,7 +555,7 @@ public:
             if (!child_) {
               child_ = make_message_parser(depth_ + 1);
               if (!child_) {
-                return protocol_error<message>(error::nesting_too_deep);
+                return unexpected(error::nesting_too_deep);
               }
             }
             auto r = child_->parse(buf);
@@ -590,14 +590,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < -1) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           if (len == -1) {
@@ -617,7 +617,7 @@ public:
             if (!child_) {
               child_ = make_message_parser(depth_ + 1);
               if (!child_) {
-                return protocol_error<message>(error::nesting_too_deep);
+                return unexpected(error::nesting_too_deep);
               }
             }
             auto r = child_->parse(buf);
@@ -653,14 +653,14 @@ public:
           auto data = buf.data();
           auto pos = find_crlf(data);
           if (pos == std::string_view::npos) {
-            return need_more<message>();
+            return unexpected(error::needs_more);
           }
           std::int64_t len{};
           if (!parse_i64(data.substr(0, pos), len)) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           if (len < -1) {
-            return protocol_error<message>(error::invalid_length);
+            return unexpected(error::invalid_length);
           }
           buf.consume(pos + 2);
           if (len == -1) {
@@ -683,7 +683,7 @@ public:
           if (!child_) {
             child_ = make_message_parser(depth_ + 1);
             if (!child_) {
-              return protocol_error<message>(error::nesting_too_deep);
+              return unexpected(error::nesting_too_deep);
             }
           }
           auto r = child_->parse(buf);
@@ -697,12 +697,12 @@ public:
         }
         case stage::read_value: {
           if (!current_key_.has_value()) {
-            return protocol_error<message>(error::invalid_format);
+            return unexpected(error::invalid_format);
           }
           if (!child_) {
             child_ = make_message_parser(depth_ + 1);
             if (!child_) {
-              return protocol_error<message>(error::nesting_too_deep);
+              return unexpected(error::nesting_too_deep);
             }
           }
           auto r = child_->parse(buf);
@@ -726,7 +726,7 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
       case stage::read_attrs: {
         auto data = buf.data();
         if (data.empty()) {
-          return need_more<message>();
+          return unexpected(error::needs_more);
         }
         if (data[0] != type_to_code(type::attribute)) {
           stage_ = stage::read_type;
@@ -755,7 +755,7 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
       case stage::read_type: {
         auto data = buf.data();
         if (data.empty()) {
-          return need_more<message>();
+          return unexpected(error::needs_more);
         }
         auto b = data[0];
         if (b == type_to_code(type::attribute)) {
@@ -765,21 +765,21 @@ auto message_parser::parse(buffer& buf) -> parse_expected {
         buf.consume(1);
         auto maybe_t = code_to_type(b);
         if (!maybe_t.has_value()) {
-          return protocol_error<message>(error::invalid_type_byte);
+          return unexpected(error::invalid_type_byte);
         }
         if (depth_ + 1 > max_nesting_depth) {
-          return protocol_error<message>(error::nesting_too_deep);
+          return unexpected(error::nesting_too_deep);
         }
         child_ = make_value_body_parser(*maybe_t, depth_ + 1);
         if (!child_) {
-          return protocol_error<message>(error::invalid_format);
+          return unexpected(error::invalid_format);
         }
         stage_ = stage::read_value;
         continue;
       }
       case stage::read_value: {
         if (!child_) {
-          return protocol_error<message>(error::invalid_format);
+          return unexpected(error::invalid_format);
         }
         auto r = child_->parse(buf);
         if (!r) {
