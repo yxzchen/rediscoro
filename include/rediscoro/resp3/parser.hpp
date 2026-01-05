@@ -5,6 +5,7 @@
 #include <rediscoro/resp3/raw.hpp>
 #include <rediscoro/expected.hpp>
 
+#include <span>
 #include <cstdint>
 #include <vector>
 
@@ -44,7 +45,22 @@ class parser {
 public:
   parser() = default;
 
-  auto parse_one(buffer& buf) -> expected<std::uint32_t, error>;
+  /// Zero-copy input API (caller writes into parser-owned buffer).
+  auto prepare(std::size_t min_size = 4096) -> std::span<char> { return buf_.prepare(min_size); }
+  auto commit(std::size_t n) -> void { buf_.commit(n); }
+
+  /// Parse exactly one RESP3 value into the internal raw_tree.
+  /// On success returns root node index into tree().nodes.
+  ///
+  /// IMPORTANT: After success, you must consume the result (tree()+root) and then call reclaim()
+  /// before parsing the next message, otherwise the underlying buffer may move and invalidate views.
+  auto parse_one() -> expected<std::uint32_t, error>;
+
+  /// Reclaim memory after consuming the latest parsed tree:
+  /// - clears raw_tree
+  /// - clears internal parse stack/pending attrs
+  /// - compacts the internal buffer (keeps unread bytes)
+  auto reclaim() -> void;
 
   [[nodiscard]] auto tree() noexcept -> raw_tree& { return tree_; }
   [[nodiscard]] auto tree() const noexcept -> const raw_tree& { return tree_; }
@@ -52,17 +68,21 @@ public:
   [[nodiscard]] auto failed() const noexcept -> bool { return failed_; }
 
   auto reset() -> void {
+    buf_.reset();
     tree_.reset();
     stack_.clear();
     failed_ = false;
+    tree_ready_ = false;
     pending_attr_count_ = 0;
     pending_attr_first_ = 0;
   }
 
 private:
+  buffer buf_{};
   raw_tree tree_{};
   std::vector<frame> stack_{};
   bool failed_{false};
+  bool tree_ready_{false};
 
   std::uint32_t pending_attr_first_{0};
   std::uint32_t pending_attr_count_{0};

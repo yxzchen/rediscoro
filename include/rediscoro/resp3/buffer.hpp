@@ -54,11 +54,6 @@ public:
   auto consume(std::size_t n) -> void {
     REDISCORO_ASSERT(n <= size());
     read_pos_ += n;
-
-    // Auto-compact if we've consumed a lot and buffer is mostly empty
-    if (read_pos_ > buffer_.size() / 2 && size() < buffer_.size() / 4) {
-      compact();
-    }
   }
 
   /// Reset buffer to initial state (clears all data)
@@ -104,10 +99,6 @@ private:
     if (available >= n) {
       return;
     }
-
-    // Try compacting first
-    compact();
-    available = buffer_.size() - write_pos_;
 
     // If still not enough, resize
     if (available < n) {

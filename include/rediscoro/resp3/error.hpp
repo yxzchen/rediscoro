@@ -22,6 +22,7 @@ enum class error {
   invalid_map_pairs,
 
   invalid_state,
+  tree_not_consumed,
 
   // Parser is in failed state (prior protocol error)
   parser_failed,

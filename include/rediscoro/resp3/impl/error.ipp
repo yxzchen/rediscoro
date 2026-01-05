@@ -32,6 +32,8 @@ public:
         return "invalid map pairs";
       case error::invalid_state:
         return "invalid state";
+      case error::tree_not_consumed:
+        return "tree not consumed";
       case error::parser_failed:
         return "parser failed";
       default:

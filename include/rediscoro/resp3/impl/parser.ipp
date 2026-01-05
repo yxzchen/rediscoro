@@ -69,7 +69,10 @@ struct value_result {
 
 }  // namespace
 
-auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
+auto parser::parse_one() -> expected<std::uint32_t, error> {
+  if (tree_ready_) {
+    return unexpected(error::tree_not_consumed);
+  }
   if (failed_) {
     return unexpected(error::parser_failed);
   }
@@ -185,7 +188,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
   };
 
   auto parse_value = [&]() -> expected<value_result, error> {
-    auto data = buf.data();
+    auto data = buf_.data();
     if (data.empty()) {
       return unexpected(error::needs_more);
     }
@@ -209,7 +212,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(e);
       }
-      buf.consume(header_bytes);
+      buf_.consume(header_bytes);
       if (len == 0) {
         return value_result{.step = value_step::continue_parsing};
       }
@@ -238,7 +241,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         // Replace current value frame with a container frame (if present).
         stack_.pop_back();
       }
-      buf.consume(header_bytes);
+      buf_.consume(header_bytes);
       auto started = start_container(*maybe_rt, len);
       if (!started) {
         return unexpected(started.error());
@@ -258,7 +261,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(error::invalid_null);
       }
-      buf.consume(3);
+      buf_.consume(3);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::null});
       attach_pending_attrs(idx);
@@ -283,7 +286,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(error::invalid_boolean);
       }
-      buf.consume(4);
+      buf_.consume(4);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::boolean, .boolean = b});
       attach_pending_attrs(idx);
@@ -307,7 +310,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       auto header_bytes = 1 + pos + 2;
       if (len == -1) {
-        buf.consume(header_bytes);
+        buf_.consume(header_bytes);
         auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
         // Preserve bulk type for null bulk (e.g. $-1, !-1, =-1)
         tree_.nodes.push_back(raw_node{.type = *maybe_rt, .i64 = -1});
@@ -323,7 +326,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(error::invalid_bulk_trailer);
       }
-      buf.consume(need);
+      buf_.consume(need);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_rt, .text = payload, .i64 = len});
       attach_pending_attrs(idx);
@@ -339,7 +342,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     auto consume_bytes = 1 + pos + 2;
 
     if (*maybe_rt == type3::simple_string || *maybe_rt == type3::simple_error || *maybe_rt == type3::big_number) {
-      buf.consume(consume_bytes);
+      buf_.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_rt, .text = line});
       attach_pending_attrs(idx);
@@ -352,7 +355,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(error::invalid_integer);
       }
-      buf.consume(consume_bytes);
+      buf_.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::integer, .text = line, .i64 = v});
       attach_pending_attrs(idx);
@@ -365,7 +368,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(error::invalid_double);
       }
-      buf.consume(consume_bytes);
+      buf_.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::double_type, .text = line, .f64 = v});
       attach_pending_attrs(idx);
@@ -405,6 +408,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
 
         while (true) {
           if (stack_.empty()) {
+            tree_ready_ = true;
             return child_idx;
           }
           auto& parent = stack_.back();
@@ -489,6 +493,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           }
 
           // No parent container: child is root.
+          tree_ready_ = true;
           return child_idx;
         }
         break;
@@ -503,6 +508,16 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
     }
   }
+}
+
+auto parser::reclaim() -> void {
+  // After the user has consumed the raw tree, it is now safe to reclaim memory.
+  tree_.reset();
+  stack_.clear();
+  pending_attr_first_ = 0;
+  pending_attr_count_ = 0;
+  tree_ready_ = false;
+  buf_.compact();
 }
 
 }  // namespace rediscoro::resp3
