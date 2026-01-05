@@ -6,6 +6,7 @@
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/response.hpp>
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <tuple>
@@ -23,15 +24,16 @@ public:
 
   [[nodiscard]] static constexpr std::size_t size() noexcept { return static_size; }
   [[nodiscard]] bool done() const noexcept { return next_index_ == static_size; }
-  [[nodiscard]] std::size_t next_index() const noexcept { return next_index_; }
 
   void accept(resp3::message msg) {
-    set_next_from_message(std::move(msg));
+    REDISCORO_ASSERT(next_index_ < static_size);
+    msg_dispatch_table()[next_index_](this, std::move(msg));
     next_index_ += 1;
   }
 
   void accept(resp3::error e) {
-    set_next_resp3_error(e);
+    REDISCORO_ASSERT(next_index_ < static_size);
+    err_dispatch_table()[next_index_](this, e);
     next_index_ += 1;
   }
 
@@ -56,6 +58,7 @@ private:
 
   template <std::size_t I, typename E>
   void set_error(E&& e) {
+    static_assert(std::is_constructible_v<response_error, E>);
     set_slot<I>(unexpected(response_error{std::forward<E>(e)}));
   }
 
@@ -85,40 +88,37 @@ private:
     set_error<I>(e);
   }
 
-  void set_next_from_message(resp3::message msg) {
-    REDISCORO_ASSERT(next_index_ < static_size);
-    set_next_from_message_impl<0>(std::move(msg));
+  using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
+  using err_dispatch_fn = void(*)(response_builder*, resp3::error);
+
+  template <std::size_t I>
+  static void msg_dispatch(response_builder* self, resp3::message msg) {
+    self->set_from_message<I>(std::move(msg));
   }
 
   template <std::size_t I>
-  void set_next_from_message_impl(resp3::message msg) {
-    if constexpr (I < static_size) {
-      if (next_index_ == I) {
-        set_from_message<I>(std::move(msg));
-        return;
-      }
-      set_next_from_message_impl<I + 1>(std::move(msg));
-    } else {
-      REDISCORO_ASSERT(false);
-    }
+  static void err_dispatch(response_builder* self, resp3::error e) {
+    self->set_resp3_error<I>(e);
   }
 
-  void set_next_resp3_error(resp3::error e) {
-    REDISCORO_ASSERT(next_index_ < static_size);
-    set_next_resp3_error_impl<0>(e);
+  template <std::size_t... Is>
+  static constexpr auto make_msg_table(std::index_sequence<Is...>) -> std::array<msg_dispatch_fn, static_size> {
+    return {&msg_dispatch<Is>...};
   }
 
-  template <std::size_t I>
-  void set_next_resp3_error_impl(resp3::error e) {
-    if constexpr (I < static_size) {
-      if (next_index_ == I) {
-        set_resp3_error<I>(e);
-        return;
-      }
-      set_next_resp3_error_impl<I + 1>(e);
-    } else {
-      REDISCORO_ASSERT(false);
-    }
+  template <std::size_t... Is>
+  static constexpr auto make_err_table(std::index_sequence<Is...>) -> std::array<err_dispatch_fn, static_size> {
+    return {&err_dispatch<Is>...};
+  }
+
+  static auto msg_dispatch_table() -> const std::array<msg_dispatch_fn, static_size>& {
+    static constexpr auto table = make_msg_table(std::index_sequence_for<Ts...>{});
+    return table;
+  }
+
+  static auto err_dispatch_table() -> const std::array<err_dispatch_fn, static_size>& {
+    static constexpr auto table = make_err_table(std::index_sequence_for<Ts...>{});
+    return table;
   }
 
   template <std::size_t... Is>
