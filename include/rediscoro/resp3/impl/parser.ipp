@@ -78,7 +78,7 @@ public:
     if (pos == std::string_view::npos) {
       return false;
     }
-    if (data.empty() || data[0] != type_prefix(type::simple_string)) {
+    if (data.empty() || data[0] != type_to_code(type::simple_string)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -96,7 +96,7 @@ public:
     if (pos == std::string_view::npos) {
       return false;
     }
-    if (data.empty() || data[0] != type_prefix(type::simple_error)) {
+    if (data.empty() || data[0] != type_to_code(type::simple_error)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -114,7 +114,7 @@ public:
     if (pos == std::string_view::npos) {
       return false;
     }
-    if (data.empty() || data[0] != type_prefix(type::integer)) {
+    if (data.empty() || data[0] != type_to_code(type::integer)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -137,7 +137,7 @@ public:
     if (pos == std::string_view::npos) {
       return false;
     }
-    if (data.empty() || data[0] != type_prefix(type::double_type)) {
+    if (data.empty() || data[0] != type_to_code(type::double_type)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -159,7 +159,7 @@ public:
     if (data.size() < 4) {
       return false;
     }
-    if (data[0] != type_prefix(type::boolean)) {
+    if (data[0] != type_to_code(type::boolean)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -188,7 +188,7 @@ public:
     if (pos == std::string_view::npos) {
       return false;
     }
-    if (data.empty() || data[0] != type_prefix(type::big_number)) {
+    if (data.empty() || data[0] != type_to_code(type::big_number)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -205,7 +205,7 @@ public:
     if (data.size() < 3) {
       return false;
     }
-    if (data[0] != type_prefix(type::null)) {
+    if (data[0] != type_to_code(type::null)) {
       ec = make_error_code(error::invalid_format);
       return true;
     }
@@ -237,7 +237,7 @@ public:
         if (pos == std::string_view::npos) {
           return false;
         }
-        if (data.empty() || data[0] != type_prefix(type::bulk_string)) {
+        if (data.empty() || data[0] != type_to_code(type::bulk_string)) {
           ec = make_error_code(error::invalid_format);
           return true;
         }
@@ -295,7 +295,7 @@ public:
         if (pos == std::string_view::npos) {
           return false;
         }
-        if (data.empty() || data[0] != type_prefix(type::bulk_error)) {
+        if (data.empty() || data[0] != type_to_code(type::bulk_error)) {
           ec = make_error_code(error::invalid_format);
           return true;
         }
@@ -349,7 +349,7 @@ public:
         if (pos == std::string_view::npos) {
           return false;
         }
-        if (data.empty() || data[0] != type_prefix(type::verbatim_string)) {
+        if (data.empty() || data[0] != type_to_code(type::verbatim_string)) {
           ec = make_error_code(error::invalid_format);
           return true;
         }
@@ -500,7 +500,7 @@ public:
     return nullptr;
   }
 
-  auto maybe_t = type_from_prefix(type_byte);
+  auto maybe_t = code_to_type(type_byte);
   if (!maybe_t.has_value()) {
     ec = make_error_code(error::invalid_type_byte);
     return nullptr;
@@ -554,7 +554,7 @@ public:
       }
 
       if (stage_ == stage::read_attrs) {
-        if (data[0] == type_prefix(type::attribute)) {
+        if (data[0] == type_to_code(type::attribute)) {
           if (!attr_child_) {
             attr_child_ = std::make_unique<attribute_value_parser>(depth_);
           }
@@ -586,7 +586,7 @@ public:
       if (stage_ == stage::read_value) {
         if (!child_) {
           std::error_code make_ec{};
-          if (data[0] == type_prefix(type::attribute)) {
+          if (data[0] == type_to_code(type::attribute)) {
             stage_ = stage::read_attrs;
             continue;
           }
@@ -636,7 +636,7 @@ auto array_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool
       if (pos == std::string_view::npos) {
         return false;
       }
-      if (data.empty() || data[0] != type_prefix(type::array)) {
+      if (data.empty() || data[0] != type_to_code(type::array)) {
         ec = make_error_code(error::invalid_format);
         return true;
       }
@@ -700,7 +700,7 @@ auto set_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
       if (pos == std::string_view::npos) {
         return false;
       }
-      if (data.empty() || data[0] != type_prefix(type::set)) {
+      if (data.empty() || data[0] != type_to_code(type::set)) {
         ec = make_error_code(error::invalid_format);
         return true;
       }
@@ -764,7 +764,7 @@ auto push_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool 
       if (pos == std::string_view::npos) {
         return false;
       }
-      if (data.empty() || data[0] != type_prefix(type::push)) {
+      if (data.empty() || data[0] != type_to_code(type::push)) {
         ec = make_error_code(error::invalid_format);
         return true;
       }
@@ -828,7 +828,7 @@ auto map_parser::parse(buffer& buf, message& out, std::error_code& ec) -> bool {
       if (pos == std::string_view::npos) {
         return false;
       }
-      if (data.empty() || data[0] != type_prefix(type::map)) {
+      if (data.empty() || data[0] != type_to_code(type::map)) {
         ec = make_error_code(error::invalid_format);
         return true;
       }
@@ -924,7 +924,7 @@ auto attribute_value_parser::parse(buffer& buf, attribute& out, std::error_code&
       if (pos == std::string_view::npos) {
         return false;
       }
-      if (data.empty() || data[0] != type_prefix(type::attribute)) {
+      if (data.empty() || data[0] != type_to_code(type::attribute)) {
         ec = make_error_code(error::invalid_format);
         return true;
       }

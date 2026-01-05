@@ -33,7 +33,7 @@ enum class type {
 // clang-format on
 
 /// Convert RESP3 type to its leading prefix byte in the wire format.
-[[nodiscard]] constexpr auto type_prefix(type t) noexcept -> char {
+[[nodiscard]] constexpr auto type_to_code(type t) noexcept -> char {
   switch (t) {
     case type::simple_string:   return '+';
     case type::simple_error:    return '-';
@@ -55,7 +55,7 @@ enum class type {
 }
 
 /// Convert RESP3 leading prefix byte to a type.
-[[nodiscard]] constexpr auto type_from_prefix(char b) noexcept -> std::optional<type> {
+[[nodiscard]] constexpr auto code_to_type(char b) noexcept -> std::optional<type> {
   switch (b) {
     case '+': return type::simple_string;
     case '-': return type::simple_error;
