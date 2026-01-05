@@ -2,16 +2,18 @@
 
 #include <rediscoro/adapter/adapt.hpp>
 #include <rediscoro/adapter/error.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/resp3/error.hpp>
 #include <rediscoro/resp3/message.hpp>
 
 #include <cstddef>
+#include <optional>
 #include <string>
-#include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace rediscoro {
 
@@ -43,107 +45,110 @@ private:
   variant_type v_;
 };
 
-class response_item {
-public:
-  using value_type = resp3::message;
+template <typename T>
+using response_slot = expected<T, response_error>;
 
-  explicit response_item(resp3::message msg) : data_(std::move(msg)) {}
-  explicit response_item(response_error err) : data_(std::move(err)) {}
+namespace detail {
 
-  [[nodiscard]] bool ok() const noexcept { return std::holds_alternative<resp3::message>(data_); }
+template <typename T>
+using slot_storage = std::optional<response_slot<T>>;
 
-  [[nodiscard]] bool is_redis_error() const noexcept {
-    if (!ok()) {
-      return std::get<response_error>(data_).is_redis_error();
-    }
-    return false;
-  }
+template <std::size_t I, typename... Ts>
+using nth_type = std::tuple_element_t<I, std::tuple<Ts...>>;
 
-  [[nodiscard]] bool is_resp3_error() const noexcept {
-    if (!ok()) {
-      return std::get<response_error>(data_).is_resp3_error();
-    }
-    return false;
-  }
+}  // namespace detail
 
-  [[nodiscard]] bool is_adapter_error() const noexcept {
-    if (!ok()) {
-      return std::get<response_error>(data_).is_adapter_error();
-    }
-    return false;
-  }
-
-  [[nodiscard]] const resp3::message& message() const { return std::get<resp3::message>(data_); }
-  [[nodiscard]] const response_error& error() const { return std::get<response_error>(data_); }
-
-  /// Convert a successful message into T via adapter::adapt<T>.
-  /// If this item is already a failure, returns the existing error.
-  template <typename T>
-  [[nodiscard]] auto adapt_as() const -> rediscoro::expected<T, response_error> {
-    if (!ok()) {
-      return rediscoro::unexpected(error());
-    }
-    auto r = rediscoro::adapter::adapt<T>(message());
-    if (!r) {
-      return rediscoro::unexpected(response_error{std::move(r.error())});
-    }
-    return std::move(*r);
-  }
-
-  /// Helper: map RESP3 error replies (- / !) into redis_error; other values are ok().
-  static auto from_message(resp3::message msg) -> response_item {
-    if (msg.is<resp3::simple_error>()) {
-      return response_item{response_error{redis_error{msg.as<resp3::simple_error>().message}}};
-    }
-    if (msg.is<resp3::bulk_error>()) {
-      return response_item{response_error{redis_error{msg.as<resp3::bulk_error>().message}}};
-    }
-    return response_item{std::move(msg)};
-  }
-
-private:
-  std::variant<resp3::message, response_error> data_;
-};
-
+/// Typed response for a pipeline (compile-time sized, heterogenous slots).
+template <typename... Ts>
 class response {
 public:
+  static constexpr std::size_t static_size = sizeof...(Ts);
+
   response() = default;
 
-  explicit response(std::size_t reserve_n) {
-    items_.reserve(reserve_n);
+  [[nodiscard]] static constexpr std::size_t size() noexcept { return static_size; }
+  [[nodiscard]] static constexpr bool empty() noexcept { return static_size == 0; }
+
+  template <std::size_t I>
+  [[nodiscard]] auto get() -> response_slot<detail::nth_type<I, Ts...>>& {
+    auto& opt = std::get<I>(results_);
+    REDISCORO_ASSERT(opt.has_value());
+    return *opt;
   }
 
-  [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
-  [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
-
-  [[nodiscard]] const response_item& operator[](std::size_t i) const { return items_[i]; }
-  [[nodiscard]] const response_item& at(std::size_t i) const { return items_.at(i); }
-
-  [[nodiscard]] auto begin() const noexcept { return items_.begin(); }
-  [[nodiscard]] auto end() const noexcept { return items_.end(); }
-
-  void push(response_item item) {
-    items_.push_back(std::move(item));
+  template <std::size_t I>
+  [[nodiscard]] auto get() const -> const response_slot<detail::nth_type<I, Ts...>>& {
+    const auto& opt = std::get<I>(results_);
+    REDISCORO_ASSERT(opt.has_value());
+    return *opt;
   }
 
-  void push_message(resp3::message msg) {
-    items_.push_back(response_item::from_message(std::move(msg)));
+  /// For exec: set I-th slot from a successfully parsed RESP3 message.
+  template <std::size_t I>
+  void set_from_message(resp3::message msg) {
+    using T = detail::nth_type<I, Ts...>;
+
+    if (msg.is<resp3::simple_error>()) {
+      set_error<I>(redis_error{msg.as<resp3::simple_error>().message});
+      return;
+    }
+    if (msg.is<resp3::bulk_error>()) {
+      set_error<I>(redis_error{msg.as<resp3::bulk_error>().message});
+      return;
+    }
+
+    auto r = adapter::adapt<T>(msg);
+    if (!r) {
+      set_error<I>(std::move(r.error()));
+      return;
+    }
+
+    std::get<I>(results_) = std::move(*r);
   }
 
-  void push_redis_error(std::string message) {
-    items_.push_back(response_item{response_error{redis_error{std::move(message)}}});
+  /// For exec: set I-th slot from a protocol/parse error.
+  template <std::size_t I>
+  void set_resp3_error(resp3::error e) {
+    set_error<I>(e);
   }
 
-  void push_resp3_error(resp3::error e) {
-    items_.push_back(response_item{response_error{e}});
+  /// For exec: set I-th slot from a redis error (already extracted).
+  template <std::size_t I>
+  void set_redis_error(std::string message) {
+    set_error<I>(redis_error{std::move(message)});
   }
 
-  void push_adapter_error(adapter::error e) {
-    items_.push_back(response_item{response_error{std::move(e)}});
+  template <std::size_t I>
+  void set_adapter_error(adapter::error e) {
+    set_error<I>(std::move(e));
+  }
+
+  /// Convenience: unpack as tuple of references for structured bindings.
+  [[nodiscard]] auto unpack() -> std::tuple<response_slot<Ts>&...> {
+    return unpack_impl(std::index_sequence_for<Ts...>{});
+  }
+
+  [[nodiscard]] auto unpack() const -> std::tuple<const response_slot<Ts>&...> {
+    return unpack_impl(std::index_sequence_for<Ts...>{});
   }
 
 private:
-  std::vector<response_item> items_{};
+  std::tuple<detail::slot_storage<Ts>...> results_{};
+
+  template <std::size_t... Is>
+  [[nodiscard]] auto unpack_impl(std::index_sequence<Is...>) -> std::tuple<response_slot<Ts>&...> {
+    return std::tie(get<Is>()...);
+  }
+
+  template <std::size_t... Is>
+  [[nodiscard]] auto unpack_impl(std::index_sequence<Is...>) const -> std::tuple<const response_slot<Ts>&...> {
+    return std::tie(get<Is>()...);
+  }
+
+  template <std::size_t I, typename E>
+  void set_error(E&& e) {
+    std::get<I>(results_) = unexpected(response_error{std::forward<E>(e)});
+  }
 };
 
 }  // namespace rediscoro
