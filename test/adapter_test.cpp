@@ -63,7 +63,7 @@ TEST(resp3_adapter, adapter_error_to_error_code_projection) {
   ASSERT_FALSE(r.has_value());
 
   const auto ec = rediscoro::adapter::to_error_code(r.error());
-  EXPECT_EQ(ec, rediscoro::redis::error::type_mismatch);
+  EXPECT_EQ(ec, rediscoro::adapter::error::type_mismatch);
 }
 
 }  // namespace rediscoro::resp3

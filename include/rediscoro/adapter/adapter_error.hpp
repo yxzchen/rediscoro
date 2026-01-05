@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <variant>
@@ -37,9 +38,10 @@ using path_element = std::variant<path_index, path_key, path_field>;
 struct adapter_error {
   adapter_error_kind kind{};
   resp3::type3 actual_type{};
-  std::optional<resp3::type3> expected_type{};
-  std::vector<resp3::type3> expected_any_of{};  // only for type_mismatch with multiple acceptable RESP3 types
+  std::vector<resp3::type3> expected_types{};   // empty means "unknown / not applicable"
   std::vector<path_element> path{};
+  std::optional<std::size_t> expected_size{};
+  std::optional<std::size_t> got_size{};
   mutable std::optional<std::string> cached_message{};
 
   auto prepend_path(path_element el) -> void {
@@ -59,13 +61,14 @@ struct adapter_error {
 
 namespace detail {
 
-inline auto make_type_mismatch(resp3::type3 expected, resp3::type3 actual, std::vector<resp3::type3> any_of = {}) -> adapter_error {
+inline auto make_type_mismatch(resp3::type3 actual, std::vector<resp3::type3> expected) -> adapter_error {
   return adapter_error{
     .kind = adapter_error_kind::type_mismatch,
     .actual_type = actual,
-    .expected_type = expected,
-    .expected_any_of = std::move(any_of),
+    .expected_types = std::move(expected),
     .path = {},
+    .expected_size = std::nullopt,
+    .got_size = std::nullopt,
     .cached_message = std::nullopt,
   };
 }
@@ -74,9 +77,10 @@ inline auto make_unexpected_null(resp3::type3 expected) -> adapter_error {
   return adapter_error{
     .kind = adapter_error_kind::unexpected_null,
     .actual_type = resp3::type3::null,
-    .expected_type = expected,
-    .expected_any_of = {},
+    .expected_types = {expected},
     .path = {},
+    .expected_size = std::nullopt,
+    .got_size = std::nullopt,
     .cached_message = std::nullopt,
   };
 }
@@ -85,24 +89,24 @@ inline auto make_value_out_of_range(resp3::type3 t) -> adapter_error {
   return adapter_error{
     .kind = adapter_error_kind::value_out_of_range,
     .actual_type = t,
-    .expected_type = t,
-    .expected_any_of = {},
+    .expected_types = {t},
     .path = {},
+    .expected_size = std::nullopt,
+    .got_size = std::nullopt,
     .cached_message = std::nullopt,
   };
 }
 
 inline auto make_size_mismatch(resp3::type3 actual, std::size_t expected, std::size_t got) -> adapter_error {
-  adapter_error e{
+  return adapter_error{
     .kind = adapter_error_kind::size_mismatch,
     .actual_type = actual,
-    .expected_type = actual,
-    .expected_any_of = {},
+    .expected_types = {actual},
     .path = {},
+    .expected_size = expected,
+    .got_size = got,
     .cached_message = std::nullopt,
   };
-  e.cached_message = adapter_error::format_message(e) + " (expected " + std::to_string(expected) + ", got " + std::to_string(got) + ")";
-  return e;
 }
 
 }  // namespace detail
@@ -132,28 +136,37 @@ inline auto adapter_error::format_message(const adapter_error& e) -> std::string
   const auto path = path_to_string(e.path);
   switch (e.kind) {
     case adapter_error_kind::type_mismatch: {
-      std::string exp = e.expected_type ? type_to_string(*e.expected_type) : "<?>";  // should not happen
-      if (!e.expected_any_of.empty()) {
-        exp += " (any of: ";
-        for (std::size_t i = 0; i < e.expected_any_of.size(); ++i) {
-          if (i != 0) {
-            exp += ", ";
-          }
-          exp += type_to_string(e.expected_any_of[i]);
-        }
-        exp += ")";
+      if (e.expected_types.empty()) {
+        return path + ": expected <?>, got " + type_to_string(e.actual_type);
       }
-      return path + ": expected " + exp + ", got " + type_to_string(e.actual_type);
+      if (e.expected_types.size() == 1) {
+        return path + ": expected " + type_to_string(e.expected_types[0]) + ", got " + type_to_string(e.actual_type);
+      }
+      std::string exp = "any of: ";
+      for (std::size_t i = 0; i < e.expected_types.size(); ++i) {
+        if (i != 0) {
+          exp += ", ";
+        }
+        exp += type_to_string(e.expected_types[i]);
+      }
+      return path + ": expected (" + exp + "), got " + type_to_string(e.actual_type);
     }
     case adapter_error_kind::unexpected_null: {
-      const std::string exp = e.expected_type ? type_to_string(*e.expected_type) : "non-null";
-      return path + ": unexpected null (expected " + exp + ")";
+      if (e.expected_types.size() == 1) {
+        return path + ": unexpected null (expected " + type_to_string(e.expected_types[0]) + ")";
+      }
+      return path + ": unexpected null";
     }
     case adapter_error_kind::value_out_of_range: {
-      const std::string t = e.expected_type ? type_to_string(*e.expected_type) : type_to_string(e.actual_type);
-      return path + ": value out of range for " + t;
+      if (e.expected_types.size() == 1) {
+        return path + ": value out of range for " + type_to_string(e.expected_types[0]);
+      }
+      return path + ": value out of range";
     }
     case adapter_error_kind::size_mismatch: {
+      if (e.expected_size.has_value() && e.got_size.has_value()) {
+        return path + ": size mismatch (expected " + std::to_string(*e.expected_size) + ", got " + std::to_string(*e.got_size) + ")";
+      }
       return path + ": size mismatch";
     }
     case adapter_error_kind::invalid_value: {

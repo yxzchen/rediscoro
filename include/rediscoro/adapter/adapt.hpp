@@ -123,7 +123,6 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, adapter_e
       }
     }
     return rediscoro::unexpected(make_type_mismatch(
-      resp3::type3::bulk_string,
       msg.get_type(),
       {resp3::type3::simple_string, resp3::type3::bulk_string, resp3::type3::verbatim_string}));
   } else if constexpr (integral_like<U>) {
@@ -131,7 +130,7 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, adapter_e
       return rediscoro::unexpected(make_unexpected_null(resp3::type3::integer));
     }
     if (!msg.is<resp3::integer>()) {
-      return rediscoro::unexpected(make_type_mismatch(resp3::type3::integer, msg.get_type()));
+      return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::integer}));
     }
     const auto v = msg.as<resp3::integer>().value;
     if (v < static_cast<std::int64_t>((std::numeric_limits<U>::min)()) ||
@@ -144,7 +143,7 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, adapter_e
       return rediscoro::unexpected(make_unexpected_null(resp3::type3::boolean));
     }
     if (!msg.is<resp3::boolean>()) {
-      return rediscoro::unexpected(make_type_mismatch(resp3::type3::boolean, msg.get_type()));
+      return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::boolean}));
     }
     return msg.as<resp3::boolean>().value;
   } else if constexpr (double_like<U>) {
@@ -152,7 +151,7 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, adapter_e
       return rediscoro::unexpected(make_unexpected_null(resp3::type3::double_type));
     }
     if (!msg.is<resp3::double_type>()) {
-      return rediscoro::unexpected(make_type_mismatch(resp3::type3::double_type, msg.get_type()));
+      return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::double_type}));
     }
     return static_cast<U>(msg.as<resp3::double_type>().value);
   } else {
@@ -190,7 +189,7 @@ auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, adapter
     elems = &msg.as<resp3::push>().elements;
   } else {
     return rediscoro::unexpected(make_type_mismatch(
-      resp3::type3::array, msg.get_type(), {resp3::type3::array, resp3::type3::set, resp3::type3::push}));
+      msg.get_type(), {resp3::type3::array, resp3::type3::set, resp3::type3::push}));
   }
 
   U out{};
@@ -218,7 +217,7 @@ auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, adapter_erro
     "ignore_t is only allowed as the top-level adaptation target");
 
   if (!msg.is<resp3::map>()) {
-    return rediscoro::unexpected(make_type_mismatch(resp3::type3::map, msg.get_type()));
+    return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::map}));
   }
 
   U out{};
@@ -256,7 +255,7 @@ auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, adapte
   constexpr std::size_t N = std::tuple_size_v<U>;
 
   if (!msg.is<resp3::array>()) {
-    return rediscoro::unexpected(make_type_mismatch(resp3::type3::array, msg.get_type()));
+    return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::array}));
   }
   const auto& elems = msg.as<resp3::array>().elements;
   if (elems.size() != N) {

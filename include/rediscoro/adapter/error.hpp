@@ -1,7 +1,5 @@
 #pragma once
 
-#include <rediscoro/adapter/adapter_error.hpp>
-
 #include <system_error>
 #include <type_traits>
 
@@ -14,6 +12,8 @@ enum class error {
   size_mismatch,
   invalid_value,
 };
+
+auto make_error_code(error e) -> std::error_code;
 
 }  // namespace rediscoro::adapter
 
