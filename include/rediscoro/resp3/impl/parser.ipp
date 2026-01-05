@@ -35,10 +35,6 @@ constexpr std::size_t max_nesting_depth = 64;
   return true;
 }
 
-[[nodiscard]] auto parse_len(std::string_view sv, std::int64_t& out) -> bool {
-  return parse_i64(sv, out);
-}
-
 [[nodiscard]] auto parse_double(std::string_view sv, double& out) -> bool {
   if (sv == "inf") {
     out = std::numeric_limits<double>::infinity();
@@ -53,7 +49,6 @@ constexpr std::size_t max_nesting_depth = 64;
     return true;
   }
 
-  // strtod requires a null-terminated string.
   std::string tmp(sv);
   char* end = nullptr;
   out = std::strtod(tmp.c_str(), &end);
@@ -66,476 +61,290 @@ constexpr std::size_t max_nesting_depth = 64;
   return true;
 }
 
-}  // namespace
-
-class message_parser;
-
-class simple_string_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    auto pos = find_crlf(data);
-    if (pos == std::string_view::npos) {
-      return false;
-    }
-    if (data.empty() || data[0] != type_to_code(type::simple_string)) {
-      err = error::invalid_format;
-      return true;
-    }
-    out = message(simple_string{std::string(data.substr(1, pos - 1))});
-    buf.consume(pos + 2);
-    return true;
-  }
-};
-
-class simple_error_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    auto pos = find_crlf(data);
-    if (pos == std::string_view::npos) {
-      return false;
-    }
-    if (data.empty() || data[0] != type_to_code(type::simple_error)) {
-      err = error::invalid_format;
-      return true;
-    }
-    out = message(simple_error{std::string(data.substr(1, pos - 1))});
-    buf.consume(pos + 2);
-    return true;
-  }
-};
-
-class integer_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    auto pos = find_crlf(data);
-    if (pos == std::string_view::npos) {
-      return false;
-    }
-    if (data.empty() || data[0] != type_to_code(type::integer)) {
-      err = error::invalid_format;
-      return true;
-    }
-    std::int64_t v{};
-    if (!parse_i64(data.substr(1, pos - 1), v)) {
-      err = error::invalid_integer;
-      return true;
-    }
-    out = message(integer{v});
-    buf.consume(pos + 2);
-    return true;
-  }
-};
-
-class double_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    auto pos = find_crlf(data);
-    if (pos == std::string_view::npos) {
-      return false;
-    }
-    if (data.empty() || data[0] != type_to_code(type::double_type)) {
-      err = error::invalid_format;
-      return true;
-    }
-    double v{};
-    if (!parse_double(data.substr(1, pos - 1), v)) {
-      err = error::invalid_format;
-      return true;
-    }
-    out = message(double_type{v});
-    buf.consume(pos + 2);
-    return true;
-  }
-};
-
-class boolean_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    if (data.size() < 4) {
-      return false;
-    }
-    if (data[0] != type_to_code(type::boolean)) {
-      err = error::invalid_format;
-      return true;
-    }
-    if (data[3] != '\n' || data[2] != '\r') {
-      err = error::invalid_format;
-      return true;
-    }
-    if (data[1] == 't') {
-      out = message(boolean{true});
-    } else if (data[1] == 'f') {
-      out = message(boolean{false});
-    } else {
-      err = error::invalid_format;
-      return true;
-    }
-    buf.consume(4);
-    return true;
-  }
-};
-
-class big_number_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    auto pos = find_crlf(data);
-    if (pos == std::string_view::npos) {
-      return false;
-    }
-    if (data.empty() || data[0] != type_to_code(type::big_number)) {
-      err = error::invalid_format;
-      return true;
-    }
-    out = message(big_number{std::string(data.substr(1, pos - 1))});
-    buf.consume(pos + 2);
-    return true;
-  }
-};
-
-class null_parser final : public value_parser {
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    auto data = buf.data();
-    if (data.size() < 3) {
-      return false;
-    }
-    if (data[0] != type_to_code(type::null)) {
-      err = error::invalid_format;
-      return true;
-    }
-    if (data[1] != '\r' || data[2] != '\n') {
-      err = error::invalid_format;
-      return true;
-    }
-    out = message(null{});
-    buf.consume(3);
-    return true;
-  }
-};
-
-class bulk_string_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_data,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    while (true) {
-      if (stage_ == stage::read_len) {
-        auto data = buf.data();
-        auto pos = find_crlf(data);
-        if (pos == std::string_view::npos) {
-          return false;
-        }
-        if (data.empty() || data[0] != type_to_code(type::bulk_string)) {
-          err = error::invalid_format;
-          return true;
-        }
-        std::int64_t len{};
-        if (!parse_len(data.substr(1, pos - 1), len)) {
-          err = error::invalid_length;
-          return true;
-        }
-        if (len < -1) {
-          err = error::invalid_length;
-          return true;
-        }
-        buf.consume(pos + 2);
-        if (len == -1) {
-          out = message(null{});
-          return true;
-        }
-        expected_ = len;
-        stage_ = stage::read_data;
-      }
-
-      if (stage_ == stage::read_data) {
-        auto data = buf.data();
-        auto need = static_cast<std::size_t>(expected_) + 2;
-        if (data.size() < need) {
-          return false;
-        }
-        if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-          err = error::invalid_format;
-          return true;
-        }
-        out = message(bulk_string{std::string(data.substr(0, static_cast<std::size_t>(expected_)))});
-        buf.consume(need);
-        return true;
-      }
-    }
-  }
-};
-
-class bulk_error_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_data,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    while (true) {
-      if (stage_ == stage::read_len) {
-        auto data = buf.data();
-        auto pos = find_crlf(data);
-        if (pos == std::string_view::npos) {
-          return false;
-        }
-        if (data.empty() || data[0] != type_to_code(type::bulk_error)) {
-          err = error::invalid_format;
-          return true;
-        }
-        std::int64_t len{};
-        if (!parse_len(data.substr(1, pos - 1), len)) {
-          err = error::invalid_length;
-          return true;
-        }
-        if (len < 0) {
-          err = error::invalid_length;
-          return true;
-        }
-        buf.consume(pos + 2);
-        expected_ = len;
-        stage_ = stage::read_data;
-      }
-
-      if (stage_ == stage::read_data) {
-        auto data = buf.data();
-        auto need = static_cast<std::size_t>(expected_) + 2;
-        if (data.size() < need) {
-          return false;
-        }
-        if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-          err = error::invalid_format;
-          return true;
-        }
-        out = message(bulk_error{std::string(data.substr(0, static_cast<std::size_t>(expected_)))});
-        buf.consume(need);
-        return true;
-      }
-    }
-  }
-};
-
-class verbatim_string_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_data,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-
-public:
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    while (true) {
-      if (stage_ == stage::read_len) {
-        auto data = buf.data();
-        auto pos = find_crlf(data);
-        if (pos == std::string_view::npos) {
-          return false;
-        }
-        if (data.empty() || data[0] != type_to_code(type::verbatim_string)) {
-          err = error::invalid_format;
-          return true;
-        }
-        std::int64_t len{};
-        if (!parse_len(data.substr(1, pos - 1), len)) {
-          err = error::invalid_length;
-          return true;
-        }
-        if (len < -1) {
-          err = error::invalid_length;
-          return true;
-        }
-        buf.consume(pos + 2);
-        if (len == -1) {
-          out = message(null{});
-          return true;
-        }
-        expected_ = len;
-        stage_ = stage::read_data;
-      }
-
-      if (stage_ == stage::read_data) {
-        auto data = buf.data();
-        auto need = static_cast<std::size_t>(expected_) + 2;
-        if (data.size() < need) {
-          return false;
-        }
-        if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
-          err = error::invalid_format;
-          return true;
-        }
-        auto payload = data.substr(0, static_cast<std::size_t>(expected_));
-        if (payload.size() < 4) {
-          err = error::invalid_format;
-          return true;
-        }
-        if (payload[3] != ':') {
-          err = error::invalid_format;
-          return true;
-        }
-        verbatim_string v{};
-        v.encoding = std::string(payload.substr(0, 3));
-        v.data = std::string(payload.substr(4));
-        out = message(std::move(v));
-        buf.consume(need);
-        return true;
-      }
-    }
-  }
-};
-
-class array_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_elements,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-  std::vector<message> elements_{};
-  std::unique_ptr<value_parser> child_{};
-  std::size_t depth_{0};
-
-public:
-  explicit array_parser(std::size_t depth) : depth_(depth) {}
-
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
-};
-
-class set_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_elements,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-  std::vector<message> elements_{};
-  std::unique_ptr<value_parser> child_{};
-  std::size_t depth_{0};
-
-public:
-  explicit set_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
-};
-
-class push_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_elements,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-  std::vector<message> elements_{};
-  std::unique_ptr<value_parser> child_{};
-  std::size_t depth_{0};
-
-public:
-  explicit push_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
-};
-
-class map_parser final : public value_parser {
-  enum class stage {
-    read_len,
-    read_key,
-    read_value,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-  std::vector<std::pair<message, message>> entries_{};
-  std::unique_ptr<value_parser> child_{};
-  std::optional<message> current_key_{};
-  std::size_t depth_{0};
-
-public:
-  explicit map_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override;
-};
-
-class attribute_value_parser final {
-  enum class stage {
-    read_len,
-    read_key,
-    read_value,
-  };
-
-  stage stage_{stage::read_len};
-  std::int64_t expected_{0};
-  std::vector<std::pair<message, message>> entries_{};
-  std::unique_ptr<value_parser> child_{};
-  std::optional<message> current_key_{};
-  std::size_t depth_{0};
-
-public:
-  explicit attribute_value_parser(std::size_t depth) : depth_(depth) {}
-  auto parse(buffer& buf, attribute& out, std::optional<error>& err) -> bool;
-};
-
-[[nodiscard]] auto make_message_parser(std::size_t depth) -> std::unique_ptr<value_parser>;
-
-[[nodiscard]] auto make_value_parser_for_type(char type_byte, std::size_t depth, std::optional<error>& err)
-  -> std::unique_ptr<value_parser> {
-  if (depth > max_nesting_depth) {
-    err = error::nesting_too_deep;
-    return nullptr;
-  }
-
-  auto maybe_t = code_to_type(type_byte);
-  if (!maybe_t.has_value()) {
-    err = error::invalid_type_byte;
-    return nullptr;
-  }
-
-  switch (*maybe_t) {
-    case type::simple_string:   return std::make_unique<simple_string_parser>();
-    case type::simple_error:    return std::make_unique<simple_error_parser>();
-    case type::integer:         return std::make_unique<integer_parser>();
-    case type::double_type:     return std::make_unique<double_parser>();
-    case type::boolean:         return std::make_unique<boolean_parser>();
-    case type::big_number:      return std::make_unique<big_number_parser>();
-    case type::null:            return std::make_unique<null_parser>();
-    case type::bulk_string:     return std::make_unique<bulk_string_parser>();
-    case type::bulk_error:      return std::make_unique<bulk_error_parser>();
-    case type::verbatim_string: return std::make_unique<verbatim_string_parser>();
-    case type::array:           return std::make_unique<array_parser>(depth);
-    case type::map:             return std::make_unique<map_parser>(depth);
-    case type::set:             return std::make_unique<set_parser>(depth);
-    case type::push:            return std::make_unique<push_parser>(depth);
-    case type::attribute:
-      // Attributes are handled as a prefix by message_parser, never as a "value".
-      err = error::invalid_format;
-      return nullptr;
-  }
-
-  err = error::invalid_type_byte;
-  return nullptr;
+template <typename T>
+[[nodiscard]] auto need_more() -> rediscoro::expected<T, std::error_code> {
+  return rediscoro::unexpected(error::needs_more);
 }
 
+template <typename T>
+[[nodiscard]] auto protocol_error(error e) -> rediscoro::expected<T, std::error_code> {
+  return rediscoro::unexpected(e);
+}
+
+}  // namespace
+
+using parse_expected = rediscoro::expected<message, std::error_code>;
+
+class attribute_value_parser;
+
+[[nodiscard]] auto make_message_parser(std::size_t depth) -> std::unique_ptr<value_parser>;
+[[nodiscard]] auto make_value_body_parser(type t, std::size_t depth) -> std::unique_ptr<value_parser>;
+
+class simple_string_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    auto pos = find_crlf(data);
+    if (pos == std::string_view::npos) {
+      return need_more<message>();
+    }
+    auto line = data.substr(0, pos);
+    buf.consume(pos + 2);
+    return message(simple_string{std::string(line)});
+  }
+};
+
+class simple_error_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    auto pos = find_crlf(data);
+    if (pos == std::string_view::npos) {
+      return need_more<message>();
+    }
+    auto line = data.substr(0, pos);
+    buf.consume(pos + 2);
+    return message(simple_error{std::string(line)});
+  }
+};
+
+class integer_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    auto pos = find_crlf(data);
+    if (pos == std::string_view::npos) {
+      return need_more<message>();
+    }
+    std::int64_t v{};
+    if (!parse_i64(data.substr(0, pos), v)) {
+      return protocol_error<message>(error::invalid_integer);
+    }
+    buf.consume(pos + 2);
+    return message(integer{v});
+  }
+};
+
+class double_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    auto pos = find_crlf(data);
+    if (pos == std::string_view::npos) {
+      return need_more<message>();
+    }
+    double v{};
+    if (!parse_double(data.substr(0, pos), v)) {
+      return protocol_error<message>(error::invalid_format);
+    }
+    buf.consume(pos + 2);
+    return message(double_type{v});
+  }
+};
+
+class boolean_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    if (data.size() < 3) {
+      return need_more<message>();
+    }
+    if (data[1] != '\r' || data[2] != '\n') {
+      return protocol_error<message>(error::invalid_format);
+    }
+    if (data[0] == 't') {
+      buf.consume(3);
+      return message(boolean{true});
+    }
+    if (data[0] == 'f') {
+      buf.consume(3);
+      return message(boolean{false});
+    }
+    return protocol_error<message>(error::invalid_format);
+  }
+};
+
+class big_number_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    auto pos = find_crlf(data);
+    if (pos == std::string_view::npos) {
+      return need_more<message>();
+    }
+    auto line = data.substr(0, pos);
+    buf.consume(pos + 2);
+    return message(big_number{std::string(line)});
+  }
+};
+
+class null_body_parser final : public value_parser {
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    auto data = buf.data();
+    if (data.size() < 2) {
+      return need_more<message>();
+    }
+    if (data[0] != '\r' || data[1] != '\n') {
+      return protocol_error<message>(error::invalid_format);
+    }
+    buf.consume(2);
+    return message(null{});
+  }
+};
+
+class bulk_string_body_parser final : public value_parser {
+  enum class stage { read_len, read_data };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < -1) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          if (len == -1) {
+            return message(null{});
+          }
+          expected_ = len;
+          stage_ = stage::read_data;
+          continue;
+        }
+        case stage::read_data: {
+          auto data = buf.data();
+          auto need = static_cast<std::size_t>(expected_) + 2;
+          if (data.size() < need) {
+            return need_more<message>();
+          }
+          if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
+            return protocol_error<message>(error::invalid_format);
+          }
+          auto payload = data.substr(0, static_cast<std::size_t>(expected_));
+          buf.consume(need);
+          return message(bulk_string{std::string(payload)});
+        }
+      }
+    }
+  }
+};
+
+class bulk_error_body_parser final : public value_parser {
+  enum class stage { read_len, read_data };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < 0) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          expected_ = len;
+          stage_ = stage::read_data;
+          continue;
+        }
+        case stage::read_data: {
+          auto data = buf.data();
+          auto need = static_cast<std::size_t>(expected_) + 2;
+          if (data.size() < need) {
+            return need_more<message>();
+          }
+          if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
+            return protocol_error<message>(error::invalid_format);
+          }
+          auto payload = data.substr(0, static_cast<std::size_t>(expected_));
+          buf.consume(need);
+          return message(bulk_error{std::string(payload)});
+        }
+      }
+    }
+  }
+};
+
+class verbatim_string_body_parser final : public value_parser {
+  enum class stage { read_len, read_data };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+
+public:
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < -1) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          if (len == -1) {
+            return message(null{});
+          }
+          expected_ = len;
+          stage_ = stage::read_data;
+          continue;
+        }
+        case stage::read_data: {
+          auto data = buf.data();
+          auto need = static_cast<std::size_t>(expected_) + 2;
+          if (data.size() < need) {
+            return need_more<message>();
+          }
+          if (data.substr(static_cast<std::size_t>(expected_), 2) != "\r\n") {
+            return protocol_error<message>(error::invalid_format);
+          }
+          auto payload = data.substr(0, static_cast<std::size_t>(expected_));
+          if (payload.size() < 4) {
+            return protocol_error<message>(error::invalid_format);
+          }
+          if (payload[3] != ':') {
+            return protocol_error<message>(error::invalid_format);
+          }
+          verbatim_string v{};
+          v.encoding = std::string(payload.substr(0, 3));
+          v.data = std::string(payload.substr(4));
+          buf.consume(need);
+          return message(std::move(v));
+        }
+      }
+    }
+  }
+};
+
 class message_parser final : public value_parser {
-  enum class stage {
-    read_attrs,
-    read_value,
-  };
+  enum class stage { read_attrs, read_type, read_value };
 
   stage stage_{stage::read_attrs};
   std::optional<attribute> attrs_{};
@@ -546,80 +355,445 @@ class message_parser final : public value_parser {
 public:
   explicit message_parser(std::size_t depth) : depth_(depth) {}
 
-  auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool override {
-    while (true) {
-      auto data = buf.data();
-      if (data.empty()) {
-        return false;
-      }
+  auto parse(buffer& buf) -> parse_expected override;
+};
 
-      if (stage_ == stage::read_attrs) {
-        if (data[0] == type_to_code(type::attribute)) {
-          if (!attr_child_) {
-            attr_child_ = std::make_unique<attribute_value_parser>(depth_);
+using attr_expected = rediscoro::expected<attribute, std::error_code>;
+
+class attribute_value_parser final {
+  enum class stage { read_len, read_key, read_value };
+
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+  std::vector<std::pair<message, message>> entries_{};
+  std::unique_ptr<value_parser> child_{};
+  std::optional<message> current_key_{};
+  std::size_t depth_{0};
+
+public:
+  explicit attribute_value_parser(std::size_t depth) : depth_(depth) {}
+
+  auto parse(buffer& buf) -> attr_expected {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<attribute>();
           }
-          attribute tmp_attr{};
-          std::optional<error> inner_err{};
-          auto done = attr_child_->parse(buf, tmp_attr, inner_err);
-          if (!done) {
-            return false;
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<attribute>(error::invalid_length);
           }
-          if (inner_err.has_value()) {
-            err = *inner_err;
-            return true;
+          if (len < 0) {
+            return protocol_error<attribute>(error::invalid_length);
           }
-          if (!attrs_.has_value()) {
-            attrs_ = attribute{};
+          buf.consume(pos + 2);
+          expected_ = len;
+          entries_.clear();
+          entries_.reserve(static_cast<std::size_t>(expected_));
+          current_key_.reset();
+          stage_ = stage::read_key;
+          if (expected_ == 0) {
+            attribute out{};
+            out.entries = std::move(entries_);
+            return out;
           }
-          auto& dst = attrs_->entries;
-          auto& src = tmp_attr.entries;
-          dst.insert(dst.end(),
-                     std::make_move_iterator(src.begin()),
-                     std::make_move_iterator(src.end()));
-          attr_child_.reset();
           continue;
         }
-        stage_ = stage::read_value;
-        continue;
-      }
-
-      if (stage_ == stage::read_value) {
-        if (!child_) {
-          std::optional<error> make_err{};
-          if (data[0] == type_to_code(type::attribute)) {
-            stage_ = stage::read_attrs;
-            continue;
-          }
-          child_ = make_value_parser_for_type(data[0], depth_, make_err);
-          if (make_err.has_value()) {
-            err = *make_err;
-            return true;
+        case stage::read_key: {
+          if (entries_.size() >= static_cast<std::size_t>(expected_)) {
+            attribute out{};
+            out.entries = std::move(entries_);
+            return out;
           }
           if (!child_) {
-            err = error::invalid_format;
-            return true;
+            child_ = make_message_parser(depth_ + 1);
+            if (!child_) {
+              return protocol_error<attribute>(error::nesting_too_deep);
+            }
           }
+          auto r = child_->parse(buf);
+          if (!r) {
+            return rediscoro::unexpected(r.error());
+          }
+          current_key_ = std::move(*r);
+          child_.reset();
+          stage_ = stage::read_value;
+          continue;
         }
-
-        message value_msg{};
-        std::optional<error> inner_err{};
-        auto done = child_->parse(buf, value_msg, inner_err);
-        if (!done) {
-          return false;
+        case stage::read_value: {
+          if (!current_key_.has_value()) {
+            return protocol_error<attribute>(error::invalid_format);
+          }
+          if (!child_) {
+            child_ = make_message_parser(depth_ + 1);
+            if (!child_) {
+              return protocol_error<attribute>(error::nesting_too_deep);
+            }
+          }
+          auto r = child_->parse(buf);
+          if (!r) {
+            return rediscoro::unexpected(r.error());
+          }
+          entries_.push_back({std::move(*current_key_), std::move(*r)});
+          current_key_.reset();
+          child_.reset();
+          stage_ = stage::read_key;
+          continue;
         }
-        if (inner_err.has_value()) {
-          err = *inner_err;
-          return true;
-        }
-        if (attrs_.has_value()) {
-          value_msg.attrs = std::move(attrs_);
-        }
-        out = std::move(value_msg);
-        return true;
       }
     }
   }
 };
+
+class array_body_parser final : public value_parser {
+  enum class stage { read_len, read_elements };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+  std::vector<message> elements_{};
+  std::unique_ptr<value_parser> child_{};
+  std::size_t depth_{0};
+
+public:
+  explicit array_body_parser(std::size_t depth) : depth_(depth) {}
+
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < -1) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          if (len == -1) {
+            return message(null{});
+          }
+          expected_ = len;
+          elements_.clear();
+          elements_.reserve(static_cast<std::size_t>(expected_));
+          stage_ = stage::read_elements;
+          if (expected_ == 0) {
+            return message(array{std::move(elements_)});
+          }
+          continue;
+        }
+        case stage::read_elements: {
+          while (elements_.size() < static_cast<std::size_t>(expected_)) {
+            if (!child_) {
+              child_ = make_message_parser(depth_ + 1);
+              if (!child_) {
+                return protocol_error<message>(error::nesting_too_deep);
+              }
+            }
+            auto r = child_->parse(buf);
+            if (!r) {
+              return rediscoro::unexpected(r.error());
+            }
+            elements_.push_back(std::move(*r));
+            child_.reset();
+          }
+          return message(array{std::move(elements_)});
+        }
+      }
+    }
+  }
+};
+
+class set_body_parser final : public value_parser {
+  enum class stage { read_len, read_elements };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+  std::vector<message> elements_{};
+  std::unique_ptr<value_parser> child_{};
+  std::size_t depth_{0};
+
+public:
+  explicit set_body_parser(std::size_t depth) : depth_(depth) {}
+
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < -1) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          if (len == -1) {
+            return message(null{});
+          }
+          expected_ = len;
+          elements_.clear();
+          elements_.reserve(static_cast<std::size_t>(expected_));
+          stage_ = stage::read_elements;
+          if (expected_ == 0) {
+            return message(set{std::move(elements_)});
+          }
+          continue;
+        }
+        case stage::read_elements: {
+          while (elements_.size() < static_cast<std::size_t>(expected_)) {
+            if (!child_) {
+              child_ = make_message_parser(depth_ + 1);
+              if (!child_) {
+                return protocol_error<message>(error::nesting_too_deep);
+              }
+            }
+            auto r = child_->parse(buf);
+            if (!r) {
+              return rediscoro::unexpected(r.error());
+            }
+            elements_.push_back(std::move(*r));
+            child_.reset();
+          }
+          return message(set{std::move(elements_)});
+        }
+      }
+    }
+  }
+};
+
+class push_body_parser final : public value_parser {
+  enum class stage { read_len, read_elements };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+  std::vector<message> elements_{};
+  std::unique_ptr<value_parser> child_{};
+  std::size_t depth_{0};
+
+public:
+  explicit push_body_parser(std::size_t depth) : depth_(depth) {}
+
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < -1) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          if (len == -1) {
+            return message(null{});
+          }
+          expected_ = len;
+          elements_.clear();
+          elements_.reserve(static_cast<std::size_t>(expected_));
+          stage_ = stage::read_elements;
+          if (expected_ == 0) {
+            return message(push{std::move(elements_)});
+          }
+          continue;
+        }
+        case stage::read_elements: {
+          while (elements_.size() < static_cast<std::size_t>(expected_)) {
+            if (!child_) {
+              child_ = make_message_parser(depth_ + 1);
+              if (!child_) {
+                return protocol_error<message>(error::nesting_too_deep);
+              }
+            }
+            auto r = child_->parse(buf);
+            if (!r) {
+              return rediscoro::unexpected(r.error());
+            }
+            elements_.push_back(std::move(*r));
+            child_.reset();
+          }
+          return message(push{std::move(elements_)});
+        }
+      }
+    }
+  }
+};
+
+class map_body_parser final : public value_parser {
+  enum class stage { read_len, read_key, read_value };
+  stage stage_{stage::read_len};
+  std::int64_t expected_{0};
+  std::vector<std::pair<message, message>> entries_{};
+  std::unique_ptr<value_parser> child_{};
+  std::optional<message> current_key_{};
+  std::size_t depth_{0};
+
+public:
+  explicit map_body_parser(std::size_t depth) : depth_(depth) {}
+
+  auto parse(buffer& buf) -> parse_expected override {
+    while (true) {
+      switch (stage_) {
+        case stage::read_len: {
+          auto data = buf.data();
+          auto pos = find_crlf(data);
+          if (pos == std::string_view::npos) {
+            return need_more<message>();
+          }
+          std::int64_t len{};
+          if (!parse_i64(data.substr(0, pos), len)) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          if (len < -1) {
+            return protocol_error<message>(error::invalid_length);
+          }
+          buf.consume(pos + 2);
+          if (len == -1) {
+            return message(null{});
+          }
+          expected_ = len;
+          entries_.clear();
+          entries_.reserve(static_cast<std::size_t>(expected_));
+          current_key_.reset();
+          stage_ = stage::read_key;
+          if (expected_ == 0) {
+            return message(map{std::move(entries_)});
+          }
+          continue;
+        }
+        case stage::read_key: {
+          if (entries_.size() >= static_cast<std::size_t>(expected_)) {
+            return message(map{std::move(entries_)});
+          }
+          if (!child_) {
+            child_ = make_message_parser(depth_ + 1);
+            if (!child_) {
+              return protocol_error<message>(error::nesting_too_deep);
+            }
+          }
+          auto r = child_->parse(buf);
+          if (!r) {
+            return rediscoro::unexpected(r.error());
+          }
+          current_key_ = std::move(*r);
+          child_.reset();
+          stage_ = stage::read_value;
+          continue;
+        }
+        case stage::read_value: {
+          if (!current_key_.has_value()) {
+            return protocol_error<message>(error::invalid_format);
+          }
+          if (!child_) {
+            child_ = make_message_parser(depth_ + 1);
+            if (!child_) {
+              return protocol_error<message>(error::nesting_too_deep);
+            }
+          }
+          auto r = child_->parse(buf);
+          if (!r) {
+            return rediscoro::unexpected(r.error());
+          }
+          entries_.push_back({std::move(*current_key_), std::move(*r)});
+          current_key_.reset();
+          child_.reset();
+          stage_ = stage::read_key;
+          continue;
+        }
+      }
+    }
+  }
+};
+
+auto message_parser::parse(buffer& buf) -> parse_expected {
+  while (true) {
+    switch (stage_) {
+      case stage::read_attrs: {
+        auto data = buf.data();
+        if (data.empty()) {
+          return need_more<message>();
+        }
+        if (data[0] != type_to_code(type::attribute)) {
+          stage_ = stage::read_type;
+          continue;
+        }
+        // consume '|' before parsing attribute body
+        buf.consume(1);
+        if (!attr_child_) {
+          attr_child_ = std::make_unique<attribute_value_parser>(depth_);
+        }
+        auto r = attr_child_->parse(buf);
+        if (!r) {
+          return rediscoro::unexpected(r.error());
+        }
+        if (!attrs_.has_value()) {
+          attrs_ = attribute{};
+        }
+        auto& dst = attrs_->entries;
+        auto& src = r->entries;
+        dst.insert(dst.end(),
+                   std::make_move_iterator(src.begin()),
+                   std::make_move_iterator(src.end()));
+        attr_child_.reset();
+        continue;
+      }
+      case stage::read_type: {
+        auto data = buf.data();
+        if (data.empty()) {
+          return need_more<message>();
+        }
+        auto b = data[0];
+        if (b == type_to_code(type::attribute)) {
+          stage_ = stage::read_attrs;
+          continue;
+        }
+        buf.consume(1);
+        auto maybe_t = code_to_type(b);
+        if (!maybe_t.has_value()) {
+          return protocol_error<message>(error::invalid_type_byte);
+        }
+        if (depth_ + 1 > max_nesting_depth) {
+          return protocol_error<message>(error::nesting_too_deep);
+        }
+        child_ = make_value_body_parser(*maybe_t, depth_ + 1);
+        if (!child_) {
+          return protocol_error<message>(error::invalid_format);
+        }
+        stage_ = stage::read_value;
+        continue;
+      }
+      case stage::read_value: {
+        if (!child_) {
+          return protocol_error<message>(error::invalid_format);
+        }
+        auto r = child_->parse(buf);
+        if (!r) {
+          return rediscoro::unexpected(r.error());
+        }
+        auto msg = std::move(*r);
+        if (attrs_.has_value()) {
+          msg.attrs = std::move(attrs_);
+        }
+        return msg;
+      }
+    }
+  }
+}
 
 [[nodiscard]] auto make_message_parser(std::size_t depth) -> std::unique_ptr<value_parser> {
   if (depth > max_nesting_depth) {
@@ -628,384 +802,30 @@ public:
   return std::make_unique<message_parser>(depth);
 }
 
-auto array_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
-  while (true) {
-    if (stage_ == stage::read_len) {
-      auto data = buf.data();
-      auto pos = find_crlf(data);
-      if (pos == std::string_view::npos) {
-        return false;
-      }
-      if (data.empty() || data[0] != type_to_code(type::array)) {
-        err = error::invalid_format;
-        return true;
-      }
-      std::int64_t len{};
-      if (!parse_len(data.substr(1, pos - 1), len)) {
-        err = error::invalid_length;
-        return true;
-      }
-      if (len < -1) {
-        err = error::invalid_length;
-        return true;
-      }
-      buf.consume(pos + 2);
-      if (len == -1) {
-        out = message(null{});
-        return true;
-      }
-      expected_ = len;
-      elements_.clear();
-      elements_.reserve(static_cast<std::size_t>(expected_));
-      stage_ = stage::read_elements;
-      if (expected_ == 0) {
-        out = message(array{std::move(elements_)});
-        return true;
-      }
-    }
-
-    if (stage_ == stage::read_elements) {
-      while (elements_.size() < static_cast<std::size_t>(expected_)) {
-        if (!child_) {
-          child_ = make_message_parser(depth_ + 1);
-          if (!child_) {
-            err = error::nesting_too_deep;
-            return true;
-          }
-        }
-        message elem{};
-        std::optional<error> inner_err{};
-        auto done = child_->parse(buf, elem, inner_err);
-        if (!done) {
-          return false;
-        }
-        if (inner_err.has_value()) {
-          err = *inner_err;
-          return true;
-        }
-        elements_.push_back(std::move(elem));
-        child_.reset();
-      }
-      out = message(array{std::move(elements_)});
-      return true;
-    }
+[[nodiscard]] auto make_value_body_parser(type t, std::size_t depth) -> std::unique_ptr<value_parser> {
+  if (depth > max_nesting_depth) {
+    return nullptr;
   }
-}
-
-auto set_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
-  while (true) {
-    if (stage_ == stage::read_len) {
-      auto data = buf.data();
-      auto pos = find_crlf(data);
-      if (pos == std::string_view::npos) {
-        return false;
-      }
-      if (data.empty() || data[0] != type_to_code(type::set)) {
-        err = error::invalid_format;
-        return true;
-      }
-      std::int64_t len{};
-      if (!parse_len(data.substr(1, pos - 1), len)) {
-        err = error::invalid_length;
-        return true;
-      }
-      if (len < -1) {
-        err = error::invalid_length;
-        return true;
-      }
-      buf.consume(pos + 2);
-      if (len == -1) {
-        out = message(null{});
-        return true;
-      }
-      expected_ = len;
-      elements_.clear();
-      elements_.reserve(static_cast<std::size_t>(expected_));
-      stage_ = stage::read_elements;
-      if (expected_ == 0) {
-        out = message(set{std::move(elements_)});
-        return true;
-      }
-    }
-
-    if (stage_ == stage::read_elements) {
-      while (elements_.size() < static_cast<std::size_t>(expected_)) {
-        if (!child_) {
-          child_ = make_message_parser(depth_ + 1);
-          if (!child_) {
-            err = error::nesting_too_deep;
-            return true;
-          }
-        }
-        message elem{};
-        std::optional<error> inner_err{};
-        auto done = child_->parse(buf, elem, inner_err);
-        if (!done) {
-          return false;
-        }
-        if (inner_err.has_value()) {
-          err = *inner_err;
-          return true;
-        }
-        elements_.push_back(std::move(elem));
-        child_.reset();
-      }
-      out = message(set{std::move(elements_)});
-      return true;
-    }
+  switch (t) {
+    case type::simple_string:   return std::make_unique<simple_string_body_parser>();
+    case type::simple_error:    return std::make_unique<simple_error_body_parser>();
+    case type::integer:         return std::make_unique<integer_body_parser>();
+    case type::double_type:     return std::make_unique<double_body_parser>();
+    case type::boolean:         return std::make_unique<boolean_body_parser>();
+    case type::big_number:      return std::make_unique<big_number_body_parser>();
+    case type::null:            return std::make_unique<null_body_parser>();
+    case type::bulk_string:     return std::make_unique<bulk_string_body_parser>();
+    case type::bulk_error:      return std::make_unique<bulk_error_body_parser>();
+    case type::verbatim_string: return std::make_unique<verbatim_string_body_parser>();
+    case type::array:           return std::make_unique<array_body_parser>(depth);
+    case type::map:             return std::make_unique<map_body_parser>(depth);
+    case type::set:             return std::make_unique<set_body_parser>(depth);
+    case type::push:            return std::make_unique<push_body_parser>(depth);
+    case type::attribute:
+      // Attribute is a prefix handled by message_parser.
+      return nullptr;
   }
-}
-
-auto push_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
-  while (true) {
-    if (stage_ == stage::read_len) {
-      auto data = buf.data();
-      auto pos = find_crlf(data);
-      if (pos == std::string_view::npos) {
-        return false;
-      }
-      if (data.empty() || data[0] != type_to_code(type::push)) {
-        err = error::invalid_format;
-        return true;
-      }
-      std::int64_t len{};
-      if (!parse_len(data.substr(1, pos - 1), len)) {
-        err = error::invalid_length;
-        return true;
-      }
-      if (len < -1) {
-        err = error::invalid_length;
-        return true;
-      }
-      buf.consume(pos + 2);
-      if (len == -1) {
-        out = message(null{});
-        return true;
-      }
-      expected_ = len;
-      elements_.clear();
-      elements_.reserve(static_cast<std::size_t>(expected_));
-      stage_ = stage::read_elements;
-      if (expected_ == 0) {
-        out = message(push{std::move(elements_)});
-        return true;
-      }
-    }
-
-    if (stage_ == stage::read_elements) {
-      while (elements_.size() < static_cast<std::size_t>(expected_)) {
-        if (!child_) {
-          child_ = make_message_parser(depth_ + 1);
-          if (!child_) {
-            err = error::nesting_too_deep;
-            return true;
-          }
-        }
-        message elem{};
-        std::optional<error> inner_err{};
-        auto done = child_->parse(buf, elem, inner_err);
-        if (!done) {
-          return false;
-        }
-        if (inner_err.has_value()) {
-          err = *inner_err;
-          return true;
-        }
-        elements_.push_back(std::move(elem));
-        child_.reset();
-      }
-      out = message(push{std::move(elements_)});
-      return true;
-    }
-  }
-}
-
-auto map_parser::parse(buffer& buf, message& out, std::optional<error>& err) -> bool {
-  while (true) {
-    if (stage_ == stage::read_len) {
-      auto data = buf.data();
-      auto pos = find_crlf(data);
-      if (pos == std::string_view::npos) {
-        return false;
-      }
-      if (data.empty() || data[0] != type_to_code(type::map)) {
-        err = error::invalid_format;
-        return true;
-      }
-      std::int64_t len{};
-      if (!parse_len(data.substr(1, pos - 1), len)) {
-        err = error::invalid_length;
-        return true;
-      }
-      if (len < -1) {
-        err = error::invalid_length;
-        return true;
-      }
-      buf.consume(pos + 2);
-      if (len == -1) {
-        out = message(null{});
-        return true;
-      }
-      expected_ = len;
-      entries_.clear();
-      entries_.reserve(static_cast<std::size_t>(expected_));
-      current_key_.reset();
-      stage_ = stage::read_key;
-      if (expected_ == 0) {
-        out = message(map{std::move(entries_)});
-        return true;
-      }
-    }
-
-    if (stage_ == stage::read_key) {
-      if (entries_.size() >= static_cast<std::size_t>(expected_)) {
-        out = message(map{std::move(entries_)});
-        return true;
-      }
-      if (!child_) {
-        child_ = make_message_parser(depth_ + 1);
-        if (!child_) {
-          err = error::nesting_too_deep;
-          return true;
-        }
-      }
-      message key{};
-      std::optional<error> inner_err{};
-      auto done = child_->parse(buf, key, inner_err);
-      if (!done) {
-        return false;
-      }
-      if (inner_err.has_value()) {
-        err = *inner_err;
-        return true;
-      }
-      current_key_ = std::move(key);
-      child_.reset();
-      stage_ = stage::read_value;
-      continue;
-    }
-
-    if (stage_ == stage::read_value) {
-      if (!current_key_.has_value()) {
-        err = error::invalid_format;
-        return true;
-      }
-      if (!child_) {
-        child_ = make_message_parser(depth_ + 1);
-        if (!child_) {
-          err = error::nesting_too_deep;
-          return true;
-        }
-      }
-      message value{};
-      std::optional<error> inner_err{};
-      auto done = child_->parse(buf, value, inner_err);
-      if (!done) {
-        return false;
-      }
-      if (inner_err.has_value()) {
-        err = *inner_err;
-        return true;
-      }
-      entries_.push_back({std::move(*current_key_), std::move(value)});
-      current_key_.reset();
-      child_.reset();
-      stage_ = stage::read_key;
-      continue;
-    }
-  }
-}
-
-auto attribute_value_parser::parse(buffer& buf, attribute& out, std::optional<error>& err) -> bool {
-  while (true) {
-    if (stage_ == stage::read_len) {
-      auto data = buf.data();
-      auto pos = find_crlf(data);
-      if (pos == std::string_view::npos) {
-        return false;
-      }
-      if (data.empty() || data[0] != type_to_code(type::attribute)) {
-        err = error::invalid_format;
-        return true;
-      }
-      std::int64_t len{};
-      if (!parse_len(data.substr(1, pos - 1), len)) {
-        err = error::invalid_length;
-        return true;
-      }
-      if (len < 0) {
-        err = error::invalid_length;
-        return true;
-      }
-      buf.consume(pos + 2);
-      expected_ = len;
-      entries_.clear();
-      entries_.reserve(static_cast<std::size_t>(expected_));
-      current_key_.reset();
-      stage_ = stage::read_key;
-      if (expected_ == 0) {
-        out = attribute{std::move(entries_)};
-        return true;
-      }
-    }
-
-    if (stage_ == stage::read_key) {
-      if (entries_.size() >= static_cast<std::size_t>(expected_)) {
-        out = attribute{std::move(entries_)};
-        return true;
-      }
-      if (!child_) {
-        child_ = make_message_parser(depth_ + 1);
-        if (!child_) {
-          err = error::nesting_too_deep;
-          return true;
-        }
-      }
-      message key{};
-      std::optional<error> inner_err{};
-      auto done = child_->parse(buf, key, inner_err);
-      if (!done) {
-        return false;
-      }
-      if (inner_err.has_value()) {
-        err = *inner_err;
-        return true;
-      }
-      current_key_ = std::move(key);
-      child_.reset();
-      stage_ = stage::read_value;
-      continue;
-    }
-
-    if (stage_ == stage::read_value) {
-      if (!current_key_.has_value()) {
-        err = error::invalid_format;
-        return true;
-      }
-      if (!child_) {
-        child_ = make_message_parser(depth_ + 1);
-        if (!child_) {
-          err = error::nesting_too_deep;
-          return true;
-        }
-      }
-      message value{};
-      std::optional<error> inner_err{};
-      auto done = child_->parse(buf, value, inner_err);
-      if (!done) {
-        return false;
-      }
-      if (inner_err.has_value()) {
-        err = *inner_err;
-        return true;
-      }
-      entries_.push_back({std::move(*current_key_), std::move(value)});
-      current_key_.reset();
-      child_.reset();
-      stage_ = stage::read_key;
-      continue;
-    }
-  }
+  return nullptr;
 }
 
 }  // namespace rediscoro::resp3::detail
@@ -1022,7 +842,7 @@ inline auto parser::commit(std::size_t n) -> void {
   buffer_.commit(n);
 }
 
-inline auto parser::parse_one() -> rediscoro::expected<message, error> {
+inline auto parser::parse_one() -> rediscoro::expected<message, std::error_code> {
   if (failed_) {
     return rediscoro::unexpected(failed_error_);
   }
@@ -1036,22 +856,20 @@ inline auto parser::parse_one() -> rediscoro::expected<message, error> {
     }
   }
 
-  message tmp{};
-  std::optional<error> err{};
-  auto done = current_->parse(buffer_, tmp, err);
-  if (!done) {
-    return rediscoro::unexpected(error::needs_more);
+  auto r = current_->parse(buffer_);
+  if (r) {
+    current_.reset();
+    return r;
   }
 
+  if (r.error() == error::needs_more) {
+    return r;
+  }
+
+  failed_ = true;
+  failed_error_ = r.error();
   current_.reset();
-
-  if (err.has_value()) {
-    failed_ = true;
-    failed_error_ = *err;
-    return rediscoro::unexpected(failed_error_);
-  }
-
-  return tmp;
+  return r;
 }
 
 inline auto parser::failed() const noexcept -> bool {
@@ -1062,7 +880,7 @@ inline auto parser::reset() -> void {
   buffer_.reset();
   current_.reset();
   failed_ = false;
-  failed_error_ = error::invalid_format;
+  failed_error_.clear();
 }
 
 }  // namespace rediscoro::resp3

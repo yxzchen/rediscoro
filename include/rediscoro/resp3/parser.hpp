@@ -9,7 +9,6 @@
 #include <memory>
 #include <span>
 #include <cstddef>
-#include <optional>
 
 namespace rediscoro::resp3 {
 
@@ -18,10 +17,7 @@ namespace detail {
 struct value_parser {
   virtual ~value_parser() = default;
 
-  // Return:
-  // - true  : parsing finished (either success, or err is set to protocol error)
-  // - false : need more data, out must not be modified by caller
-  virtual auto parse(buffer& buf, message& out, std::optional<error>& err) -> bool = 0;
+  virtual auto parse(buffer& buf) -> rediscoro::expected<message, std::error_code> = 0;
 };
 
 }  // namespace detail
@@ -43,7 +39,7 @@ public:
   /// - success: returns message
   /// - error::needs_more: need more data (parser remains usable)
   /// - other errors: protocol error, parser enters failed() state
-  auto parse_one() -> rediscoro::expected<message, error>;
+  auto parse_one() -> rediscoro::expected<message, std::error_code>;
 
   [[nodiscard]] auto failed() const noexcept -> bool;
 
@@ -54,7 +50,7 @@ public:
 private:
   buffer buffer_;
   bool failed_{false};
-  error failed_error_{error::invalid_format};
+  std::error_code failed_error_{};
 
   std::unique_ptr<detail::value_parser> current_{};
 };
