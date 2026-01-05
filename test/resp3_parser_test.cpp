@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <rediscoro/resp3/encoder.hpp>
+#include <rediscoro/resp3/builder.hpp>
 #include <rediscoro/resp3/parser.hpp>
+#include <rediscoro/resp3/buffer.hpp>
 
 #include <cstring>
 #include <string_view>
@@ -10,72 +12,91 @@ using namespace rediscoro::resp3;
 
 namespace {
 
-auto append(parser& p, std::string_view data) -> void {
+auto append(buffer& b, std::string_view data) -> void {
   if (data.empty()) {
     return;
   }
-  auto w = p.prepare(data.size());
+  auto w = b.prepare(data.size());
   std::memcpy(w.data(), data.data(), data.size());
-  p.commit(data.size());
+  b.commit(data.size());
 }
 
 TEST(resp3_parser_test, parse_simple_string_ok) {
+  buffer b;
   parser p;
-  append(p, "+OK\r\n");
+  append(b, "+OK\r\n");
 
-  auto r = p.parse_one();
-  ASSERT_TRUE(r);
-  ASSERT_TRUE(r->is<simple_string>());
-  EXPECT_EQ(r->as<simple_string>().data, "OK");
+  auto root = p.parse_one(b);
+  ASSERT_TRUE(root);
+
+  const auto& n = p.tree().nodes.at(*root);
+  EXPECT_EQ(n.type, raw_type::simple_string);
+  EXPECT_EQ(n.text, "OK");
+
+  auto msg = build_message(p.tree(), *root);
+  ASSERT_TRUE(msg.is<simple_string>());
+  EXPECT_EQ(msg.as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, need_more_data_does_not_modify_out) {
+  buffer b;
   parser p;
-  append(p, "+OK\r");
+  append(b, "+OK\r");
 
-  auto r = p.parse_one();
-  ASSERT_FALSE(r);
-  EXPECT_EQ(r.error(), error::needs_more);
+  auto root = p.parse_one(b);
+  ASSERT_FALSE(root);
+  EXPECT_EQ(root.error(), error::needs_more);
 }
 
 TEST(resp3_parser_test, incremental_feed_completes_message) {
+  buffer b;
   parser p;
-  append(p, "+O");
+  append(b, "+O");
 
-  auto r1 = p.parse_one();
+  auto r1 = p.parse_one(b);
   ASSERT_FALSE(r1);
   EXPECT_EQ(r1.error(), error::needs_more);
 
-  append(p, "K\r\n");
-  auto r2 = p.parse_one();
+  append(b, "K\r\n");
+  auto r2 = p.parse_one(b);
   ASSERT_TRUE(r2);
-  ASSERT_TRUE(r2->is<simple_string>());
-  EXPECT_EQ(r2->as<simple_string>().data, "OK");
+  auto msg = build_message(p.tree(), *r2);
+  ASSERT_TRUE(msg.is<simple_string>());
+  EXPECT_EQ(msg.as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, parse_bulk_string_ok_and_split_payload) {
+  buffer b;
   parser p;
-  append(p, "$5\r\nhe");
+  append(b, "$5\r\nhe");
 
-  auto r1 = p.parse_one();
+  auto r1 = p.parse_one(b);
   ASSERT_FALSE(r1);
   EXPECT_EQ(r1.error(), error::needs_more);
 
-  append(p, "llo\r\n");
-  auto r2 = p.parse_one();
+  append(b, "llo\r\n");
+  auto r2 = p.parse_one(b);
   ASSERT_TRUE(r2);
-  ASSERT_TRUE(r2->is<bulk_string>());
-  EXPECT_EQ(r2->as<bulk_string>().data, "hello");
+  const auto& n = p.tree().nodes.at(*r2);
+  EXPECT_EQ(n.type, raw_type::bulk_string);
+  EXPECT_EQ(n.text, "hello");
+
+  auto msg = build_message(p.tree(), *r2);
+  ASSERT_TRUE(msg.is<bulk_string>());
+  EXPECT_EQ(msg.as<bulk_string>().data, "hello");
 }
 
 TEST(resp3_parser_test, parse_array_nested) {
+  buffer b;
   parser p;
-  append(p, "*2\r\n+OK\r\n:1\r\n");
+  append(b, "*2\r\n+OK\r\n:1\r\n");
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_TRUE(r);
-  ASSERT_TRUE(r->is<array>());
-  const auto& elems = r->as<array>().elements;
+
+  auto msg = build_message(p.tree(), *r);
+  ASSERT_TRUE(msg.is<array>());
+  const auto& elems = msg.as<array>().elements;
   ASSERT_EQ(elems.size(), 2u);
   ASSERT_TRUE(elems[0].is<simple_string>());
   EXPECT_EQ(elems[0].as<simple_string>().data, "OK");
@@ -84,16 +105,19 @@ TEST(resp3_parser_test, parse_array_nested) {
 }
 
 TEST(resp3_parser_test, parse_message_with_attributes) {
+  buffer b;
   parser p;
-  append(p, "|1\r\n+key\r\n+val\r\n+OK\r\n");
+  append(b, "|1\r\n+key\r\n+val\r\n+OK\r\n");
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_TRUE(r);
-  EXPECT_TRUE(r->has_attributes());
-  ASSERT_TRUE(r->is<simple_string>());
-  EXPECT_EQ(r->as<simple_string>().data, "OK");
 
-  const auto& attrs = r->get_attributes();
+  auto msg = build_message(p.tree(), *r);
+  EXPECT_TRUE(msg.has_attributes());
+  ASSERT_TRUE(msg.is<simple_string>());
+  EXPECT_EQ(msg.as<simple_string>().data, "OK");
+
+  const auto& attrs = msg.get_attributes();
   ASSERT_EQ(attrs.entries.size(), 1u);
   ASSERT_TRUE(attrs.entries[0].first.is<simple_string>());
   ASSERT_TRUE(attrs.entries[0].second.is<simple_string>());
@@ -102,77 +126,87 @@ TEST(resp3_parser_test, parse_message_with_attributes) {
 }
 
 TEST(resp3_parser_test, attributes_inside_aggregate_element) {
+  buffer b;
   parser p;
-  append(p, "*1\r\n|1\r\n+meta\r\n+1\r\n+OK\r\n");
+  append(b, "*1\r\n|1\r\n+meta\r\n+1\r\n+OK\r\n");
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_TRUE(r);
-  ASSERT_TRUE(r->is<array>());
-  const auto& elems = r->as<array>().elements;
-  ASSERT_EQ(elems.size(), 1u);
 
+  auto msg = build_message(p.tree(), *r);
+  ASSERT_TRUE(msg.is<array>());
+  const auto& elems = msg.as<array>().elements;
+  ASSERT_EQ(elems.size(), 1u);
   EXPECT_TRUE(elems[0].has_attributes());
   ASSERT_TRUE(elems[0].is<simple_string>());
   EXPECT_EQ(elems[0].as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, parse_multiple_messages_from_one_feed) {
+  buffer b;
   parser p;
-  append(p, "+OK\r\n:1\r\n");
+  append(b, "+OK\r\n:1\r\n");
 
-  auto r1 = p.parse_one();
+  auto r1 = p.parse_one(b);
   ASSERT_TRUE(r1);
-  ASSERT_TRUE(r1->is<simple_string>());
-  EXPECT_EQ(r1->as<simple_string>().data, "OK");
+  auto m1 = build_message(p.tree(), *r1);
+  ASSERT_TRUE(m1.is<simple_string>());
+  EXPECT_EQ(m1.as<simple_string>().data, "OK");
 
-  auto r2 = p.parse_one();
+  auto r2 = p.parse_one(b);
   ASSERT_TRUE(r2);
-  ASSERT_TRUE(r2->is<integer>());
-  EXPECT_EQ(r2->as<integer>().value, 1);
+  auto m2 = build_message(p.tree(), *r2);
+  ASSERT_TRUE(m2.is<integer>());
+  EXPECT_EQ(m2.as<integer>().value, 1);
 
-  auto r3 = p.parse_one();
+  auto r3 = p.parse_one(b);
   ASSERT_FALSE(r3);
   EXPECT_EQ(r3.error(), error::needs_more);
 }
 
 TEST(resp3_parser_test, protocol_error_marks_failed) {
+  buffer b;
   parser p;
-  append(p, "?oops\r\n");
+  append(b, "?oops\r\n");
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_FALSE(r);
   EXPECT_NE(r.error(), error::needs_more);
   EXPECT_TRUE(p.failed());
 
-  append(p, "+OK\r\n");
-  auto r2 = p.parse_one();
+  append(b, "+OK\r\n");
+  auto r2 = p.parse_one(b);
   ASSERT_FALSE(r2);
   EXPECT_TRUE(p.failed());
 }
 
 TEST(resp3_parser_test, reset_clears_failed_state) {
+  buffer b;
   parser p;
-  append(p, "?oops\r\n");
+  append(b, "?oops\r\n");
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_FALSE(r);
   EXPECT_TRUE(p.failed());
 
   p.reset();
   EXPECT_FALSE(p.failed());
+  b.reset();
 
-  append(p, "+OK\r\n");
-  auto r2 = p.parse_one();
+  append(b, "+OK\r\n");
+  auto r2 = p.parse_one(b);
   ASSERT_TRUE(r2);
-  ASSERT_TRUE(r2->is<simple_string>());
-  EXPECT_EQ(r2->as<simple_string>().data, "OK");
+  auto msg = build_message(p.tree(), *r2);
+  ASSERT_TRUE(msg.is<simple_string>());
+  EXPECT_EQ(msg.as<simple_string>().data, "OK");
 }
 
 TEST(resp3_parser_test, protocol_error_on_bulk_string_bad_trailer) {
+  buffer b;
   parser p;
-  append(p, "$5\r\nhelloX\r\n");
+  append(b, "$5\r\nhelloX\r\n");
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_FALSE(r);
   EXPECT_TRUE(p.failed());
 }
@@ -189,12 +223,14 @@ TEST(resp3_parser_test, roundtrip_encoder_parser_for_complex_message) {
 
   auto wire = encode(original);
 
+  buffer b;
   parser p;
-  append(p, wire);
+  append(b, wire);
 
-  auto r = p.parse_one();
+  auto r = p.parse_one(b);
   ASSERT_TRUE(r);
-  EXPECT_EQ(encode(*r), wire);
+  auto decoded = build_message(p.tree(), *r);
+  EXPECT_EQ(encode(decoded), wire);
 }
 
 }  // namespace
