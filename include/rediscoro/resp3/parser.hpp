@@ -26,7 +26,6 @@ struct frame {
   std::int64_t expected = 0;          // container len (pairs for map/attr)
   std::uint32_t produced = 0;         // produced children (or pairs)
   std::uint32_t node_index = 0;       // container node (for array/map/set/push)
-  std::uint32_t first_link = 0;       // start offset in raw_tree::links
   std::uint32_t pending_key = 0;      // for map/attr
   bool has_pending_key = false;       // for map/attr
 };

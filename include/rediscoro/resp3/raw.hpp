@@ -30,6 +30,10 @@ struct raw_node {
 
   // Composite: children are stored as indices in raw_tree::links.
   std::uint32_t first_child = 0;
+  // Convention:
+  // - type3::{array,set,push}: child_count == element count
+  // - type3::map:             child_count == key/value node count (pairs * 2)
+  // - otherwise:              child_count is 0
   std::uint32_t child_count = 0;
 
   // Attributes: indices in raw_tree::links, stored as key/value alternating.

@@ -131,7 +131,6 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         .expected = len,  // pairs
         .produced = 0,    // pairs produced
         .node_index = idx,
-        .first_link = static_cast<std::uint32_t>(tree_.links.size()),
         .pending_key = 0,
         .has_pending_key = false,
       });
@@ -142,7 +141,6 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         .expected = len,       // elements
         .produced = 0,         // elements produced
         .node_index = idx,
-        .first_link = static_cast<std::uint32_t>(tree_.links.size()),
         .pending_key = 0,
         .has_pending_key = false,
       });
@@ -165,7 +163,6 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       .expected = len,  // pairs
       .produced = 0,    // pairs produced
       .node_index = 0,
-      .first_link = static_cast<std::uint32_t>(tree_.links.size()),
       .pending_key = 0,
       .has_pending_key = false,
     });
@@ -435,6 +432,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           }
 
           if (parent.kind == frame_kind::map_key) {
+            REDISCORO_ASSERT(parent.container_type == type3::map);
             parent.pending_key = child_idx;
             parent.has_pending_key = true;
             parent.kind = frame_kind::map_value;
@@ -443,6 +441,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           }
 
           if (parent.kind == frame_kind::map_value) {
+            REDISCORO_ASSERT(parent.container_type == type3::map);
             if (!parent.has_pending_key) {
               failed_ = true;
               return unexpected(error::invalid_format);
@@ -467,6 +466,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           }
 
           if (parent.kind == frame_kind::attribute) {
+            REDISCORO_ASSERT(parent.container_type == type3::attribute);
             if (!parent.has_pending_key) {
               parent.pending_key = child_idx;
               parent.has_pending_key = true;
