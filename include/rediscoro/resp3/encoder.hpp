@@ -18,27 +18,14 @@ public:
   /// Encode a message to RESP3 protocol format
   auto encode(const message& msg) -> std::string {
     buffer_.clear();
-
-    // Encode attributes first if present
-    if (msg.has_attributes()) {
-      encode_attribute(msg.get_attributes());
-    }
-
-    // Encode the value
-    visit(*this, msg);
-
+    encode_with_attrs(msg);
     return std::move(buffer_);
   }
 
   /// Encode to an existing string buffer
   auto encode_to(std::string& out, const message& msg) -> void {
     buffer_.clear();
-
-    if (msg.has_attributes()) {
-      encode_attribute(msg.get_attributes());
-    }
-
-    visit(*this, msg);
+    encode_with_attrs(msg);
     out.append(buffer_);
   }
 
@@ -186,12 +173,13 @@ private:
   }
 
   auto encode_message(const message& msg) -> void {
-    // Encode attributes first if present
+    encode_with_attrs(msg);
+  }
+
+  auto encode_with_attrs(const message& msg) -> void {
     if (msg.has_attributes()) {
       encode_attribute(msg.get_attributes());
     }
-
-    // Encode the value
     visit(*this, msg);
   }
 
