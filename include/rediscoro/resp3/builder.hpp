@@ -63,16 +63,31 @@ namespace rediscoro::resp3 {
       return m;
     }
     case type3::bulk_string: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       message m{bulk_string{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
     case type3::bulk_error: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       message m{bulk_error{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
     case type3::verbatim_string: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       verbatim_string v{};
       // Expect "xxx:<data>"
       if (n.text.size() >= 4 && n.text[3] == ':') {
@@ -87,6 +102,11 @@ namespace rediscoro::resp3 {
       return m;
     }
     case type3::array: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       array a{};
       a.elements.reserve(n.child_count);
       for (std::uint32_t i = 0; i < n.child_count; ++i) {
@@ -98,6 +118,11 @@ namespace rediscoro::resp3 {
       return m;
     }
     case type3::set: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       set s{};
       s.elements.reserve(n.child_count);
       for (std::uint32_t i = 0; i < n.child_count; ++i) {
@@ -109,6 +134,11 @@ namespace rediscoro::resp3 {
       return m;
     }
     case type3::push: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       push p{};
       p.elements.reserve(n.child_count);
       for (std::uint32_t i = 0; i < n.child_count; ++i) {
@@ -120,6 +150,11 @@ namespace rediscoro::resp3 {
       return m;
     }
     case type3::map: {
+      if (n.i64 == -1) {
+        message m{null{}};
+        build_attrs(m);
+        return m;
+      }
       map mapp{};
       mapp.entries.reserve(n.child_count / 2);
       for (std::uint32_t i = 0; i < n.child_count; i += 2) {

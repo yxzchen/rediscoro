@@ -59,12 +59,11 @@ namespace {
 
 enum class value_step : std::uint8_t {
   produced_node,   // node_index is valid
-  started_frame,   // started container/attribute, no node produced
-  retry_same_frame // consumed something (e.g. |0) and should retry parsing in same value frame
+  continue_parsing // started container/attribute OR consumed something and should keep parsing
 };
 
 struct value_result {
-  value_step step{value_step::started_frame};
+  value_step step{value_step::continue_parsing};
   std::uint32_t node_index{0};
 };
 
@@ -105,7 +104,8 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     }
     if (len == -1) {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-      tree_.nodes.push_back(raw_node{.type = type3::null});
+      // Preserve container type for null container (e.g. *-1, %-1)
+      tree_.nodes.push_back(raw_node{.type = t, .i64 = -1});
       attach_pending_attrs(idx);
       return std::optional<std::uint32_t>{idx};
     }
@@ -214,14 +214,14 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       buf.consume(header_bytes);
       if (len == 0) {
-        return value_result{.step = value_step::retry_same_frame};
+        return value_result{.step = value_step::continue_parsing};
       }
       // Attribute is a prefix modifier for the *next value* in the same value context.
       auto r = start_attribute(len);
       if (!r) {
         return unexpected(r.error());
       }
-      return value_result{.step = value_step::started_frame};
+      return value_result{.step = value_step::continue_parsing};
     }
 
     // Containers
@@ -237,12 +237,8 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(e);
       }
-      if (len > 0) {
-        if (stack_.empty() || stack_.back().kind != frame_kind::value) {
-          failed_ = true;
-          return unexpected(error::invalid_format);
-        }
-        // Replace current value frame with a container frame.
+      if (len > 0 && !stack_.empty() && stack_.back().kind == frame_kind::value) {
+        // Replace current value frame with a container frame (if present).
         stack_.pop_back();
       }
       buf.consume(header_bytes);
@@ -253,7 +249,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       if (started->has_value()) {
         return value_result{.step = value_step::produced_node, .node_index = **started};
       }
-      return value_result{.step = value_step::started_frame};
+      return value_result{.step = value_step::continue_parsing};
     }
 
     // Null: "_\r\n"
@@ -316,7 +312,8 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       if (len == -1) {
         buf.consume(header_bytes);
         auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-        tree_.nodes.push_back(raw_node{.type = type3::null});
+        // Preserve bulk type for null bulk (e.g. $-1, !-1, =-1)
+        tree_.nodes.push_back(raw_node{.type = *maybe_rt, .i64 = -1});
         attach_pending_attrs(idx);
         return value_result{.step = value_step::produced_node, .node_index = idx};
       }
@@ -398,12 +395,9 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           return unexpected(r.error());
         }
 
-        if (r->step == value_step::retry_same_frame) {
-          // e.g. |0 prefix: no frame, keep parsing in same value frame
-          break;
-        }
-        if (r->step == value_step::started_frame) {
-          // Do not push value here; let the outer loop decide based on the new top frame.
+        if (r->step == value_step::continue_parsing) {
+          // Do not push value here; let the outer loop decide based on the new top frame,
+          // or retry parsing within the same value frame (e.g. |0).
           break;
         }
 
