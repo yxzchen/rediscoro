@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rediscoro/assert.hpp>
 #include <rediscoro/resp3/type.hpp>
 
 #include <charconv>
@@ -45,13 +46,13 @@ public:
   /// The full RESP3 wire bytes for all queued commands (pipeline).
   [[nodiscard]] auto wire() const noexcept -> const std::string& { return wire_; }
 
-  auto clear() -> void {
+  void clear() {
     wire_.clear();
     command_count_ = 0;
   }
 
   /// Append one complete command (argv form).
-  auto push(std::initializer_list<std::string_view> argv) -> void {
+  void push(std::initializer_list<std::string_view> argv) {
     append_command_header(argv.size());
     for (auto sv : argv) {
       append_bulk_string(wire_, sv);
@@ -60,7 +61,7 @@ public:
   }
 
   /// Append one complete command (argv form).
-  auto push(std::span<const std::string_view> argv) -> void {
+  void push(std::span<const std::string_view> argv) {
     append_command_header(argv.size());
     for (auto sv : argv) {
       append_bulk_string(wire_, sv);
@@ -70,8 +71,7 @@ public:
 
   /// Append one complete command (command + variadic args).
   template <typename... Args>
-    requires (sizeof...(Args) >= 0)
-  auto push(std::string_view cmd, Args&&... args) -> void {
+  void push(std::string_view cmd, Args&&... args) {
     constexpr std::size_t n = 1 + sizeof...(Args);
     append_command_header(n);
     append_arg(wire_, cmd);
@@ -80,7 +80,7 @@ public:
   }
 
   /// Append one complete command (single-token).
-  auto push(std::string_view cmd) -> void {
+  void push(std::string_view cmd) {
     append_command_header(1);
     append_bulk_string(wire_, cmd);
     command_count_ += 1;
@@ -90,25 +90,22 @@ private:
   std::string wire_{};
   std::size_t command_count_{0};
 
-  static auto append_unsigned(std::string& out, std::size_t v) -> void {
+  static void append_unsigned(std::string& out, std::size_t v) {
     char buf[32]{};
     auto* first = buf;
     auto* last = buf + sizeof(buf);
     auto res = std::to_chars(first, last, v);
-    if (res.ec != std::errc{}) {
-      // Should never happen for size_t with enough buffer; keep behavior defined.
-      return;
-    }
+    REDISCORO_ASSERT(res.ec == std::errc{});
     out.append(first, res.ptr);
   }
 
-  auto append_command_header(std::size_t argc) -> void {
+  void append_command_header(std::size_t argc) {
     wire_.push_back(rediscoro::resp3::type_to_code(rediscoro::resp3::type3::array));
     append_unsigned(wire_, argc);
     wire_.append("\r\n");
   }
 
-  static auto append_bulk_string(std::string& out, std::string_view sv) -> void {
+  static void append_bulk_string(std::string& out, std::string_view sv) {
     out.push_back(rediscoro::resp3::type_to_code(rediscoro::resp3::type3::bulk_string));
     append_unsigned(out, sv.size());
     out.append("\r\n");
@@ -116,11 +113,11 @@ private:
     out.append("\r\n");
   }
 
-  static auto append_arg(std::string& out, std::string_view sv) -> void {
+  static void append_arg(std::string& out, std::string_view sv) {
     append_bulk_string(out, sv);
   }
 
-  static auto append_arg(std::string& out, const char* s) -> void {
+  static void append_arg(std::string& out, const char* s) {
     if (s == nullptr) {
       append_bulk_string(out, std::string_view{});
     } else {
@@ -128,17 +125,13 @@ private:
     }
   }
 
-  static auto append_arg(std::string& out, const std::string& s) -> void {
-    append_bulk_string(out, std::string_view{s});
-  }
-
-  static auto append_arg(std::string& out, std::string&& s) -> void {
+  static void append_arg(std::string& out, const std::string& s) {
     append_bulk_string(out, std::string_view{s});
   }
 
   template <typename T>
     requires (std::is_integral_v<std::remove_cvref_t<T>> && !std::is_same_v<std::remove_cvref_t<T>, bool>)
-  static auto append_arg(std::string& out, T v) -> void {
+  static void append_arg(std::string& out, T v) {
     const auto tmp = std::to_string(v);
     append_bulk_string(out, std::string_view{tmp});
   }
