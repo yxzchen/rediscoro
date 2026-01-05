@@ -1,8 +1,7 @@
 #pragma once
 
 #include <rediscoro/adapter/adapter_error.hpp>
-#include <rediscoro/adapter/ignore.hpp>
-#include <rediscoro/adapter/traits.hpp>
+#include <rediscoro/ignore.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/resp3/message.hpp>
 

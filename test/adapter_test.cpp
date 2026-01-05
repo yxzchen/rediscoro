@@ -45,7 +45,7 @@ TEST(resp3_adapter, map_string_to_int) {
 
 TEST(resp3_adapter, ignore_always_ok) {
   message m{simple_error{"ERR"}};
-  auto r = rediscoro::adapter::adapt<rediscoro::adapter::ignore_t>(m);
+  auto r = rediscoro::adapter::adapt<rediscoro::ignore_t>(m);
   EXPECT_TRUE(r.has_value());
 }
 
