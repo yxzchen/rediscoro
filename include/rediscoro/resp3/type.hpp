@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <string_view>
 
 namespace rediscoro::resp3 {
 
@@ -74,6 +75,28 @@ enum class type3 {
     case '>': return type3::push;
     default:  return std::nullopt;
   }
+}
+
+/// User-readable type name (for diagnostics/logging).
+[[nodiscard]] constexpr auto type_name(type3 t) noexcept -> std::string_view {
+  switch (t) {
+    case type3::simple_string:   return "simple_string";
+    case type3::simple_error:    return "simple_error";
+    case type3::integer:         return "integer";
+    case type3::double_type:     return "double";
+    case type3::boolean:         return "boolean";
+    case type3::big_number:      return "big_number";
+    case type3::null:            return "null";
+    case type3::bulk_string:     return "bulk_string";
+    case type3::bulk_error:      return "bulk_error";
+    case type3::verbatim_string: return "verbatim_string";
+    case type3::array:           return "array";
+    case type3::map:             return "map";
+    case type3::set:             return "set";
+    case type3::attribute:       return "attribute";
+    case type3::push:            return "push";
+  }
+  return "<unknown>";
 }
 
 }  // namespace rediscoro::resp3

@@ -15,6 +15,7 @@ macro(make_test TEST_NAME)
   gtest_discover_tests(${TEST_NAME})
 endmacro()
 
+make_test(resp3_adapter_test)
 make_test(resp3_types_test)
 make_test(resp3_visitor_test)
 make_test(resp3_encoder_test)

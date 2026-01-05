@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -44,8 +45,15 @@ TEST(resp3_adapter, map_string_to_int) {
 
 TEST(resp3_adapter, ignore_always_ok) {
   message m{simple_error{"ERR"}};
-  auto r = adapt<detail::ignore_t>(m);
+  auto r = adapt<ignore_t>(m);
   EXPECT_TRUE(r.has_value());
+}
+
+TEST(resp3_adapter, std_array_size_mismatch) {
+  message m{array{{message{integer{1}}, message{integer{2}}}}};
+  auto r = adapt<std::array<int, 3>>(m);
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error().kind, adapter_error_kind::size_mismatch);
 }
 
 }  // namespace rediscoro::resp3
