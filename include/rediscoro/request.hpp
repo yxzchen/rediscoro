@@ -55,7 +55,7 @@ public:
   void push(std::initializer_list<std::string_view> argv) {
     append_command_header(argv.size());
     for (auto sv : argv) {
-      append_bulk_string(wire_, sv);
+      append_bulk_string(sv);
     }
     command_count_ += 1;
   }
@@ -64,7 +64,7 @@ public:
   void push(std::span<const std::string_view> argv) {
     append_command_header(argv.size());
     for (auto sv : argv) {
-      append_bulk_string(wire_, sv);
+      append_bulk_string(sv);
     }
     command_count_ += 1;
   }
@@ -74,15 +74,15 @@ public:
   void push(std::string_view cmd, Args&&... args) {
     constexpr std::size_t n = 1 + sizeof...(Args);
     append_command_header(n);
-    append_arg(wire_, cmd);
-    (append_arg(wire_, std::forward<Args>(args)), ...);
+    append_arg(cmd);
+    (append_arg(std::forward<Args>(args)), ...);
     command_count_ += 1;
   }
 
   /// Append one complete command (single-token).
   void push(std::string_view cmd) {
     append_command_header(1);
-    append_bulk_string(wire_, cmd);
+    append_bulk_string(cmd);
     command_count_ += 1;
   }
 
@@ -90,50 +90,50 @@ private:
   std::string wire_{};
   std::size_t command_count_{0};
 
-  static void append_unsigned(std::string& out, std::size_t v) {
+  void append_unsigned(std::size_t v) {
     char buf[32]{};
     auto* first = buf;
     auto* last = buf + sizeof(buf);
     auto res = std::to_chars(first, last, v);
     REDISCORO_ASSERT(res.ec == std::errc{});
-    out.append(first, res.ptr);
+    wire_.append(first, res.ptr);
   }
 
   void append_command_header(std::size_t argc) {
     wire_.push_back(rediscoro::resp3::type_to_code(rediscoro::resp3::type3::array));
-    append_unsigned(wire_, argc);
+    append_unsigned(argc);
     wire_.append("\r\n");
   }
 
-  static void append_bulk_string(std::string& out, std::string_view sv) {
-    out.push_back(rediscoro::resp3::type_to_code(rediscoro::resp3::type3::bulk_string));
-    append_unsigned(out, sv.size());
-    out.append("\r\n");
-    out.append(sv.data(), sv.size());
-    out.append("\r\n");
+  void append_bulk_string(std::string_view sv) {
+    wire_.push_back(rediscoro::resp3::type_to_code(rediscoro::resp3::type3::bulk_string));
+    append_unsigned(sv.size());
+    wire_.append("\r\n");
+    wire_.append(sv.data(), sv.size());
+    wire_.append("\r\n");
   }
 
-  static void append_arg(std::string& out, std::string_view sv) {
-    append_bulk_string(out, sv);
+  void append_arg(std::string_view sv) {
+    append_bulk_string(sv);
   }
 
-  static void append_arg(std::string& out, const char* s) {
+  void append_arg(const char* s) {
     if (s == nullptr) {
-      append_bulk_string(out, std::string_view{});
+      append_bulk_string(std::string_view{});
     } else {
-      append_bulk_string(out, std::string_view{s});
+      append_bulk_string(std::string_view{s});
     }
   }
 
-  static void append_arg(std::string& out, const std::string& s) {
-    append_bulk_string(out, std::string_view{s});
+  void append_arg(const std::string& s) {
+    append_bulk_string(std::string_view{s});
   }
 
   template <typename T>
     requires (std::is_integral_v<std::remove_cvref_t<T>> && !std::is_same_v<std::remove_cvref_t<T>, bool>)
-  static void append_arg(std::string& out, T v) {
+  void append_arg(T v) {
     const auto tmp = std::to_string(v);
-    append_bulk_string(out, std::string_view{tmp});
+    append_bulk_string(std::string_view{tmp});
   }
 };
 
