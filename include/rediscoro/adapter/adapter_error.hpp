@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rediscoro/adapter/error.hpp>
 #include <rediscoro/resp3/type.hpp>
 
 #include <cstdint>
@@ -160,6 +161,30 @@ inline auto adapter_error::format_message(const adapter_error& e) -> std::string
     }
   }
   return path + ": adapter error";
+}
+
+/// Project an adapter_error into std::error_code (drops path and other structured details).
+[[nodiscard]] inline auto to_error_code(const adapter_error& e) -> std::error_code {
+  using rediscoro::adapter::error;
+
+  switch (e.kind) {
+    case adapter_error_kind::type_mismatch: {
+      return error::type_mismatch;
+    }
+    case adapter_error_kind::unexpected_null: {
+      return error::unexpected_null;
+    }
+    case adapter_error_kind::value_out_of_range: {
+      return error::value_out_of_range;
+    }
+    case adapter_error_kind::size_mismatch: {
+      return error::size_mismatch;
+    }
+    case adapter_error_kind::invalid_value: {
+      return error::invalid_value;
+    }
+  }
+  return error::invalid_value;
 }
 
 }  // namespace rediscoro::adapter
