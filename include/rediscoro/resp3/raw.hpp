@@ -17,7 +17,14 @@ struct raw_node {
 
   // Scalars
   std::string_view text{};  // string / error / bulk payload / number literal
-  std::int64_t i64 = 0;     // integer / len (for bulk/container)
+  // Convention:
+  // - type3::integer: i64 is the integer value
+  // - bulk/container: i64 is the declared length
+  // - otherwise: i64 is unspecified
+  std::int64_t i64 = 0;
+  // Convention:
+  // - type3::double_type: f64 is the parsed value
+  // - otherwise: f64 is unspecified
   double f64 = 0.0;
   bool boolean = false;
 

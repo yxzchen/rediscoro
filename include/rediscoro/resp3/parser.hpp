@@ -35,6 +35,11 @@ struct frame {
 /// - incremental: call parse_one repeatedly as more data arrives
 /// - zero-copy: raw_node.text is string_view into `buffer` memory (must remain stable)
 /// - output: root node index into `tree().nodes`
+///
+/// Contracts (important):
+/// - pending attributes apply to the next completed value only
+/// - after parse_one() returns a root, the caller must not compact/reset/reallocate the input
+///   buffer until the returned raw_tree nodes are fully consumed (string_view lifetime)
 class parser {
 public:
   parser() = default;

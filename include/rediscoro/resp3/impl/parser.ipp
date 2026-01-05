@@ -2,9 +2,9 @@
 
 #include <rediscoro/resp3/parser.hpp>
 #include <rediscoro/resp3/type.hpp>
+#include <rediscoro/assert.hpp>
 
 #include <charconv>
-#include <cstdlib>
 #include <limits>
 #include <string_view>
 
@@ -43,17 +43,32 @@ namespace detail {
     return true;
   }
 
-  // Requires null-terminated input.
-  std::string tmp(sv);
-  char* end = nullptr;
-  out = std::strtod(tmp.c_str(), &end);
-  if (end == tmp.c_str()) {
+  // no allocation: use from_chars for floating-point (C++17+).
+  auto first = sv.data();
+  auto last = sv.data() + sv.size();
+  auto res = std::from_chars(first, last, out, std::chars_format::general);
+  if (res.ec != std::errc{}) {
     return false;
   }
-  return end == tmp.c_str() + tmp.size();
+  return res.ptr == last;
 }
 
 }  // namespace detail
+
+namespace {
+
+enum class value_step : std::uint8_t {
+  produced_node,   // node_index is valid
+  started_frame,   // started container/attribute, no node produced
+  retry_same_frame // consumed something (e.g. |0) and should retry parsing in same value frame
+};
+
+struct value_result {
+  value_step step{value_step::started_frame};
+  std::uint32_t node_index{0};
+};
+
+}  // namespace
 
 auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
   if (failed_) {
@@ -136,13 +151,13 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     return std::optional<std::uint32_t>{};
   };
 
-  auto start_attribute = [&](std::int64_t len) -> expected<std::optional<std::uint32_t>, error> {
+  auto start_attribute = [&](std::int64_t len) -> expected<void, error> {
     if (len < 0) {
       failed_ = true;
       return unexpected(error::invalid_length);
     }
     if (len == 0) {
-      return std::optional<std::uint32_t>{};
+      return {};
     }
     stack_.push_back(frame{
       .kind = frame_kind::attribute,
@@ -154,7 +169,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       .pending_key = 0,
       .has_pending_key = false,
     });
-    return std::optional<std::uint32_t>{};
+    return {};
   };
 
   auto parse_length_after_type = [&](std::string_view data, std::int64_t& out_len, std::size_t& header_bytes) -> error {
@@ -172,7 +187,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     return error{};
   };
 
-  auto parse_value = [&]() -> expected<std::optional<std::uint32_t>, error> {
+  auto parse_value = [&]() -> expected<value_result, error> {
     auto data = buf.data();
     if (data.empty()) {
       return unexpected(error::needs_more);
@@ -197,15 +212,16 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         failed_ = true;
         return unexpected(e);
       }
-      if (len > 0) {
-        if (stack_.empty() || stack_.back().kind != frame_kind::value) {
-          failed_ = true;
-          return unexpected(error::invalid_format);
-        }
-        stack_.pop_back();
-      }
       buf.consume(header_bytes);
-      return start_attribute(len);
+      if (len == 0) {
+        return value_result{.step = value_step::retry_same_frame};
+      }
+      // Attribute is a prefix modifier for the *next value* in the same value context.
+      auto r = start_attribute(len);
+      if (!r) {
+        return unexpected(r.error());
+      }
+      return value_result{.step = value_step::started_frame};
     }
 
     // Containers
@@ -226,10 +242,18 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           failed_ = true;
           return unexpected(error::invalid_format);
         }
+        // Replace current value frame with a container frame.
         stack_.pop_back();
       }
       buf.consume(header_bytes);
-      return start_container(*maybe_rt, len);
+      auto started = start_container(*maybe_rt, len);
+      if (!started) {
+        return unexpected(started.error());
+      }
+      if (started->has_value()) {
+        return value_result{.step = value_step::produced_node, .node_index = **started};
+      }
+      return value_result{.step = value_step::started_frame};
     }
 
     // Null: "_\r\n"
@@ -245,7 +269,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::null});
       attach_pending_attrs(idx);
-      return std::optional<std::uint32_t>{idx};
+      return value_result{.step = value_step::produced_node, .node_index = idx};
     }
 
     // Boolean: "#t\r\n" / "#f\r\n"
@@ -270,7 +294,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::boolean, .boolean = b});
       attach_pending_attrs(idx);
-      return std::optional<std::uint32_t>{idx};
+      return value_result{.step = value_step::produced_node, .node_index = idx};
     }
 
     // Bulk-like: $ ! =
@@ -294,7 +318,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
         auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
         tree_.nodes.push_back(raw_node{.type = type3::null});
         attach_pending_attrs(idx);
-        return std::optional<std::uint32_t>{idx};
+        return value_result{.step = value_step::produced_node, .node_index = idx};
       }
       auto need = static_cast<std::size_t>(header_bytes) + static_cast<std::size_t>(len) + 2;
       if (data.size() < need) {
@@ -309,7 +333,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_rt, .text = payload, .i64 = len});
       attach_pending_attrs(idx);
-      return std::optional<std::uint32_t>{idx};
+      return value_result{.step = value_step::produced_node, .node_index = idx};
     }
 
     // Line-like: + - : , (
@@ -325,7 +349,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_rt, .text = line});
       attach_pending_attrs(idx);
-      return std::optional<std::uint32_t>{idx};
+      return value_result{.step = value_step::produced_node, .node_index = idx};
     }
 
     if (*maybe_rt == type3::integer) {
@@ -338,7 +362,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::integer, .text = line, .i64 = v});
       attach_pending_attrs(idx);
-      return std::optional<std::uint32_t>{idx};
+      return value_result{.step = value_step::produced_node, .node_index = idx};
     }
 
     if (*maybe_rt == type3::double_type) {
@@ -351,7 +375,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = type3::double_type, .text = line, .f64 = v});
       attach_pending_attrs(idx);
-      return std::optional<std::uint32_t>{idx};
+      return value_result{.step = value_step::produced_node, .node_index = idx};
     }
 
     failed_ = true;
@@ -374,17 +398,17 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           return unexpected(r.error());
         }
 
-        // A value either completed a node, or started a container/attribute (nullopt).
-        if (!r->has_value()) {
-          // If we just pushed a container/attribute frame, keep driving by pushing a new value frame.
-          if (stack_.back().kind != frame_kind::value) {
-            stack_.push_back(frame{.kind = frame_kind::value});
-          }
+        if (r->step == value_step::retry_same_frame) {
+          // e.g. |0 prefix: no frame, keep parsing in same value frame
+          break;
+        }
+        if (r->step == value_step::started_frame) {
+          // Do not push value here; let the outer loop decide based on the new top frame.
           break;
         }
 
         // Completed a node: pop value frame and attach to parent frames.
-        auto child_idx = **r;
+        auto child_idx = r->node_index;
         stack_.pop_back();  // pop value frame
 
         while (true) {
@@ -394,6 +418,11 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
           auto& parent = stack_.back();
 
           if (parent.kind == frame_kind::array) {
+            REDISCORO_ASSERT(
+              parent.container_type == type3::array ||
+              parent.container_type == type3::set ||
+              parent.container_type == type3::push
+            );
             auto& node = tree_.nodes.at(parent.node_index);
             if (node.child_count == 0) {
               node.first_child = static_cast<std::uint32_t>(tree_.links.size());
@@ -457,8 +486,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
             parent.produced++;
             if (parent.produced == static_cast<std::uint32_t>(parent.expected)) {
               stack_.pop_back();  // pop attribute frame
-              // After finishing attributes, continue parsing the next value at the same nesting.
-              stack_.push_back(frame{.kind = frame_kind::value});
+              // Attribute is a prefix modifier; do not push value here.
               break;
             }
             stack_.push_back(frame{.kind = frame_kind::value});
