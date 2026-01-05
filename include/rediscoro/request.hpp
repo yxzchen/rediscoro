@@ -38,7 +38,7 @@ public:
     push(cmd, std::forward<Args>(args)...);
   }
 
-  /// Number of commands currently encoded in this request.
+  [[nodiscard]] auto reply_count() const noexcept -> std::size_t { return command_count_; }
   [[nodiscard]] auto command_count() const noexcept -> std::size_t { return command_count_; }
 
   [[nodiscard]] auto empty() const noexcept -> bool { return command_count_ == 0; }

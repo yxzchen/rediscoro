@@ -11,12 +11,16 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace rediscoro {
 
 namespace detail {
 template <typename... Ts>
 class response_builder;
+
+template <typename T>
+class dynamic_response_builder;
 }
 
 struct redis_error {
@@ -97,6 +101,34 @@ private:
   friend class detail::response_builder;
 
   explicit response(std::tuple<response_slot<Ts>...>&& results)
+    : results_(std::move(results)) {}
+};
+
+/// Runtime-sized response where all slots have the same value type T.
+template <typename T>
+class dynamic_response {
+public:
+  dynamic_response() = default;
+
+  [[nodiscard]] std::size_t size() const noexcept { return results_.size(); }
+  [[nodiscard]] bool empty() const noexcept { return results_.empty(); }
+
+  [[nodiscard]] const response_slot<T>& operator[](std::size_t i) const { return results_[i]; }
+  [[nodiscard]] response_slot<T>& operator[](std::size_t i) { return results_[i]; }
+
+  [[nodiscard]] const response_slot<T>& at(std::size_t i) const { return results_.at(i); }
+  [[nodiscard]] response_slot<T>& at(std::size_t i) { return results_.at(i); }
+
+  [[nodiscard]] auto begin() const noexcept { return results_.begin(); }
+  [[nodiscard]] auto end() const noexcept { return results_.end(); }
+
+private:
+  std::vector<response_slot<T>> results_{};
+
+  template <typename>
+  friend class detail::dynamic_response_builder;
+
+  explicit dynamic_response(std::vector<response_slot<T>>&& results)
     : results_(std::move(results)) {}
 };
 

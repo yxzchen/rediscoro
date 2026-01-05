@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <vector>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -126,6 +127,53 @@ private:
     REDISCORO_ASSERT(((std::get<Is>(results_).has_value()) && ...));
     return std::tuple<response_slot<Ts>...>{std::move(*std::get<Is>(results_))...};
   }
+};
+
+template <typename T>
+class dynamic_response_builder {
+public:
+  explicit dynamic_response_builder(std::size_t expected_count)
+    : expected_(expected_count) {
+    results_.reserve(expected_count);
+  }
+
+  [[nodiscard]] std::size_t expected_count() const noexcept { return expected_; }
+  [[nodiscard]] std::size_t size() const noexcept { return results_.size(); }
+  [[nodiscard]] bool done() const noexcept { return results_.size() == expected_; }
+
+  void accept(resp3::message msg) {
+    REDISCORO_ASSERT(results_.size() < expected_);
+
+    if (msg.is<resp3::simple_error>()) {
+      results_.push_back(unexpected(response_error{redis_error{msg.as<resp3::simple_error>().message}}));
+      return;
+    }
+    if (msg.is<resp3::bulk_error>()) {
+      results_.push_back(unexpected(response_error{redis_error{msg.as<resp3::bulk_error>().message}}));
+      return;
+    }
+
+    auto r = adapter::adapt<T>(msg);
+    if (!r) {
+      results_.push_back(unexpected(response_error{std::move(r.error())}));
+      return;
+    }
+    results_.push_back(std::move(*r));
+  }
+
+  void accept(resp3::error e) {
+    REDISCORO_ASSERT(results_.size() < expected_);
+    results_.push_back(unexpected(response_error{e}));
+  }
+
+  auto take_results() -> dynamic_response<T> {
+    REDISCORO_ASSERT(done());
+    return dynamic_response<T>{std::move(results_)};
+  }
+
+private:
+  std::size_t expected_{0};
+  std::vector<response_slot<T>> results_{};
 };
 
 }  // namespace rediscoro::detail
