@@ -53,27 +53,6 @@ namespace detail {
   return end == tmp.c_str() + tmp.size();
 }
 
-[[nodiscard]] inline auto raw_type_from_code(char c) -> std::optional<raw_type> {
-  switch (c) {
-    case '+': return raw_type::simple_string;
-    case '-': return raw_type::simple_error;
-    case ':': return raw_type::integer;
-    case ',': return raw_type::double_type;
-    case '#': return raw_type::boolean;
-    case '(': return raw_type::big_number;
-    case '_': return raw_type::null;
-    case '$': return raw_type::bulk_string;
-    case '!': return raw_type::bulk_error;
-    case '=': return raw_type::verbatim_string;
-    case '*': return raw_type::array;
-    case '%': return raw_type::map;
-    case '~': return raw_type::set;
-    case '>': return raw_type::push;
-    case '|': return raw_type::attribute;
-    default: return std::nullopt;
-  }
-}
-
 }  // namespace detail
 
 auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
@@ -104,14 +83,14 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     pending_attr_count_++;
   };
 
-  auto start_container = [&](raw_type t, std::int64_t len) -> expected<std::optional<std::uint32_t>, error> {
+  auto start_container = [&](type3 t, std::int64_t len) -> expected<std::optional<std::uint32_t>, error> {
     if (len < -1) {
       failed_ = true;
       return unexpected(error::invalid_length);
     }
     if (len == -1) {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-      tree_.nodes.push_back(raw_node{.type = raw_type::null});
+      tree_.nodes.push_back(raw_node{.type = type3::null});
       attach_pending_attrs(idx);
       return std::optional<std::uint32_t>{idx};
     }
@@ -130,7 +109,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       return std::optional<std::uint32_t>{idx};
     }
 
-    if (t == raw_type::map) {
+    if (t == type3::map) {
       stack_.push_back(frame{
         .kind = frame_kind::map_key,
         .container_type = t,
@@ -167,7 +146,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     }
     stack_.push_back(frame{
       .kind = frame_kind::attribute,
-      .container_type = raw_type::attribute,
+      .container_type = type3::attribute,
       .expected = len,  // pairs
       .produced = 0,    // pairs produced
       .node_index = 0,
@@ -200,14 +179,14 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     }
 
     auto t = data[0];
-    auto maybe_rt = detail::raw_type_from_code(t);
+    auto maybe_rt = code_to_type(t);
     if (!maybe_rt.has_value()) {
       failed_ = true;
       return unexpected(error::invalid_type_byte);
     }
 
     // Attributes are handled as stack frames, not nodes.
-    if (*maybe_rt == raw_type::attribute) {
+    if (*maybe_rt == type3::attribute) {
       std::int64_t len{};
       std::size_t header_bytes{};
       auto e = parse_length_after_type(data, len, header_bytes);
@@ -230,8 +209,8 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     }
 
     // Containers
-    if (*maybe_rt == raw_type::array || *maybe_rt == raw_type::map ||
-        *maybe_rt == raw_type::set || *maybe_rt == raw_type::push) {
+    if (*maybe_rt == type3::array || *maybe_rt == type3::map ||
+        *maybe_rt == type3::set || *maybe_rt == type3::push) {
       std::int64_t len{};
       std::size_t header_bytes{};
       auto e = parse_length_after_type(data, len, header_bytes);
@@ -254,7 +233,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     }
 
     // Null: "_\r\n"
-    if (*maybe_rt == raw_type::null) {
+    if (*maybe_rt == type3::null) {
       if (data.size() < 3) {
         return unexpected(error::needs_more);
       }
@@ -264,13 +243,13 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       buf.consume(3);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-      tree_.nodes.push_back(raw_node{.type = raw_type::null});
+      tree_.nodes.push_back(raw_node{.type = type3::null});
       attach_pending_attrs(idx);
       return std::optional<std::uint32_t>{idx};
     }
 
     // Boolean: "#t\r\n" / "#f\r\n"
-    if (*maybe_rt == raw_type::boolean) {
+    if (*maybe_rt == type3::boolean) {
       if (data.size() < 4) {
         return unexpected(error::needs_more);
       }
@@ -289,13 +268,13 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       buf.consume(4);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-      tree_.nodes.push_back(raw_node{.type = raw_type::boolean, .boolean = b});
+      tree_.nodes.push_back(raw_node{.type = type3::boolean, .boolean = b});
       attach_pending_attrs(idx);
       return std::optional<std::uint32_t>{idx};
     }
 
     // Bulk-like: $ ! =
-    if (*maybe_rt == raw_type::bulk_string || *maybe_rt == raw_type::bulk_error || *maybe_rt == raw_type::verbatim_string) {
+    if (*maybe_rt == type3::bulk_string || *maybe_rt == type3::bulk_error || *maybe_rt == type3::verbatim_string) {
       auto pos = detail::find_crlf(data.substr(1));
       if (pos == std::string_view::npos) {
         return unexpected(error::needs_more);
@@ -313,7 +292,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       if (len == -1) {
         buf.consume(header_bytes);
         auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-        tree_.nodes.push_back(raw_node{.type = raw_type::null});
+        tree_.nodes.push_back(raw_node{.type = type3::null});
         attach_pending_attrs(idx);
         return std::optional<std::uint32_t>{idx};
       }
@@ -341,7 +320,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
     auto line = data.substr(1, pos);
     auto consume_bytes = 1 + pos + 2;
 
-    if (*maybe_rt == raw_type::simple_string || *maybe_rt == raw_type::simple_error || *maybe_rt == raw_type::big_number) {
+    if (*maybe_rt == type3::simple_string || *maybe_rt == type3::simple_error || *maybe_rt == type3::big_number) {
       buf.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_rt, .text = line});
@@ -349,7 +328,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       return std::optional<std::uint32_t>{idx};
     }
 
-    if (*maybe_rt == raw_type::integer) {
+    if (*maybe_rt == type3::integer) {
       std::int64_t v{};
       if (!detail::parse_i64(line, v)) {
         failed_ = true;
@@ -357,12 +336,12 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       buf.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-      tree_.nodes.push_back(raw_node{.type = raw_type::integer, .text = line, .i64 = v});
+      tree_.nodes.push_back(raw_node{.type = type3::integer, .text = line, .i64 = v});
       attach_pending_attrs(idx);
       return std::optional<std::uint32_t>{idx};
     }
 
-    if (*maybe_rt == raw_type::double_type) {
+    if (*maybe_rt == type3::double_type) {
       double v{};
       if (!detail::parse_double(line, v)) {
         failed_ = true;
@@ -370,7 +349,7 @@ auto parser::parse_one(buffer& buf) -> expected<std::uint32_t, error> {
       }
       buf.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
-      tree_.nodes.push_back(raw_node{.type = raw_type::double_type, .text = line, .f64 = v});
+      tree_.nodes.push_back(raw_node{.type = type3::double_type, .text = line, .f64 = v});
       attach_pending_attrs(idx);
       return std::optional<std::uint32_t>{idx};
     }

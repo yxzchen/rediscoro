@@ -20,7 +20,7 @@ enum class frame_kind : std::uint8_t {
 
 struct frame {
   frame_kind kind{frame_kind::value};
-  raw_type container_type{raw_type::null};
+  type3 container_type{type3::null};
 
   std::int64_t expected = 0;          // container len (pairs for map/attr)
   std::uint32_t produced = 0;         // produced children (or pairs)

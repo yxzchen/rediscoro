@@ -1,35 +1,19 @@
 #pragma once
 
+#include <rediscoro/resp3/type.hpp>
+
 #include <cstdint>
 #include <string_view>
 #include <vector>
 
 namespace rediscoro::resp3 {
 
-enum class raw_type : std::uint8_t {
-  simple_string,
-  simple_error,
-  integer,
-  double_type,
-  boolean,
-  big_number,
-  null,
-  bulk_string,
-  bulk_error,
-  verbatim_string,
-  array,
-  map,
-  set,
-  push,
-  attribute,
-};
-
 /// Zero-copy raw node (non-owning).
 ///
 /// IMPORTANT: All string_views refer to the underlying input buffer memory.
 /// They remain valid only while that input memory is stable (no resize/compact).
 struct raw_node {
-  raw_type type{};
+  type3 type{};
 
   // Scalars
   std::string_view text{};  // string / error / bulk payload / number literal

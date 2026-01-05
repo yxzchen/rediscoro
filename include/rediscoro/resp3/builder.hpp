@@ -27,52 +27,52 @@ namespace rediscoro::resp3 {
   };
 
   switch (n.type) {
-    case raw_type::simple_string: {
+    case type3::simple_string: {
       message m{simple_string{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
-    case raw_type::simple_error: {
+    case type3::simple_error: {
       message m{simple_error{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
-    case raw_type::integer: {
+    case type3::integer: {
       message m{integer{n.i64}};
       build_attrs(m);
       return m;
     }
-    case raw_type::double_type: {
+    case type3::double_type: {
       message m{double_type{n.f64}};
       build_attrs(m);
       return m;
     }
-    case raw_type::boolean: {
+    case type3::boolean: {
       message m{boolean{n.boolean}};
       build_attrs(m);
       return m;
     }
-    case raw_type::big_number: {
+    case type3::big_number: {
       message m{big_number{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
-    case raw_type::null: {
+    case type3::null: {
       message m{null{}};
       build_attrs(m);
       return m;
     }
-    case raw_type::bulk_string: {
+    case type3::bulk_string: {
       message m{bulk_string{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
-    case raw_type::bulk_error: {
+    case type3::bulk_error: {
       message m{bulk_error{std::string(n.text)}};
       build_attrs(m);
       return m;
     }
-    case raw_type::verbatim_string: {
+    case type3::verbatim_string: {
       verbatim_string v{};
       // Expect "xxx:<data>"
       if (n.text.size() >= 4 && n.text[3] == ':') {
@@ -86,7 +86,7 @@ namespace rediscoro::resp3 {
       build_attrs(m);
       return m;
     }
-    case raw_type::array: {
+    case type3::array: {
       array a{};
       a.elements.reserve(n.child_count);
       for (std::uint32_t i = 0; i < n.child_count; ++i) {
@@ -97,7 +97,7 @@ namespace rediscoro::resp3 {
       build_attrs(m);
       return m;
     }
-    case raw_type::set: {
+    case type3::set: {
       set s{};
       s.elements.reserve(n.child_count);
       for (std::uint32_t i = 0; i < n.child_count; ++i) {
@@ -108,7 +108,7 @@ namespace rediscoro::resp3 {
       build_attrs(m);
       return m;
     }
-    case raw_type::push: {
+    case type3::push: {
       push p{};
       p.elements.reserve(n.child_count);
       for (std::uint32_t i = 0; i < n.child_count; ++i) {
@@ -119,7 +119,7 @@ namespace rediscoro::resp3 {
       build_attrs(m);
       return m;
     }
-    case raw_type::map: {
+    case type3::map: {
       map mapp{};
       mapp.entries.reserve(n.child_count / 2);
       for (std::uint32_t i = 0; i < n.child_count; i += 2) {
@@ -131,7 +131,7 @@ namespace rediscoro::resp3 {
       build_attrs(m);
       return m;
     }
-    case raw_type::attribute: {
+    case type3::attribute: {
       // Attributes are stored on `message.attrs`, never as a standalone message value.
       return message{null{}};
     }

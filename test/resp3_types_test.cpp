@@ -5,15 +5,15 @@ using namespace rediscoro::resp3;
 
 namespace {
 
-TEST(resp3_types_test, simple_and_bulk_type_creation) {
+TEST(type3s_test, simple_and_bulk_type_creation) {
   // Simple types
   message str{simple_string{"OK"}};
-  EXPECT_EQ(str.get_type(), type::simple_string);
+  EXPECT_EQ(str.get_type(), type3::simple_string);
   EXPECT_TRUE(str.is<simple_string>());
   EXPECT_EQ(str.as<simple_string>().data, "OK");
 
   message int_msg{integer{42}};
-  EXPECT_EQ(int_msg.get_type(), type::integer);
+  EXPECT_EQ(int_msg.get_type(), type3::integer);
   EXPECT_EQ(int_msg.as<integer>().value, 42);
 
   message null_msg{null{}};
@@ -21,18 +21,18 @@ TEST(resp3_types_test, simple_and_bulk_type_creation) {
 
   // Bulk types
   message bulk{bulk_string{"hello"}};
-  EXPECT_EQ(bulk.get_type(), type::bulk_string);
+  EXPECT_EQ(bulk.get_type(), type3::bulk_string);
   EXPECT_EQ(bulk.as<bulk_string>().data, "hello");
 }
 
-TEST(resp3_types_test, aggregate_types_array_and_map) {
+TEST(type3s_test, aggregate_types_array_and_map) {
   // Array
   array arr;
   arr.elements.push_back(message{integer{1}});
   arr.elements.push_back(message{simple_string{"two"}});
 
   message array_msg{std::move(arr)};
-  EXPECT_EQ(array_msg.get_type(), type::array);
+  EXPECT_EQ(array_msg.get_type(), type3::array);
   EXPECT_EQ(array_msg.as<array>().elements.size(), 2);
   EXPECT_EQ(array_msg.as<array>().elements[0].as<integer>().value, 1);
 
@@ -44,12 +44,12 @@ TEST(resp3_types_test, aggregate_types_array_and_map) {
   );
 
   message map_msg{std::move(m)};
-  EXPECT_EQ(map_msg.get_type(), type::map);
+  EXPECT_EQ(map_msg.get_type(), type3::map);
   EXPECT_EQ(map_msg.as<map>().entries.size(), 1);
   EXPECT_EQ(map_msg.as<map>().entries[0].second.as<integer>().value, 100);
 }
 
-TEST(resp3_types_test, attributes_attachment_and_access) {
+TEST(type3s_test, attributes_attachment_and_access) {
   attribute attrs;
   attrs.entries.emplace_back(
     message{simple_string{"ttl"}},
@@ -66,7 +66,7 @@ TEST(resp3_types_test, attributes_attachment_and_access) {
   EXPECT_FALSE(no_attrs.has_attributes());
 }
 
-TEST(resp3_types_test, nested_array_structures) {
+TEST(type3s_test, nested_array_structures) {
   array inner;
   inner.elements.push_back(message{integer{1}});
   inner.elements.push_back(message{integer{2}});
@@ -82,7 +82,7 @@ TEST(resp3_types_test, nested_array_structures) {
   EXPECT_EQ(nested.as<array>().elements[1].as<array>().elements.size(), 2);
 }
 
-TEST(resp3_types_test, type_helper_methods) {
+TEST(type3s_test, type_helper_methods) {
   message str{simple_string{"test"}};
   EXPECT_TRUE(str.is_string());
   EXPECT_TRUE(str.is_simple());
@@ -96,11 +96,11 @@ TEST(resp3_types_test, type_helper_methods) {
   EXPECT_TRUE(arr.is_aggregate());
 }
 
-TEST(resp3_types_test, static_type_id_correctness) {
-  static_assert(simple_string::type_id == type::simple_string);
-  static_assert(integer::type_id == type::integer);
-  static_assert(array::type_id == type::array);
-  static_assert(null::type_id == type::null);
+TEST(type3s_test, static_type_id_correctness) {
+  static_assert(simple_string::type_id == type3::simple_string);
+  static_assert(integer::type_id == type3::integer);
+  static_assert(array::type_id == type3::array);
+  static_assert(null::type_id == type3::null);
 }
 
 }  // namespace

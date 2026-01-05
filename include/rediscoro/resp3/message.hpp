@@ -16,7 +16,7 @@ namespace detail {
 // Concept to verify that a type has a static type_id member
 template <typename T>
 concept has_type_id = requires {
-  { T::type_id } -> std::convertible_to<type>;
+  { T::type_id } -> std::convertible_to<type3>;
 };
 
 // Compile-time verification that all value types have type_id
@@ -90,8 +90,8 @@ struct message {
   /// Get the type of this message
   /// Uses std::visit to retrieve the type_id from the actual value type
   /// This ensures type safety and doesn't rely on variant index ordering
-  [[nodiscard]] auto get_type() const -> type {
-    return std::visit([](const auto& val) -> type {
+  [[nodiscard]] auto get_type() const -> type3 {
+    return std::visit([](const auto& val) -> type3 {
       using T = std::decay_t<decltype(val)>;
       return T::type_id;
     }, value);
