@@ -14,9 +14,6 @@ enum class error {
   invalid_format,
   invalid_integer,
   invalid_length,
-
-  // Structure errors
-  nesting_too_deep,
 };
 
 auto make_error_code(error e) -> std::error_code;

@@ -22,8 +22,6 @@ public:
         return "invalid integer";
       case error::invalid_length:
         return "invalid length";
-      case error::nesting_too_deep:
-        return "nesting too deep";
       default:
         return "unknown error";
     }
