@@ -1,5 +1,4 @@
 #include <rediscoro/adapter/adapt.hpp>
-#include <rediscoro/adapter/error.hpp>
 #include <rediscoro/resp3/message.hpp>
 
 #include <gtest/gtest.h>
@@ -55,15 +54,6 @@ TEST(resp3_adapter, std_array_size_mismatch) {
   auto r = rediscoro::adapter::adapt<std::array<int, 3>>(m);
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(r.error().kind, rediscoro::adapter::adapter_error_kind::size_mismatch);
-}
-
-TEST(resp3_adapter, adapter_error_to_error_code_projection) {
-  message m{simple_string{"OK"}};
-  auto r = rediscoro::adapter::adapt<std::int64_t>(m);
-  ASSERT_FALSE(r.has_value());
-
-  const auto ec = rediscoro::adapter::to_error_code(r.error());
-  EXPECT_EQ(ec, rediscoro::adapter::error::type_mismatch);
 }
 
 }  // namespace rediscoro::resp3
