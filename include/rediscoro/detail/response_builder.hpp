@@ -13,7 +13,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace rediscoro {
+namespace rediscoro::detail {
 
 template <typename... Ts>
 class response_builder {
@@ -128,6 +128,6 @@ private:
   }
 };
 
-}  // namespace rediscoro
+}  // namespace rediscoro::detail
 
 

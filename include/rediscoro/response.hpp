@@ -14,6 +14,11 @@
 
 namespace rediscoro {
 
+namespace detail {
+template <typename... Ts>
+class response_builder;
+}
+
 struct redis_error {
   std::string message;
 };
@@ -89,7 +94,7 @@ private:
   }
 
   template <typename...>
-  friend class response_builder;
+  friend class detail::response_builder;
 
   explicit response(std::tuple<response_slot<Ts>...>&& results)
     : results_(std::move(results)) {}

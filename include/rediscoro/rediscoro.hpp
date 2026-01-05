@@ -6,4 +6,3 @@
 #include <rediscoro/logger.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
-#include <rediscoro/response_builder.hpp>

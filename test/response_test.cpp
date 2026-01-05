@@ -1,5 +1,5 @@
 #include <rediscoro/response.hpp>
-#include <rediscoro/response_builder.hpp>
+#include <rediscoro/detail/response_builder.hpp>
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 namespace rediscoro::resp3 {
 
 TEST(response, preserves_order_and_detects_redis_error) {
-  rediscoro::response_builder<std::int64_t, std::int64_t> b;
+  rediscoro::detail::response_builder<std::int64_t, std::int64_t> b;
   b.accept(message{integer{1}});
   b.accept(message{simple_error{"ERR wrongtype"}});
   ASSERT_TRUE(b.done());
@@ -25,7 +25,7 @@ TEST(response, preserves_order_and_detects_redis_error) {
 }
 
 TEST(response, adapt_as_returns_adapter_error) {
-  rediscoro::response_builder<std::int64_t> b;
+  rediscoro::detail::response_builder<std::int64_t> b;
   b.accept(message{simple_string{"OK"}});
   auto resp = b.take_results();
   auto& r = resp.get<0>();
