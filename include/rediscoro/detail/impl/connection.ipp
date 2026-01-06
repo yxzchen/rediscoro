@@ -245,6 +245,10 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
     co_return;
   }
 
+  // Defensive: ensure parser state is clean at the start of a handshake.
+  // This prevents accidental carry-over between retries or reconnect attempts.
+  parser_.reset();
+
   // Resolve (note: iocoro resolver does not support cancellation; we check cancel after it returns).
   iocoro::ip::tcp::resolver resolver{};
   auto res = co_await resolver.async_resolve(cfg_.host, std::to_string(cfg_.port));
@@ -261,6 +265,12 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // TCP connect with timeout (try endpoints in order).
   std::error_code connect_ec{};
   for (auto const& ep : *res) {
+    // IMPORTANT: after a failed connect attempt, the socket may be left in a platform-dependent
+    // error state. Always close before trying the next endpoint.
+    if (socket_.is_open()) {
+      socket_.close();
+    }
+
     connect_ec = co_await iocoro::io::async_connect_timeout(socket_, ep, cfg_.connect_timeout);
     if (!connect_ec) {
       break;
@@ -368,6 +378,12 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
     },
     cfg_.connect_timeout);
 
+  // NOTE (current limitation):
+  // - connect() lifecycle cancellation (cancel_) is not wired into iocoro::cancellation_token.
+  // - If cancel_ is requested while an async_* operation is in-flight, we only observe it after
+  //   that operation resumes (or times out). This is acceptable for now; future work may bridge
+  //   cancel_ into an iocoro cancellation_source to provide prompt abort semantics.
+
   if (cancel_.is_cancelled() || handshake_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
     last_error_ = make_error_code(::rediscoro::error::operation_aborted);
@@ -382,7 +398,12 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
 
   if (handshake_ec) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = make_error_code(::rediscoro::error::connect_failed);
+    // Unsolicited server messages during handshake are treated as unsupported feature for now.
+    if (handshake_ec == std::make_error_code(std::errc::not_supported)) {
+      last_error_ = make_error_code(::rediscoro::error::handshake_failed);
+    } else {
+      last_error_ = make_error_code(::rediscoro::error::connect_failed);
+    }
     co_return;
   }
 
@@ -399,6 +420,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // Handshake succeeded.
   state_ = connection_state::OPEN;
   reconnect_count_ = 0;
+
+  // Defensive: ensure parser buffer/state is clean when handing over to runtime loops.
+  parser_.reset();
   co_return;
 }
 
