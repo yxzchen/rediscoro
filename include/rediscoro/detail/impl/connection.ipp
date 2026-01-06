@@ -53,7 +53,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   }
 
   if (state_ == connection_state::CONNECTING) {
-    co_return ::rediscoro::error::already_in_progress;
+    co_return error::already_in_progress;
   }
 
   if (state_ == connection_state::CLOSED) {
@@ -65,7 +65,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   }
 
   if (cancel_.is_cancelled()) {
-    co_return ::rediscoro::error::operation_aborted;
+    co_return error::operation_aborted;
   }
 
   if (!actor_awaitable_.has_value()) {
@@ -82,7 +82,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   if (cancel_.is_cancelled()) {
     // close() won; unify cleanup via close().
     co_await close();
-    co_return ::rediscoro::error::operation_aborted;
+    co_return error::operation_aborted;
   }
 
   if (state_ == connection_state::OPEN) {
@@ -95,7 +95,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
 
   // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
   // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
-  auto ec = last_error_.value_or(::rediscoro::error::connect_failed);
+  auto ec = last_error_.value_or(error::connect_failed);
   co_await close();
   co_return ec;
 }
@@ -112,7 +112,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   state_ = connection_state::CLOSING;
 
   // Fail all pending work deterministically.
-  pipeline_.clear_all(::rediscoro::error::connection_closed);
+  pipeline_.clear_all(error::connection_closed);
 
   // Close socket immediately.
   if (socket_.is_open()) {
@@ -141,17 +141,17 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
   switch (state_) {
     case connection_state::INIT:
     case connection_state::CONNECTING: {
-      sink->fail_all(::rediscoro::error::not_connected);
+      sink->fail_all(error::not_connected);
       return;
     }
     case connection_state::FAILED:
     case connection_state::RECONNECTING: {
-      sink->fail_all(::rediscoro::error::connection_lost);
+      sink->fail_all(error::connection_lost);
       return;
     }
     case connection_state::CLOSING:
     case connection_state::CLOSED: {
-      sink->fail_all(::rediscoro::error::connection_closed);
+      sink->fail_all(error::connection_closed);
       return;
     }
     case connection_state::OPEN: {
@@ -241,7 +241,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
     if (state_ == connection_state::OPEN && cfg_.request_timeout > std::chrono::milliseconds{0}) {
       auto now = pipeline::clock::now();
       if (pipeline_.has_expired(now)) {
-        handle_error(::rediscoro::error::request_timeout);
+        handle_error(error::request_timeout);
         continue;
       }
 
@@ -336,7 +336,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   last_error_.reset();
 
   if (cancel_.is_cancelled()) {
-    last_error_ = ::rediscoro::error::operation_aborted;
+    last_error_ = error::operation_aborted;
     co_return;
   }
 
@@ -357,19 +357,19 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   );
   if (!res.has_value()) {
     if (res.error() == iocoro::make_error_code(iocoro::error::timed_out)) {
-      last_error_ = ::rediscoro::error::resolve_timeout;
+      last_error_ = error::resolve_timeout;
     } else {
-      last_error_ = ::rediscoro::error::resolve_failed;
+      last_error_ = error::resolve_failed;
     }
     co_return;
   }
   if (res->empty()) {
-    last_error_ = ::rediscoro::error::resolve_failed;
+    last_error_ = error::resolve_failed;
     co_return;
   }
 
   if (cancel_.is_cancelled()) {
-    last_error_ = ::rediscoro::error::operation_aborted;
+    last_error_ = error::operation_aborted;
     co_return;
   }
 
@@ -391,22 +391,22 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
-      last_error_ = ::rediscoro::error::connect_timeout;
+      last_error_ = error::connect_timeout;
     } else if (connect_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
-      last_error_ = ::rediscoro::error::operation_aborted;
+      last_error_ = error::operation_aborted;
     } else {
-      last_error_ = ::rediscoro::error::connect_failed;
+      last_error_ = error::connect_failed;
     }
     co_return;
   }
 
   if (cancel_.is_cancelled()) {
-    last_error_ = ::rediscoro::error::operation_aborted;
+    last_error_ = error::operation_aborted;
     co_return;
   }
 
   // Build handshake request (pipeline of commands).
-  ::rediscoro::request req{};
+  request req{};
   req.push("HELLO", "3");
   if (!cfg_.password.empty()) {
     if (!cfg_.username.empty()) {
@@ -422,7 +422,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
     req.push("CLIENT", "SETNAME", cfg_.client_name);
   }
 
-  auto slot = std::make_shared<pending_dynamic_response<::rediscoro::ignore_t>>(req.reply_count());
+  auto slot = std::make_shared<pending_dynamic_response<ignore_t>>(req.reply_count());
   pipeline_.push(std::move(req), slot.get());
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
@@ -455,7 +455,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
           co_return r.error();
         }
         if (*r == 0) {
-          co_return ::rediscoro::error::connection_reset;
+          co_return error::connection_reset;
         }
         parser_.commit(*r);
 
@@ -472,7 +472,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
           }
 
           if (!pipeline_.has_pending_read()) {
-            co_return ::rediscoro::error::unsolicited_message;
+            co_return error::unsolicited_message;
           }
 
           auto msg = resp3::build_message(parser_.tree(), *parsed);
@@ -496,24 +496,24 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   //   cancel_ into an iocoro cancellation_source to provide prompt abort semantics.
 
   if (cancel_.is_cancelled() || handshake_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
-    pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = ::rediscoro::error::operation_aborted;
+    pipeline_.clear_all(error::connection_closed);
+    last_error_ = error::operation_aborted;
     co_return;
   }
 
   if (handshake_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
-    pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = ::rediscoro::error::handshake_timeout;
+    pipeline_.clear_all(error::connection_closed);
+    last_error_ = error::handshake_timeout;
     co_return;
   }
 
   if (handshake_ec) {
-    pipeline_.clear_all(::rediscoro::error::connection_closed);
+    pipeline_.clear_all(error::connection_closed);
     // Unsolicited server messages during handshake are treated as unsupported feature for now.
-    if (handshake_ec == ::rediscoro::error::unsolicited_message) {
-      last_error_ = ::rediscoro::error::handshake_failed;
+    if (handshake_ec == error::unsolicited_message) {
+      last_error_ = error::handshake_failed;
     } else {
-      last_error_ = ::rediscoro::error::connect_failed;
+      last_error_ = error::connect_failed;
     }
     co_return;
   }
@@ -523,15 +523,15 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // Defensive: handshake_ec == {} implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
-    pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = ::rediscoro::error::handshake_failed;
+    pipeline_.clear_all(error::connection_closed);
+    last_error_ = error::handshake_failed;
     co_return;
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i].has_value()) {
-      pipeline_.clear_all(::rediscoro::error::connection_closed);
-      last_error_ = ::rediscoro::error::handshake_failed;
+      pipeline_.clear_all(error::connection_closed);
+      last_error_ = error::handshake_failed;
       co_return;
     }
   }
@@ -577,7 +577,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 
   if (*r == 0) {
     // Peer closed (EOF).
-    handle_error(::rediscoro::error::connection_reset);
+    handle_error(error::connection_reset);
     co_return;
   }
 
@@ -601,7 +601,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
     if (!pipeline_.has_pending_read()) {
       // Unsolicited message (e.g. PUSH) is not supported yet.
       // Temporary policy: treat as "unsupported feature" rather than protocol violation.
-      handle_error(::rediscoro::error::unsolicited_message);
+      handle_error(error::unsolicited_message);
       co_return;
     }
 
@@ -676,9 +676,9 @@ inline auto connection::handle_error(std::error_code ec) -> void {
   // OPEN runtime error -> FAILED.
   last_error_ = ec;
   state_ = connection_state::FAILED;
-  auto clear_err = ::rediscoro::error::connection_lost;
-  if (ec == ::rediscoro::error::request_timeout) {
-    clear_err = ::rediscoro::error::request_timeout;
+  auto clear_err = error::connection_lost;
+  if (ec == error::request_timeout) {
+    clear_err = error::request_timeout;
   }
   pipeline_.clear_all(clear_err);
   if (socket_.is_open()) {
@@ -693,7 +693,7 @@ inline auto connection::transition_to_closed() -> void {
   // Deterministic cleanup (idempotent).
   state_ = connection_state::CLOSED;
 
-  pipeline_.clear_all(::rediscoro::error::connection_closed);
+  pipeline_.clear_all(error::connection_closed);
 
   if (socket_.is_open()) {
     socket_.close();
