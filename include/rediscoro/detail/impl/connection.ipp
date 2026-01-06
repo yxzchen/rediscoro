@@ -266,10 +266,10 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
   // Precondition: called on strand.
   // State intent: FAILED -> (sleep) -> RECONNECTING -> OPEN, or exit early on close/cancel.
   while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
-    // Backoff sleep happens in FAILED.
-    // Note: caller enters do_reconnect() from FAILED, but we keep the assignment explicit
-    // for robustness if future callers change.
-    state_ = connection_state::FAILED;
+    // Precondition: caller enters do_reconnect() from FAILED.
+    // This coroutine does not write FAILED redundantly; it only transitions:
+    //   FAILED -> RECONNECTING -> (OPEN | FAILED)
+    REDISCORO_ASSERT(state_ == connection_state::FAILED);
     const auto delay = calculate_reconnect_delay();
 
     if (delay.count() > 0) {
@@ -645,7 +645,6 @@ inline auto connection::handle_error(std::error_code ec) -> void {
 
   if (state_ != connection_state::OPEN) {
     last_error_ = ec;
-    cancel_.request_cancel();
     control_wakeup_.notify();
     return;
   }
@@ -680,11 +679,12 @@ auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>
 
   // Thread-safety: enqueue() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
-  executor_.strand().any_executor().post(
-    [self = shared_from_this(), req = std::move(req), slot]() mutable {
-      self->enqueue_impl(std::move(req), slot.get());
-    }
-  );
+  //
+  // Performance: use dispatch() so if we're already on the strand, we run inline and avoid an
+  // extra scheduling hop; otherwise it behaves like post().
+  executor_.strand().any_executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
+    self->enqueue_impl(std::move(req), slot.get());
+  });
 
   return slot;
 }
@@ -695,11 +695,9 @@ auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic
 
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
-  executor_.strand().any_executor().post(
-    [self = shared_from_this(), req = std::move(req), slot]() mutable {
-      self->enqueue_impl(std::move(req), slot.get());
-    }
-  );
+  executor_.strand().any_executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
+    self->enqueue_impl(std::move(req), slot.get());
+  });
 
   return slot;
 }
