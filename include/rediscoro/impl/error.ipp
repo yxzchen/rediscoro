@@ -12,22 +12,22 @@ class error_category_impl : public std::error_category {
     switch (static_cast<error>(ev)) {
       case error::operation_aborted:
         return "operation aborted";
-      case error::connection_closed:
-        return "connection closed";
       case error::not_connected:
         return "not connected";
-      case error::connection_lost:
-        return "connection lost";
-      case error::handshake_failed:
-        return "handshake failed";
-      case error::timeout:
-        return "timeout";
       case error::already_in_progress:
         return "already in progress";
       case error::resolve_failed:
         return "resolve failed";
       case error::connect_failed:
         return "connect failed";
+      case error::handshake_failed:
+        return "handshake failed";
+      case error::timeout:
+        return "timeout";
+      case error::connection_closed:
+        return "connection closed";
+      case error::connection_lost:
+        return "connection lost";
       default:
         return "unknown error";
     }
