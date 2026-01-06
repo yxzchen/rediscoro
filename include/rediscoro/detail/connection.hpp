@@ -43,9 +43,24 @@ class connection : public std::enable_shared_from_this<connection> {
 public:
   explicit connection(iocoro::io_executor ex, config cfg);
 
-  /// Start the connection worker loop.
-  /// Must be called exactly once.
-  auto start() -> iocoro::awaitable<void>;
+  /// Perform initial connection to Redis server.
+  ///
+  /// Behavior:
+  /// - Starts the background worker_loop (if not already started)
+  /// - Executes TCP connection + RESP3 handshake (HELLO, AUTH, SELECT, CLIENT SETNAME)
+  /// - On success: transitions to OPEN state, returns empty error_code
+  /// - On failure:
+  ///   * Cleans up all resources (closes socket, clears pipeline)
+  ///   * Waits for all background coroutines to exit
+  ///   * Transitions to CLOSED state
+  ///   * Returns error details
+  ///
+  /// IMPORTANT: This method does NOT trigger automatic reconnection.
+  /// Automatic reconnection only applies to connection failures AFTER reaching OPEN state.
+  ///
+  /// Thread-safety: Can be called from any executor
+  /// Idempotency: Can be called multiple times (subsequent calls return cached result)
+  auto connect() -> iocoro::awaitable<std::error_code>;
 
   /// Request graceful shutdown.
   /// Can be called from any executor.
@@ -59,7 +74,7 @@ public:
   /// Implementation:
   /// - Uses co_await on worker_awaitable_ (set during start())
   /// - If worker_awaitable_ not available (destructor case), best-effort
-  auto stop() -> iocoro::awaitable<void>;
+  auto close() -> iocoro::awaitable<void>;
 
   /// Enqueue a request for execution (fixed-size, heterogenous replies).
   /// Can be called from any executor.
@@ -98,22 +113,41 @@ public:
   }
 
 private:
+  /// Start the background worker loop coroutine (internal use only).
+  ///
+  /// Semantics:
+  /// - Spawns worker_loop() on the connection's strand
+  /// - Uses detached completion token (fire-and-forget)
+  /// - Can only be called once (protected by std::call_once)
+  ///
+  /// Called by connect() to ensure worker is running before connection attempt.
+  auto run_worker() -> void;
+
   /// Main worker loop coroutine.
   /// Runs on the connection's strand until CLOSED.
+  ///
+  /// Responsibilities:
+  /// - Process pending requests (do_write)
+  /// - Read responses from server (do_read)
+  /// - Handle runtime connection errors and automatic reconnection
+  ///
+  /// NOT responsible for:
+  /// - Initial connection (handled by connect())
+  /// - Starting the loop (handled by run_worker())
   ///
   /// Loop invariant (CRITICAL):
   /// - Each wakeup drains ALL pending work before next wait
   /// - Never suspend while work is available
   /// - This prevents "work queued but loop sleeping" deadlock
   ///
-  /// Drain strategy (NORMAL state):
+  /// Drain strategy (OPEN state):
   /// 1. Wait for wakeup notification (may have multiple counts)
   /// 2. Loop until no work remains:
   ///    - Write all pending requests (until socket blocks)
   ///    - Read all available responses (until socket blocks or no pending reads)
   /// 3. Only then wait for next wakeup
   ///
-  /// Drain strategy (FAILED state):
+  /// Drain strategy (FAILED state - runtime errors only):
   /// - IMMEDIATELY stop all normal socket IO (do_read/do_write)
   /// - Do NOT attempt do_read() or do_write() after state_ becomes FAILED
   /// - Close socket and clear all in-flight requests with error via pipeline.clear_all()
@@ -234,11 +268,12 @@ private:
   // Worker loop notification
   notify_event wakeup_;
 
+  // Worker loop lifecycle
+  std::once_flag worker_start_flag_;  // Ensures run_worker() is called exactly once
+  std::optional<iocoro::awaitable<void>> worker_awaitable_{};  // For close() to co_await
+
   // Reconnection state
   int reconnect_count_{0};  // Number of reconnection attempts (reset on success)
-
-  // Worker loop awaitable (for stop() to co_await)
-  std::optional<iocoro::awaitable<void>> worker_awaitable_{};
 };
 
 }  // namespace rediscoro::detail

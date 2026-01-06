@@ -11,14 +11,50 @@ inline connection::connection(iocoro::io_executor ex, config cfg)
   , socket_(executor_.get_io_executor()) {
 }
 
-inline auto connection::start() -> iocoro::awaitable<void> {
+inline auto connection::run_worker() -> void {
   // TODO: Implementation
-  // - Spawn worker_loop on the strand
-  // - co_spawn(executor_.get(), worker_loop(), use_awaitable)
-  co_return;
+  // - Spawn worker_loop on the connection's strand
+  // - Use use_awaitable completion token
+  // - Save the awaitable in worker_awaitable_ for close() to use
 }
 
-inline auto connection::stop() -> iocoro::awaitable<void> {
+inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
+  // TODO: Implementation
+  //
+  // 1. Start worker_loop if not already started
+  //    std::call_once(worker_start_flag_, [this] { run_worker(); });
+  //
+  // 2. Check if already connected (idempotency)
+  //    if (state_ == OPEN) co_return std::error_code{};
+  //    if (state_ == CLOSED) co_return last_error_;
+  //
+  // 3. Switch to connection's strand
+  //    co_await switch_to(executor_.strand());
+  //
+  // 4. Execute initial connection
+  //    state_ = CONNECTING;
+  //    co_await do_connect();
+  //
+  // 5. Check result
+  //    if (state_ == OPEN) {
+  //      co_return std::error_code{};  // Success
+  //    }
+  //
+  // 6. Handle failure - CRITICAL: Clean up all resources and wait for worker exit
+  //    // - Set cancel flag to signal worker_loop to exit
+  //    // - Close socket
+  //    // - Clear all pending requests
+  //    // - Notify worker to wake up and exit
+  //    // - Wait for worker_loop to complete (co_await worker_awaitable_)
+  //    // - Transition to CLOSED
+  //    // - Return error
+  //
+  // IMPORTANT: On failure, this method waits for all background coroutines to exit
+  // before returning, ensuring clean resource cleanup.
+  co_return std::error_code{};
+}
+
+inline auto connection::close() -> iocoro::awaitable<void> {
   // TODO: Implementation
   // - Request cancellation
   // - Notify worker loop
@@ -34,13 +70,23 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
 
 inline auto connection::worker_loop() -> iocoro::awaitable<void> {
   // TODO: Implementation
-  // - do_connect()
-  // - while (state_ == OPEN):
+  //
+  // Main loop: Process requests and responses while connection is active
+  // - while (!cancelled && state != CLOSED):
   //   - wait for wakeup_
   //   - if cancelled: break
+  //   - if state == FAILED: handle runtime reconnection
+  //     * Only triggered by runtime IO errors AFTER reaching OPEN state
+  //     * NOT triggered by initial connection failure (handled by connect())
+  //     * If reconnection enabled: co_await do_reconnect()
+  //     * If reconnection disabled: break
   //   - if has_pending_write: do_write()
   //   - if has_pending_read: do_read()
+  //
+  // Cleanup:
   // - transition_to_closed()
+  //
+  // NOTE: Initial connection is NOT handled here, it's handled by connect()
   co_return;
 }
 

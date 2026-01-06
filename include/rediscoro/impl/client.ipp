@@ -9,15 +9,13 @@ inline client::client(iocoro::io_executor ex, config cfg)
 }
 
 inline auto client::connect() -> iocoro::awaitable<std::error_code> {
-  // TODO: Implementation
-  // - Start connection
-  co_return co_await conn_->start();
+  co_return co_await conn_->connect();
 }
 
 inline auto client::close() -> iocoro::awaitable<void> {
   // TODO: Implementation
   // - Stop connection
-  co_return co_await conn_->stop();
+  co_return co_await conn_->close();
 }
 
 inline auto client::is_connected() const noexcept -> bool {
