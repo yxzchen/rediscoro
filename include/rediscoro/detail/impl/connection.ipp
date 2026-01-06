@@ -21,7 +21,10 @@ inline auto connection::run_worker() -> void {
 inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // TODO: Implementation
   //
-  // 1. Handle CLOSED state - support retry
+  // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
+  // data races with worker_loop.
+  //
+  // 1. Handle CLOSED state - support retry (can do before strand switch)
   //    if (state_ == CLOSED) {
   //      // Previous connection failed and was cleaned up
   //      // Reset state to allow retry
@@ -47,23 +50,35 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // 5. Switch to connection's strand
   //    co_await switch_to(executor_.strand());
   //
-  // 6. Execute initial connection
+  // 6. Check cancellation (handle connect() + close() race)
+  //    if (cancel_.is_cancelled()) {
+  //      co_return make_error_code(error::operation_aborted);
+  //    }
+  //
+  // 7. Execute initial connection
   //    state_ = CONNECTING;
   //    co_await do_connect();
   //
-  // 7. Check result
+  // 8. Check cancellation again (do_connect may take time)
+  //    if (cancel_.is_cancelled()) {
+  //      // close() was called during connection
+  //      // Fall through to cleanup (step 10)
+  //    }
+  //
+  // 9. Check result
   //    if (state_ == OPEN) {
   //      co_return std::error_code{};  // Success
   //    }
   //
-  // 8. Handle failure - CRITICAL: Clean up all resources and wait for worker exit
-  //    // - Set cancel flag to signal worker_loop to exit
-  //    // - Close socket
-  //    // - Clear all pending requests
-  //    // - Notify worker to wake up and exit
-  //    // - Wait for worker_loop to complete (co_await worker_awaitable_)
-  //    // - Transition to CLOSED
-  //    // - Return error
+  // 10. Handle failure - CRITICAL: Clean up all resources and wait for worker exit
+  //     // - Set cancel flag to signal worker_loop to exit
+  //     // - Close socket (if still open)
+  //     // - Clear all pending requests (pipeline.clear_all)
+  //     // - Notify worker to wake up and exit (wakeup_.notify)
+  //     // - Wait for worker_loop to complete (co_await *worker_awaitable_)
+  //     // - Clear worker_awaitable_ to allow restart on retry
+  //     // - Transition to CLOSED
+  //     // - Return error (use operation_aborted if cancelled, otherwise last_error_)
   //
   // IMPORTANT: On failure, this method waits for all background coroutines to exit
   // before returning, ensuring clean resource cleanup. This allows retry by calling
@@ -73,9 +88,32 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
 
 inline auto connection::close() -> iocoro::awaitable<void> {
   // TODO: Implementation
-  // - Request cancellation
-  // - Notify worker loop
-  // - Wait for CLOSED state
+  //
+  // 1. Check if already closed (idempotency)
+  //    if (state_ == CLOSED) co_return;
+  //
+  // 2. Check if worker is running
+  //    if (!worker_awaitable_.has_value()) {
+  //      // Worker never started or already cleaned up
+  //      // Just transition to CLOSED
+  //      state_ = CLOSED;
+  //      co_return;
+  //    }
+  //
+  // 3. Request cancellation
+  //    cancel_.request_cancel();
+  //
+  // 4. Notify worker to wake up and exit
+  //    wakeup_.notify();
+  //
+  // 5. Wait for worker_loop to complete
+  //    co_await *worker_awaitable_;
+  //
+  // 6. Verify post-condition
+  //    REDISCORO_ASSERT(state_ == CLOSED);
+  //
+  // IMPORTANT: This method waits for worker_loop to completely exit before returning.
+  // After this method returns, it's safe to destroy the connection object.
   co_return;
 }
 

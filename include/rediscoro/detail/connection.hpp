@@ -31,60 +31,94 @@ namespace rediscoro::detail {
 /// - Dispatch incoming responses via pipeline
 ///
 /// Structural constraints:
-/// - Only one worker_loop coroutine
+/// - Only one worker_loop coroutine instance at a time
 /// - worker_loop runs until CLOSED state
 /// - Socket only accessed within worker_loop
 /// - External requests enqueued via thread-safe methods
 ///
-/// Thread safety:
+/// Thread safety and concurrent operations:
 /// - enqueue() can be called from any executor
-/// - All other methods run on the connection's strand
+/// - connect() switches to strand internally for all state mutations
+/// - close() can be called from any executor
+///
+/// Critical invariants:
+/// 1. Single worker instance: worker_awaitable_.has_value() == (worker is running)
+/// 2. Strand serialization: All state_, socket_, pipeline_ mutations on strand
+/// 3. Cancel handling: connect() checks cancel_ at each await point
+/// 4. Resource cleanup: On failure/close, wait for worker_loop to exit completely
+/// 5. Retry support: After CLOSED, connect() can reset and retry
+///
+/// State transition rules:
+/// - connect() success: INIT → CONNECTING → OPEN
+/// - connect() failure: INIT → CONNECTING → CLOSED (with full cleanup)
+/// - Runtime error: OPEN → FAILED → RECONNECTING (if enabled) OR CLOSED
+/// - close() called: any state → CLOSED
 class connection : public std::enable_shared_from_this<connection> {
 public:
   explicit connection(iocoro::io_executor ex, config cfg);
 
   /// Perform initial connection to Redis server.
   ///
+  /// Semantics (CRITICAL):
+  /// This is a "strand-serialized operation". All state mutations (state_, socket_, pipeline_)
+  /// MUST occur on the connection's strand to prevent data races with worker_loop.
+  ///
+  /// Post-condition guarantee:
+  /// When this method returns, the connection is in one of two states:
+  /// - OPEN: Connection established, ready for requests
+  /// - CLOSED: Connection failed and all resources cleaned up (socket closed, pipeline cleared,
+  ///           worker_loop exited)
+  ///
   /// Behavior:
   /// - Starts the background worker_loop (if not already started)
+  /// - Switches to connection's strand for all state operations
   /// - Executes TCP connection + RESP3 handshake (HELLO, AUTH, SELECT, CLIENT SETNAME)
   /// - On success: transitions to OPEN state, returns empty error_code
   /// - On failure:
   ///   * Cleans up all resources (closes socket, clears pipeline)
-  ///   * Waits for all background coroutines to exit
+  ///   * Waits for worker_loop to exit (co_await worker_awaitable_)
   ///   * Transitions to CLOSED state
   ///   * Returns error details
   ///
   /// Retry support:
   /// - If state is CLOSED (from previous connection failure), this method will:
   ///   * Reset state to INIT
-  ///   * Clear last_error
-  ///   * Restart worker_loop
+  ///   * Clear last_error and reconnect_count
+  ///   * Restart a new worker_loop instance
   ///   * Retry the connection
   /// - This allows retrying connection without creating a new connection object
+  ///
+  /// Concurrent call handling:
+  /// - connect() + connect(): If state is CONNECTING, returns connection_error
+  /// - connect() + close(): close() wins, connect() checks cancel_ at each await point
+  ///                        and returns operation_aborted if cancelled
   ///
   /// IMPORTANT: This method does NOT trigger automatic reconnection.
   /// Automatic reconnection only applies to connection failures AFTER reaching OPEN state.
   ///
-  /// Thread-safety: Can be called from any executor
-  /// Idempotency:
-  /// - If already OPEN, returns success immediately
-  /// - If CLOSED, resets and retries connection
-  /// - If CONNECTING, returns error (concurrent call not allowed)
+  /// Thread-safety: Can be called from any executor (switches to strand internally)
   auto connect() -> iocoro::awaitable<std::error_code>;
 
   /// Request graceful shutdown.
-  /// Can be called from any executor.
   ///
   /// Behavior:
-  /// - Set cancel flag
-  /// - Notify worker_loop to wake up
-  /// - Wait for worker_loop to reach CLOSED state
+  /// - Set cancel flag (cancel_.request_cancel())
+  /// - Notify worker_loop to wake up (wakeup_.notify())
+  /// - Wait for worker_loop to reach CLOSED state (co_await worker_awaitable_)
   /// - If called during RECONNECTING, interrupts reconnection
   ///
-  /// Implementation:
-  /// - Uses co_await on worker_awaitable_ (set during start())
-  /// - If worker_awaitable_ not available (destructor case), best-effort
+  /// Concurrent call handling:
+  /// - close() + connect(): close() wins, connect() detects cancel_ and returns operation_aborted
+  /// - close() + close(): Idempotent, second call is no-op if already closed
+  ///
+  /// Post-condition:
+  /// - state_ == CLOSED
+  /// - Socket closed
+  /// - All pending requests cleared
+  /// - worker_loop exited
+  ///
+  /// Thread-safety: Can be called from any executor
+  /// Idempotency: Safe to call multiple times
   auto close() -> iocoro::awaitable<void>;
 
   /// Enqueue a request for execution (fixed-size, heterogenous replies).
@@ -128,10 +162,19 @@ private:
   ///
   /// Semantics:
   /// - Spawns worker_loop() on the connection's strand
-  /// - Uses detached completion token (fire-and-forget)
-  /// - Can only be called once (protected by std::call_once)
+  /// - Uses use_awaitable completion token and saves the awaitable in worker_awaitable_
+  /// - MUST NOT be called if worker_awaitable_.has_value() is true (worker already running)
+  ///
+  /// Single-instance guarantee:
+  /// - Only one worker_loop instance can run at a time
+  /// - Checked by: worker_awaitable_.has_value()
+  /// - If worker failed and exited, connect() clears worker_awaitable_ after co_await,
+  ///   allowing a new worker to be started on retry
   ///
   /// Called by connect() to ensure worker is running before connection attempt.
+  ///
+  /// PRE: worker_awaitable_.has_value() == false
+  /// POST: worker_awaitable_.has_value() == true
   auto run_worker() -> void;
 
   /// Main worker loop coroutine.
