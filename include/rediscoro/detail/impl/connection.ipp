@@ -74,8 +74,12 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
     co_return std::error_code{};
   }
 
-  // Deterministic failure for phase-1 implementation.
+  // Phase-1 deterministic failure.
   // Later milestones will set last_error_ precisely from resolver/connect/handshake.
+  //
+  // IMPORTANT semantic rule:
+  // - Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
+  // - connect() failure is reported by the returned error_code and ends in CLOSED via close().
   auto ec = make_error_code(::rediscoro::error::connect_failed);
   last_error_ = ec;
   co_await close();
@@ -91,7 +95,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
 
   // Phase-1: determinism-first shutdown.
   cancel_.request_cancel();
-  state_ = connection_state::CLOSED;
+  state_ = connection_state::CLOSING;
 
   // Fail all pending work deterministically.
   pipeline_.clear_all(::rediscoro::error::connection_closed);
@@ -149,6 +153,12 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Phase-1 minimal actor:
   // - No sub-loops yet.
   // - Exists so close() has a single join point (actor_awaitable_).
+  //
+  // Future hard constraint (IMPORTANT):
+  // - When we add write_loop/read_loop/control_loop, actor_loop MUST own their lifetime.
+  // - Do NOT spawn them as detached coroutines without joining, otherwise actor_loop could exit
+  //   while sub-loops are still running/blocked.
+  // - Preferred pattern: co_spawn(use_awaitable) each loop and co_await iocoro::when_all(...) to join.
   while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
     co_await control_wakeup_.wait();
   }
@@ -186,15 +196,17 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // TODO: Implementation
   //
   // This method performs TCP connection + RESP3 handshake.
-  // On error, it sets state_ = FAILED and last_error_ with appropriate error code.
+  // On error during initial connect(), it sets last_error_ with appropriate error code.
+  // IMPORTANT: It MUST NOT set state_ = FAILED here; FAILED is reserved for runtime IO errors
+  // after the connection has reached OPEN.
   //
   // 1. Resolve address
-  //    - On DNS failure: set last_error_ = timeout or system error
+  //    - On DNS failure: set last_error_ = error::resolve_failed (or system error, by policy)
   //
   // 2. TCP connect with timeout
   //    - co_await async_connect(socket_, endpoint, timeout)
-  //    - On timeout: set last_error_ = error::timeout, state_ = FAILED, co_return
-  //    - On error: set last_error_ = system error, state_ = FAILED, co_return
+  //    - On timeout: set last_error_ = error::timeout, co_return
+  //    - On error: set last_error_ = error::connect_failed (or system error, by policy), co_return
   //
   // 3. Check cancel (in case close() was called during connect)
   //    - if (cancel_.is_cancelled()) { state_ = FAILED; co_return; }

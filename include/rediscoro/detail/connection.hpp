@@ -156,7 +156,8 @@ public:
   /// - If called during RECONNECTING, interrupts reconnection
   ///
   /// Phase-1 implementation note (determinism-first):
-  /// - close() performs immediate cancellation + pipeline clear + socket close + CLOSED.
+  /// - close() performs immediate cancellation + pipeline clear + socket close.
+  /// - State transitions: (any) -> CLOSING -> CLOSED (CLOSED set in transition_to_closed()).
   /// - Graceful flushing (CLOSING state) may be added later as a separate milestone.
   ///
   /// Concurrent call handling:
