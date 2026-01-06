@@ -163,6 +163,7 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
     co_await control_wakeup_.wait();
   }
 
+  // CRITICAL: Only transition_to_closed() is allowed to write state_ = CLOSED.
   transition_to_closed();
   co_return;
 }
@@ -209,7 +210,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   //    - On error: set last_error_ = error::connect_failed (or system error, by policy), co_return
   //
   // 3. Check cancel (in case close() was called during connect)
-  //    - if (cancel_.is_cancelled()) { state_ = FAILED; co_return; }
+  //    - if (cancel_.is_cancelled()) { last_error_ = error::operation_aborted; co_return; }
   //
   // 4. Send RESP3 handshake commands via pipeline
   //    CRITICAL: Use pipeline_.push() directly, NOT enqueue()
@@ -231,9 +232,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   //    g) Validate each response
   //
   //    Error handling:
-  //    - If response is -ERR: set last_error_ = error::handshake_failed, state_ = FAILED, co_return
-  //    - If timeout: set last_error_ = error::timeout, state_ = FAILED, co_return
-  //    - If socket error: set last_error_ = system error, state_ = FAILED, co_return
+  //    - If response is -ERR: set last_error_ = error::handshake_failed, co_return
+  //    - If timeout: set last_error_ = error::timeout, co_return
+  //    - If socket error: set last_error_ = error::connect_failed (or system error, by policy), co_return
   //
   // 5. Handshake complete
   //    - state_ = OPEN

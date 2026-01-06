@@ -67,6 +67,11 @@ namespace rediscoro::detail {
 /// - Runtime error: OPEN → FAILED → RECONNECTING (if enabled) OR CLOSED
 /// - close() called: any state → CLOSED
 ///
+/// State write authority (CRITICAL):
+/// - Only transition_to_closed() is allowed to set state_ = CLOSED.
+/// - close() transitions to CLOSING and then joins the background actor; the actor performs
+///   transition_to_closed() exactly once during shutdown.
+///
 /// Ownership during states:
 /// - INIT: No owner (waiting for connect())
 /// - CONNECTING: connect() owns socket exclusively
@@ -185,6 +190,8 @@ public:
   /// - INIT, CONNECTING: Request rejected immediately (error::not_connected)
   ///                     User must wait for connect() to complete
   /// - OPEN, RECONNECTING: Request accepted and queued
+  ///   * RECONNECTING semantic: requests are buffered in pipeline_ and will be written only after
+  ///     control_loop transitions back to OPEN (write_loop is gated on OPEN).
   /// - FAILED: Request rejected immediately (error::connection_lost)
   ///           Connection lost due to runtime error, automatic reconnection may be in progress
   /// - CLOSING, CLOSED: Request rejected immediately (error::connection_closed)
