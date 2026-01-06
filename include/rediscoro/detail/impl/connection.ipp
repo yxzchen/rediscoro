@@ -356,7 +356,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
     cfg_.resolve_timeout
   );
   if (!res.has_value()) {
-    if (res.error() == iocoro::make_error_code(iocoro::error::timed_out)) {
+    if (res.error() == iocoro::error::timed_out) {
       last_error_ = error::resolve_timeout;
     } else {
       last_error_ = error::resolve_failed;
@@ -390,9 +390,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
 
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
-    if (connect_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
+    if (connect_ec == iocoro::error::timed_out) {
       last_error_ = error::connect_timeout;
-    } else if (connect_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
+    } else if (connect_ec == iocoro::error::operation_aborted) {
       last_error_ = error::operation_aborted;
     } else {
       last_error_ = error::connect_failed;
@@ -495,27 +495,31 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   //   that operation resumes (or times out). This is acceptable for now; future work may bridge
   //   cancel_ into an iocoro cancellation_source to provide prompt abort semantics.
 
-  if (cancel_.is_cancelled() || handshake_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
-    pipeline_.clear_all(error::connection_closed);
+  if (cancel_.is_cancelled() || handshake_ec == iocoro::error::operation_aborted) {
+    // Handshake aborted (close/cancel won). Fail the internal handshake sink deterministically.
+    pipeline_.clear_all(error::operation_aborted);
     last_error_ = error::operation_aborted;
     co_return;
   }
 
-  if (handshake_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
-    pipeline_.clear_all(error::connection_closed);
+  if (handshake_ec == iocoro::error::timed_out) {
+    pipeline_.clear_all(error::handshake_timeout);
     last_error_ = error::handshake_timeout;
     co_return;
   }
 
   if (handshake_ec) {
-    pipeline_.clear_all(error::connection_closed);
+    // Fail the internal handshake sink with a meaningful error; connect() returns last_error_.
     // Unsolicited server messages during handshake are treated as unsupported feature for now.
     if (handshake_ec == error::unsolicited_message) {
+      pipeline_.clear_all(error::handshake_failed);
       last_error_ = error::handshake_failed;
     } else if (handshake_ec == error::connection_reset) {
       // Preserve the semantic error: peer closed/reset during handshake.
+      pipeline_.clear_all(error::connection_reset);
       last_error_ = error::connection_reset;
     } else {
+      pipeline_.clear_all(error::connect_failed);
       last_error_ = error::connect_failed;
     }
     co_return;
