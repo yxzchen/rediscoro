@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iocoro/awaitable.hpp>
+#include <iocoro/any_executor.hpp>
 #include <iocoro/io_executor.hpp>
 
 #include <atomic>
@@ -104,11 +105,6 @@ public:
   /// Check if there are pending notifications (for optimization).
   [[nodiscard]] auto is_ready() const noexcept -> bool {
     return count_.load(std::memory_order_acquire) > 0;
-  }
-
-  /// Reset the event (for reuse, use with caution).
-  auto reset() noexcept -> void {
-    count_.store(0, std::memory_order_release);
   }
 
 private:
