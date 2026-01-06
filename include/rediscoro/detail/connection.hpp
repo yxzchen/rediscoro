@@ -136,6 +136,8 @@ public:
   /// - std::error_code{} (empty): Success, connection is OPEN
   /// - error::already_in_progress: Another connect() is already in progress
   /// - error::operation_aborted: close() was called during connection
+  /// - error::resolve_failed: DNS/name resolution failed
+  /// - error::connect_failed: TCP connect failed after resolution
   /// - error::timeout: TCP connection or handshake timed out
   /// - error::handshake_failed: RESP3 handshake failed (HELLO/AUTH/SELECT)
   /// - system error codes: TCP connection failed, DNS resolution failed, etc.

@@ -24,6 +24,10 @@ class error_category_impl : public std::error_category {
         return "timeout";
       case error::already_in_progress:
         return "already in progress";
+      case error::resolve_failed:
+        return "resolve failed";
+      case error::connect_failed:
+        return "connect failed";
       default:
         return "unknown error";
     }
