@@ -8,7 +8,6 @@
 
 #include <cstddef>
 #include <string>
-#include <system_error>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -29,34 +28,24 @@ struct redis_error {
   std::string message;
 };
 
-/// Client-side error (transport/lifecycle/cancellation).
-///
-/// This is used for errors that are not Redis protocol errors and not adapter errors,
-/// e.g. connection closed, connection failed, cancellation.
-struct client_error {
-  std::error_code code{};
-};
-
 /// Wrapper around the internal response error variant.
 /// Provides user-friendly inspection APIs without exposing std::variant in the surface.
 class response_error {
 public:
-  using variant_type = std::variant<redis_error, client_error, resp3::error, adapter::error>;
+  using variant_type = std::variant<redis_error, error, resp3::error, adapter::error>;
 
   response_error(redis_error e) : v_(std::move(e)) {}
-  response_error(client_error e) : v_(std::move(e)) {}
-  response_error(std::error_code ec) : v_(client_error{ec}) {}
-  response_error(error e) : v_(client_error{make_error_code(e)}) {}
+  response_error(error e) : v_(e) {}
   response_error(resp3::error e) : v_(e) {}
   response_error(adapter::error e) : v_(std::move(e)) {}
 
   [[nodiscard]] bool is_redis_error() const noexcept { return std::holds_alternative<redis_error>(v_); }
-  [[nodiscard]] bool is_client_error() const noexcept { return std::holds_alternative<client_error>(v_); }
+  [[nodiscard]] bool is_client_error() const noexcept { return std::holds_alternative<error>(v_); }
   [[nodiscard]] bool is_resp3_error() const noexcept { return std::holds_alternative<resp3::error>(v_); }
   [[nodiscard]] bool is_adapter_error() const noexcept { return std::holds_alternative<adapter::error>(v_); }
 
   [[nodiscard]] const redis_error& as_redis_error() const { return std::get<redis_error>(v_); }
-  [[nodiscard]] const client_error& as_client_error() const { return std::get<client_error>(v_); }
+  [[nodiscard]] error as_client_error() const { return std::get<error>(v_); }
   [[nodiscard]] resp3::error as_resp3_error() const { return std::get<resp3::error>(v_); }
   [[nodiscard]] const adapter::error& as_adapter_error() const { return std::get<adapter::error>(v_); }
 
