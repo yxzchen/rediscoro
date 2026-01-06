@@ -39,7 +39,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //
   // 3. Check if currently connecting (concurrent call not supported)
   //    if (state_ == CONNECTING) {
-  //      co_return make_error_code(error::concurrent_operation);
+  //      co_return make_error_code(error::already_in_progress);
   //    }
   //
   // 4. Start worker_loop if not already started
@@ -219,25 +219,37 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // 3. Check cancel (in case close() was called during connect)
   //    - if (cancel_.is_cancelled()) { state_ = FAILED; co_return; }
   //
-  // 4. Send RESP3 handshake commands (directly via socket, NOT via pipeline)
-  //    - HELLO 3
-  //    - AUTH (if username/password configured)
-  //    - SELECT (if database != 0)
-  //    - CLIENT SETNAME (if client_name configured)
+  // 4. Send RESP3 handshake commands via pipeline
+  //    CRITICAL: Use pipeline_.push() directly, NOT enqueue()
+  //    (enqueue() rejects requests in CONNECTING state)
   //
-  //    For each command:
-  //    - co_await async_write(socket_, encode_command(...))
-  //    - co_await async_read + parse response
-  //    - If response is error: set last_error_ = error::handshake_failed, state_ = FAILED, co_return
+  //    Commands to send:
+  //    - HELLO 3 (switch to RESP3 protocol)
+  //    - AUTH username password (if configured)
+  //    - SELECT database (if database != 0)
+  //    - CLIENT SETNAME name (if configured)
+  //
+  //    Implementation approach:
+  //    a) Create pending_response for handshake
+  //    b) Build request with all handshake commands
+  //    c) pipeline_.push(request, pending_response*)
+  //    d) co_await do_write() to send commands
+  //    e) co_await do_read() to receive responses
+  //    f) co_await pending_response->wait() to get results
+  //    g) Validate each response
+  //
+  //    Error handling:
+  //    - If response is -ERR: set last_error_ = error::handshake_failed, state_ = FAILED, co_return
   //    - If timeout: set last_error_ = error::timeout, state_ = FAILED, co_return
+  //    - If socket error: set last_error_ = system error, state_ = FAILED, co_return
   //
   // 5. Handshake complete
   //    - state_ = OPEN
   //    - reconnect_count_ = 0 (reset on success)
   //    - co_return
   //
-  // NOTE: This method does NOT use pipeline during handshake.
-  // Pipeline is only for user requests after reaching OPEN state.
+  // NOTE: Handshake uses pipeline for request/response pairing and unified error handling.
+  // User requests are still rejected by enqueue() during CONNECTING state.
   co_return;
 }
 

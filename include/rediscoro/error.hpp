@@ -31,9 +31,9 @@ enum class error {
   /// TCP connection or handshake took too long to complete.
   timeout = 6,
 
-  /// Concurrent operation not allowed.
+  /// Operation already in progress.
   /// For example, calling connect() while another connect() is already in progress.
-  concurrent_operation = 7,
+  already_in_progress = 7,
 };
 
 auto make_error_code(error e) -> std::error_code;

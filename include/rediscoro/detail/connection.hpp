@@ -85,9 +85,16 @@ public:
   ///
   /// Responsibilities during handshake:
   /// - connect() OWNS the socket and pipeline during CONNECTING state
+  /// - connect() sends handshake commands (HELLO/AUTH/SELECT/CLIENT SETNAME) via pipeline
   /// - worker_loop does NOT process requests until state becomes OPEN
-  /// - enqueue() REJECTS all requests during INIT/CONNECTING states (error::not_connected)
-  /// - This exclusive ownership eliminates all handshake/request interleaving complexity
+  /// - enqueue() REJECTS user requests during INIT/CONNECTING states (error::not_connected)
+  /// - This exclusive ownership eliminates all handshake/user-request interleaving complexity
+  ///
+  /// Why handshake uses pipeline:
+  /// - Pipeline provides request/response pairing mechanism
+  /// - Reuses existing RESP3 encoding/decoding logic
+  /// - Unified error handling for all commands
+  /// - connect() can directly call pipeline_.push() without going through enqueue()
   ///
   /// Post-condition guarantee:
   /// When this method returns, the connection is in one of two states:
@@ -115,7 +122,7 @@ public:
   /// - This allows retrying connection without creating a new connection object
   ///
   /// Concurrent call handling:
-  /// - connect() + connect(): If state is CONNECTING, returns concurrent_operation
+  /// - connect() + connect(): If state is CONNECTING, returns already_in_progress
   /// - connect() + close(): close() wins, connect() checks cancel_ at each await point
   ///                        and returns operation_aborted if cancelled
   ///
@@ -124,7 +131,7 @@ public:
   ///
   /// Possible error codes:
   /// - std::error_code{} (empty): Success, connection is OPEN
-  /// - error::concurrent_operation: Another connect() is already in progress
+  /// - error::already_in_progress: Another connect() is already in progress
   /// - error::operation_aborted: close() was called during connection
   /// - error::timeout: TCP connection or handshake timed out
   /// - error::handshake_failed: RESP3 handshake failed (HELLO/AUTH/SELECT)

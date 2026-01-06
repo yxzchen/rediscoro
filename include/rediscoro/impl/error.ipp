@@ -22,8 +22,8 @@ class error_category_impl : public std::error_category {
         return "handshake failed";
       case error::timeout:
         return "timeout";
-      case error::concurrent_operation:
-        return "concurrent operation";
+      case error::already_in_progress:
+        return "already in progress";
       default:
         return "unknown error";
     }
