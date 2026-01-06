@@ -18,6 +18,60 @@
 
 namespace rediscoro::adapter {
 
+/// CRITICAL CONSTRAINT: No user code execution
+///
+/// The adapter layer MUST NOT execute user-provided code during adaptation.
+/// This ensures that pending_response::deliver() does not inline user logic
+/// into the worker_loop strand.
+///
+/// Forbidden:
+/// - Calling user-defined constructors (except trivial/standard types)
+/// - Invoking user callbacks or function objects
+/// - Triggering user operator overloads (except standard library types)
+///
+/// Allowed:
+/// - Standard library types (std::string, std::vector, etc.)
+/// - Trivial types (int, double, bool, etc.)
+/// - Aggregate types with standard/trivial members
+///
+/// Why this matters:
+/// - adapt<T>() is called from worker_loop (connection strand)
+/// - If T's constructor has side effects (logging, locks, IO), it runs inline
+/// - This breaks "no user code in completions" invariant
+///
+/// Safe types:
+///   adapt<std::string>(msg)      // OK: std::string is standard
+///   adapt<int64_t>(msg)          // OK: trivial type
+///   adapt<std::vector<int>>(msg) // OK: standard container + trivial element
+///
+/// Unsafe types (currently not prevented, but should be documented):
+///   struct MyType {
+///     MyType(std::string s) { log_to_file(s); }  // BAD: side effect in ctor
+///   };
+///   adapt<MyType>(msg)  // DANGER: log_to_file runs in worker_loop
+///
+/// Future: Could add concept to restrict T to "safe" types.
+
+/// Concept placeholder for safe response types.
+///
+/// Future enforcement (not currently checked):
+/// - Standard library types (std::string, std::vector, etc.)
+/// - Trivial types (int, bool, double, etc.)
+/// - Aggregates with safe members only
+/// - No user-defined constructors with side effects
+///
+/// To enable static checking in the future, uncomment and use:
+///   template <typename T>
+///   concept safe_response_type =
+///     std::is_trivial_v<T> ||
+///     /* is_standard_library_type<T> */ ||
+///     /* is_safe_aggregate<T> */;
+///
+///   template <safe_response_type T>
+///   auto adapt(const resp3::message& msg) -> expected<T, error>;
+///
+/// This placeholder documents the intent and reserves the design space.
+
 namespace detail {
 
 template <typename...>
