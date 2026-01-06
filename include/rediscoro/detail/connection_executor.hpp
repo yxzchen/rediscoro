@@ -5,7 +5,7 @@
 
 namespace rediscoro::detail {
 
-/// RAII wrapper for executor with strand.
+/// RAII wrapper for binding the connection to a strand executor.
 ///
 /// Responsibilities:
 /// - Ensure connection operations run on a single strand
@@ -41,9 +41,9 @@ namespace rediscoro::detail {
 /// Correct pattern:
 ///   // OK: direct await in worker_loop
 ///   co_await do_read();  // subroutine call, not spawn
-class executor_guard {
+class connection_executor {
 public:
-  explicit executor_guard(iocoro::io_executor ex)
+  explicit connection_executor(iocoro::io_executor ex)
     : io_executor_(ex)
     , strand_(iocoro::make_strand(iocoro::any_executor{ex})) {}
 

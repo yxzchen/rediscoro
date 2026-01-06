@@ -3,7 +3,7 @@
 #include <rediscoro/config.hpp>
 #include <rediscoro/detail/cancel_source.hpp>
 #include <rediscoro/detail/connection_state.hpp>
-#include <rediscoro/detail/executor_guard.hpp>
+#include <rediscoro/detail/connection_executor.hpp>
 #include <rediscoro/detail/notify_event.hpp>
 #include <rediscoro/detail/pending_response.hpp>
 #include <rediscoro/detail/pipeline.hpp>
@@ -213,7 +213,7 @@ private:
   config cfg_;
 
   // Executor management
-  executor_guard executor_;
+  connection_executor executor_;
 
   // Socket
   iocoro::ip::tcp::socket socket_;

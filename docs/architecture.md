@@ -28,7 +28,7 @@ client
       ├── pipeline.hpp / ipp         - Request/response scheduling
       ├── pending_response.hpp / ipp - Async response awaiter
       ├── notify_event.hpp / ipp     - Coroutine notification primitive
-      ├── executor_guard.hpp / ipp   - Strand wrapper
+      ├── connection_executor.hpp         - Strand wrapper (connection_executor)
       └── cancel_source.hpp          - Cancellation support
 ```
 
@@ -253,10 +253,10 @@ class response_sink {
 - `deliver()` aggregates replies into `response<Ts...>` / `dynamic_response<T>` and notifies
 - Called ONLY from connection strand (simplified thread-safety)
 
-### 8. executor_guard
+### 8. connection_executor
 
 **Responsibilities:**
-- Wrap executor with strand
+- Wrap io_executor with strand
 - Ensure serialized access to connection state
 - Provide stable executor reference
 
@@ -390,7 +390,7 @@ These are not "best practices" - they are system-level invariants that, if broke
 - Only worker_loop accesses socket
 - No concurrent reads/writes
 - do_read/do_write are subroutines, NOT spawned coroutines
-- executor_guard prohibits nested co_spawn
+- connection_executor prohibits nested co_spawn
 
 **Violation consequences:**
 - Data race on socket state
