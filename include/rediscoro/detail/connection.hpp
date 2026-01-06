@@ -234,9 +234,6 @@ private:
   // Worker loop notification
   notify_event wakeup_;
 
-  // Read buffer
-  std::vector<std::byte> read_buffer_;
-
   // Reconnection state
   int reconnect_count_{0};  // Number of reconnection attempts (reset on success)
 

@@ -8,8 +8,7 @@ namespace rediscoro::detail {
 inline connection::connection(iocoro::io_executor ex, config cfg)
   : cfg_(std::move(cfg))
   , executor_(ex)
-  , socket_(executor_.get_io_executor())
-  , read_buffer_(4096) {
+  , socket_(executor_.get_io_executor()) {
 }
 
 inline auto connection::start() -> iocoro::awaitable<void> {
