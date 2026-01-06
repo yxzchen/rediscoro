@@ -5,12 +5,7 @@
 namespace rediscoro::detail {
 
 inline auto executor_guard::get_io_executor() const -> iocoro::io_executor {
-  // TODO: Implementation
-  // - Extract io_executor from the strand
-  // - This may require accessing iocoro internals or casting
-
-  // Placeholder implementation
-  return iocoro::io_executor{};
+  return io_executor_;
 }
 
 }  // namespace rediscoro::detail

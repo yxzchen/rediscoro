@@ -40,6 +40,12 @@ public:
 
   /// Enqueue a request for sending.
   /// Associates request with a response_sink for delivery.
+  ///
+  /// Reply-count contract (IMPORTANT):
+  /// - A request may represent a pipeline of multiple commands (request.reply_count() > 1).
+  /// - pipeline MUST NOT deliver more than sink->expected_replies() replies into a sink.
+  /// - For single-reply sinks (e.g. pending_response<T>), the associated request MUST have
+  ///   reply_count() == 1 (enforced at connection::enqueue<T> boundary).
   auto push(request req, response_sink* sink) -> void;
 
   /// Check if there are pending writes.

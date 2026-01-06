@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iocoro/any_executor.hpp>
+#include <iocoro/detail/executor_cast.hpp>
 #include <iocoro/io_executor.hpp>
 #include <iocoro/strand.hpp>
 
@@ -45,7 +46,8 @@ namespace rediscoro::detail {
 class executor_guard {
 public:
   explicit executor_guard(iocoro::any_executor ex)
-    : strand_(iocoro::make_strand(ex)) {}
+    : io_executor_(iocoro::detail::require_executor<iocoro::io_executor>(ex))
+    , strand_(iocoro::make_strand(std::move(ex))) {}
 
   /// Strand executor façade.
   ///
@@ -73,6 +75,7 @@ public:
   [[nodiscard]] auto get_io_executor() const -> iocoro::io_executor;
 
 private:
+  iocoro::io_executor io_executor_{};
   iocoro::any_executor strand_;
 };
 
