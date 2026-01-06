@@ -160,6 +160,7 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Minimal actor (step-2):
   // - Own write_loop lifetime so close() can use actor_awaitable_ as the shutdown barrier.
   // - Step-3: own read_loop lifetime as well (joined with write_loop).
+  // - Step-3: own control_loop lifetime as well (control_wakeup_ must not be a ghost).
   //
   // Hard constraint (IMPORTANT):
   // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
@@ -167,8 +168,9 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   auto ex = executor_.strand().any_executor();
   auto writer = iocoro::co_spawn(ex, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
   auto reader = iocoro::co_spawn(ex, iocoro::bind_executor(ex, read_loop()), iocoro::use_awaitable);
+  auto controller = iocoro::co_spawn(ex, iocoro::bind_executor(ex, control_loop()), iocoro::use_awaitable);
 
-  (void)co_await iocoro::when_all(std::move(writer), std::move(reader));
+  (void)co_await iocoro::when_all(std::move(writer), std::move(reader), std::move(controller));
 
   // CRITICAL: Only transition_to_closed() is allowed to write state_ = CLOSED.
   transition_to_closed();
@@ -202,10 +204,25 @@ inline auto connection::read_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::control_loop() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  // - Centralize state transitions: FAILED -> (sleep) -> RECONNECTING -> OPEN, cancel -> CLOSED
-  // - On entering OPEN: notify read_wakeup_ and write_wakeup_
-  // - On close(): ensure socket close + pipeline_.clear_all + notify loops to exit
+  // Minimal control loop (step-3):
+  // - Ensures control_wakeup_ is not a ghost and can be used as the centralized state driver.
+  // - Reconnection will be implemented later; for now, runtime FAILED triggers deterministic shutdown.
+  //
+  // IMPORTANT constraints:
+  // - Must NOT write CLOSED (only transition_to_closed()).
+  // - Must be cancel-aware so close() can interrupt promptly.
+  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+    if (state_ == connection_state::FAILED) {
+      // Phase-3 policy: deterministic shutdown on runtime error (no reconnection yet).
+      state_ = connection_state::CLOSING;
+      cancel_.request_cancel();
+      write_wakeup_.notify();
+      read_wakeup_.notify();
+    }
+
+    co_await control_wakeup_.wait();
+  }
+
   co_return;
 }
 
@@ -315,8 +332,9 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       }
 
       if (!pipeline_.has_pending_read()) {
-        // Unsolicited message (e.g. PUSH) is not supported yet; treat as protocol error.
-        handle_error(std::make_error_code(std::errc::protocol_error));
+        // Unsolicited message (e.g. PUSH) is not supported yet.
+        // Temporary policy: treat as "unsupported feature" rather than protocol violation.
+        handle_error(std::make_error_code(std::errc::not_supported));
         co_return;
       }
 
