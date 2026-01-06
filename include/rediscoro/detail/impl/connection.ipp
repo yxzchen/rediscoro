@@ -455,7 +455,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
           co_return r.error();
         }
         if (*r == 0) {
-          co_return std::make_error_code(std::errc::connection_reset);
+          co_return ::rediscoro::error::connection_reset;
         }
         parser_.commit(*r);
 
@@ -472,7 +472,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
           }
 
           if (!pipeline_.has_pending_read()) {
-            co_return std::make_error_code(std::errc::not_supported);
+            co_return ::rediscoro::error::unsolicited_message;
           }
 
           auto msg = resp3::build_message(parser_.tree(), *parsed);
@@ -510,7 +510,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   if (handshake_ec) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
     // Unsolicited server messages during handshake are treated as unsupported feature for now.
-    if (handshake_ec == std::make_error_code(std::errc::not_supported)) {
+    if (handshake_ec == ::rediscoro::error::unsolicited_message) {
       last_error_ = ::rediscoro::error::handshake_failed;
     } else {
       last_error_ = ::rediscoro::error::connect_failed;
@@ -577,7 +577,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 
   if (*r == 0) {
     // Peer closed (EOF).
-    handle_error(std::make_error_code(std::errc::connection_reset));
+    handle_error(::rediscoro::error::connection_reset);
     co_return;
   }
 
@@ -601,7 +601,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
     if (!pipeline_.has_pending_read()) {
       // Unsolicited message (e.g. PUSH) is not supported yet.
       // Temporary policy: treat as "unsupported feature" rather than protocol violation.
-      handle_error(std::make_error_code(std::errc::not_supported));
+      handle_error(::rediscoro::error::unsolicited_message);
       co_return;
     }
 

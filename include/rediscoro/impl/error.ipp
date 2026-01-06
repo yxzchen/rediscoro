@@ -24,10 +24,14 @@ class error_category_impl : public std::error_category {
         return "connect failed";
       case error::connect_timeout:
         return "connect timeout";
+      case error::connection_reset:
+        return "connection reset";
       case error::handshake_failed:
         return "handshake failed";
       case error::handshake_timeout:
         return "handshake timeout";
+      case error::unsolicited_message:
+        return "unsolicited message";
       case error::request_timeout:
         return "request timeout";
       case error::connection_closed:

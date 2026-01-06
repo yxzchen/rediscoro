@@ -33,6 +33,11 @@ enum class error {
   /// TCP connection did not complete within config::connect_timeout.
   connect_timeout,
 
+  /// Connection reset / peer closed.
+  ///
+  /// Used when the peer closes the TCP connection (EOF) or resets it.
+  connection_reset,
+
   /// Handshake with Redis server failed.
   /// This can happen during initial connect() or during reconnection.
   /// Reasons: HELLO/AUTH/SELECT command failed, protocol mismatch, authentication error.
@@ -41,6 +46,11 @@ enum class error {
   /// RESP3 handshake timed out.
   /// Handshake did not complete within config::connect_timeout.
   handshake_timeout,
+
+  /// Server sent a message we don't support (e.g. RESP3 PUSH) or an unexpected message arrived.
+  ///
+  /// Current policy: treated as fatal and triggers reconnect.
+  unsolicited_message,
 
   /// Request timed out.
   ///
