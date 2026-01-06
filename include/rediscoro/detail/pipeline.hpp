@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rediscoro/detail/response_sink.hpp>
+#include <rediscoro/error.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/error.hpp>
@@ -71,7 +72,7 @@ public:
   auto on_error(resp3::error err) -> void;
 
   /// Clear all pending requests (on connection close/error).
-  auto clear_all(response_error err) -> void;
+  auto clear_all(rediscoro::error err) -> void;
 
   /// Get the number of pending requests (for diagnostics).
   [[nodiscard]] auto pending_count() const noexcept -> std::size_t {
@@ -79,11 +80,6 @@ public:
   }
 
 private:
-  struct awaiting_item {
-    response_sink* sink;
-    std::size_t remaining;
-  };
-
   struct pending_item {
     request req;
     response_sink* sink;  // Abstract interface, no knowledge of coroutines
@@ -94,7 +90,7 @@ private:
   std::deque<pending_item> pending_write_{};
 
   // Response sinks waiting for responses (one per sent request)
-  std::deque<awaiting_item> awaiting_read_{};
+  std::deque<response_sink*> awaiting_read_{};
 };
 
 }  // namespace rediscoro::detail

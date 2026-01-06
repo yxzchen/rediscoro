@@ -19,20 +19,13 @@ auto pending_response<Ts...>::do_deliver(resp3::message msg) -> void {
 }
 
 template <typename... Ts>
-auto pending_response<Ts...>::do_deliver_error(response_error err) -> void {
+auto pending_response<Ts...>::do_deliver_error(error_variant err) -> void {
   REDISCORO_ASSERT(!result_.has_value());
   if (result_.has_value()) {
     return;
   }
 
-  if (err.is_resp3_error()) {
-    builder_.accept(err.as_resp3_error());
-  } else if (err.is_client_error()) {
-    builder_.accept(err.as_client_error());
-  } else {
-    // pending_response should only receive RESP3/transport errors from pipeline.
-    REDISCORO_ASSERT(false && "unexpected response_error kind in pending_response::do_deliver_error()");
-  }
+  builder_.accept(err);
   if (builder_.done()) {
     result_ = builder_.take_results();
     event_.notify();
@@ -61,19 +54,13 @@ auto pending_dynamic_response<T>::do_deliver(resp3::message msg) -> void {
 }
 
 template <typename T>
-auto pending_dynamic_response<T>::do_deliver_error(response_error err) -> void {
+auto pending_dynamic_response<T>::do_deliver_error(error_variant err) -> void {
   REDISCORO_ASSERT(!result_.has_value());
   if (result_.has_value()) {
     return;
   }
 
-  if (err.is_resp3_error()) {
-    builder_.accept(err.as_resp3_error());
-  } else if (err.is_client_error()) {
-    builder_.accept(err.as_client_error());
-  } else {
-    REDISCORO_ASSERT(false && "unexpected response_error kind in pending_dynamic_response::do_deliver_error()");
-  }
+  builder_.accept(err);
   if (builder_.done()) {
     result_ = builder_.take_results();
     event_.notify();

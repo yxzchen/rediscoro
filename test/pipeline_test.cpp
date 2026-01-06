@@ -27,7 +27,7 @@ public:
 
 protected:
   auto do_deliver(rediscoro::resp3::message) -> void override { msgs_ += 1; }
-  auto do_deliver_error(rediscoro::response_error) -> void override { errs_ += 1; }
+  auto do_deliver_error(error_variant) -> void override { errs_ += 1; }
 
 private:
   std::size_t expected_{0};
@@ -97,7 +97,7 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   p.push(req, &sink);
 
   // Before any write/read, clear_all should deliver 2 errors.
-  p.clear_all(rediscoro::response_error{rediscoro::error::connection_closed});
+  p.clear_all(rediscoro::error::connection_closed);
   EXPECT_TRUE(sink.is_complete());
   EXPECT_EQ(sink.err_count(), 2u);
   EXPECT_FALSE(p.has_pending_write());
