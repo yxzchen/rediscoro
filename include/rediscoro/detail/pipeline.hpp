@@ -6,6 +6,7 @@
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/error.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <deque>
 #include <span>
@@ -39,6 +40,9 @@ class pipeline {
 public:
   pipeline() = default;
 
+  using clock = std::chrono::steady_clock;
+  using time_point = clock::time_point;
+
   /// Enqueue a request for sending.
   /// Associates request with a response_sink for delivery.
   ///
@@ -48,6 +52,11 @@ public:
   /// - For a fixed-size sink (pending_response<Ts...>), req.reply_count() MUST equal sizeof...(Ts)
   ///   (enforced at connection::enqueue<Ts...> boundary).
   auto push(request req, response_sink* sink) -> void;
+
+  /// Enqueue a request with a timeout deadline.
+  ///
+  /// deadline == time_point::max() means "no timeout".
+  auto push(request req, response_sink* sink, time_point deadline) -> void;
 
   /// Check if there are pending writes.
   [[nodiscard]] auto has_pending_write() const noexcept -> bool;
@@ -74,6 +83,13 @@ public:
   /// Clear all pending requests (on connection close/error).
   auto clear_all(rediscoro::error err) -> void;
 
+  /// Earliest deadline among all pending requests.
+  /// Returns time_point::max() if there is no deadline.
+  [[nodiscard]] auto next_deadline() const noexcept -> time_point;
+
+  /// True if the earliest pending request has reached its deadline.
+  [[nodiscard]] auto has_expired(time_point now) const noexcept -> bool;
+
   /// Get the number of pending requests (for diagnostics).
   [[nodiscard]] auto pending_count() const noexcept -> std::size_t {
     return pending_write_.size() + awaiting_read_.size();
@@ -84,13 +100,19 @@ private:
     request req;
     response_sink* sink;  // Abstract interface, no knowledge of coroutines
     std::size_t written{0};  // bytes written so far
+    time_point deadline{time_point::max()};
+  };
+
+  struct awaiting_item {
+    response_sink* sink;  // Abstract interface
+    time_point deadline{time_point::max()};
   };
 
   // Requests waiting to be written to socket
   std::deque<pending_item> pending_write_{};
 
   // Response sinks waiting for responses (one per sent request)
-  std::deque<response_sink*> awaiting_read_{};
+  std::deque<awaiting_item> awaiting_read_{};
 };
 
 }  // namespace rediscoro::detail

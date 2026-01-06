@@ -145,7 +145,9 @@ public:
   /// - error::operation_aborted: close() was called during connection
   /// - error::resolve_failed: DNS/name resolution failed
   /// - error::connect_failed: TCP connect failed after resolution
-  /// - error::timeout: TCP connection or handshake timed out
+  /// - error::resolve_timeout: DNS/name resolution timed out
+  /// - error::connect_timeout: TCP connect timed out
+  /// - error::handshake_timeout: RESP3 handshake timed out
   /// - error::handshake_failed: RESP3 handshake failed (HELLO/AUTH/SELECT)
   /// - system error codes: TCP connection failed, DNS resolution failed, etc.
   ///

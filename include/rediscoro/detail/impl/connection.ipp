@@ -159,8 +159,13 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
     }
   }
 
-  pipeline_.push(std::move(req), sink);
+  pipeline::time_point deadline = pipeline::time_point::max();
+  if (cfg_.request_timeout > std::chrono::milliseconds{0}) {
+    deadline = pipeline::clock::now() + cfg_.request_timeout;
+  }
+  pipeline_.push(std::move(req), sink, deadline);
   write_wakeup_.notify();
+  control_wakeup_.notify();  // request_timeout scheduling / wake control_loop when first request arrives
 }
 
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
@@ -231,6 +236,25 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
 
       co_await do_reconnect();
       continue;
+    }
+
+    if (state_ == connection_state::OPEN && cfg_.request_timeout > std::chrono::milliseconds{0}) {
+      auto now = pipeline::clock::now();
+      if (pipeline_.has_expired(now)) {
+        handle_error(make_error_code(::rediscoro::error::request_timeout));
+        continue;
+      }
+
+      const auto next = pipeline_.next_deadline();
+      if (next != pipeline::time_point::max()) {
+        iocoro::steady_timer timer{socket_.get_executor()};
+        timer.expires_at(next);
+
+        auto timer_wait = timer.async_wait(iocoro::use_awaitable);
+        auto wake_wait = control_wakeup_.wait();
+        (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
+        continue;
+      }
     }
 
     if (state_ == connection_state::CLOSING) {
@@ -333,7 +357,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   );
   if (!res.has_value()) {
     if (res.error() == iocoro::make_error_code(iocoro::error::timed_out)) {
-      last_error_ = make_error_code(::rediscoro::error::timeout);
+      last_error_ = make_error_code(::rediscoro::error::resolve_timeout);
     } else {
       last_error_ = make_error_code(::rediscoro::error::resolve_failed);
     }
@@ -367,7 +391,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
-      last_error_ = make_error_code(::rediscoro::error::timeout);
+      last_error_ = make_error_code(::rediscoro::error::connect_timeout);
     } else if (connect_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
       last_error_ = make_error_code(::rediscoro::error::operation_aborted);
     } else {
@@ -479,7 +503,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
 
   if (handshake_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = make_error_code(::rediscoro::error::timeout);
+    last_error_ = make_error_code(::rediscoro::error::handshake_timeout);
     co_return;
   }
 
@@ -652,7 +676,11 @@ inline auto connection::handle_error(std::error_code ec) -> void {
   // OPEN runtime error -> FAILED.
   last_error_ = ec;
   state_ = connection_state::FAILED;
-  pipeline_.clear_all(::rediscoro::error::connection_lost);
+  auto clear_err = ::rediscoro::error::connection_lost;
+  if (ec == make_error_code(::rediscoro::error::request_timeout)) {
+    clear_err = ::rediscoro::error::request_timeout;
+  }
+  pipeline_.clear_all(clear_err);
   if (socket_.is_open()) {
     socket_.close();
   }

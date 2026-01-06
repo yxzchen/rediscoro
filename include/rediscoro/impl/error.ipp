@@ -18,12 +18,18 @@ class error_category_impl : public std::error_category {
         return "already in progress";
       case error::resolve_failed:
         return "resolve failed";
+      case error::resolve_timeout:
+        return "resolve timeout";
       case error::connect_failed:
         return "connect failed";
+      case error::connect_timeout:
+        return "connect timeout";
       case error::handshake_failed:
         return "handshake failed";
-      case error::timeout:
-        return "timeout";
+      case error::handshake_timeout:
+        return "handshake timeout";
+      case error::request_timeout:
+        return "request timeout";
       case error::connection_closed:
         return "connection closed";
       case error::connection_lost:

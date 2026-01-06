@@ -21,18 +21,33 @@ enum class error {
   /// DNS resolution or name lookup failed before a TCP connection attempt.
   resolve_failed,
 
+  /// Address resolution timed out.
+  /// DNS resolution (getaddrinfo) did not complete within config::resolve_timeout.
+  resolve_timeout,
+
   /// TCP connect failed.
   /// The endpoint was resolved but the TCP connection could not be established.
   connect_failed,
+
+  /// TCP connect timed out.
+  /// TCP connection did not complete within config::connect_timeout.
+  connect_timeout,
 
   /// Handshake with Redis server failed.
   /// This can happen during initial connect() or during reconnection.
   /// Reasons: HELLO/AUTH/SELECT command failed, protocol mismatch, authentication error.
   handshake_failed,
 
-  /// Connection timeout.
-  /// TCP connection or handshake took too long to complete.
-  timeout,
+  /// RESP3 handshake timed out.
+  /// Handshake did not complete within config::connect_timeout.
+  handshake_timeout,
+
+  /// Request timed out.
+  ///
+  /// Contract:
+  /// - Request timeout is connection-level: once any request times out, the connection is treated
+  ///   as unhealthy and enters reconnection.
+  request_timeout,
 
   /// Connection is closed (CLOSING or CLOSED state).
   /// Either user called close() or connection was shut down.

@@ -5,10 +5,14 @@
 namespace rediscoro::detail {
 
 inline auto pipeline::push(request req, response_sink* sink) -> void {
+  push(std::move(req), sink, time_point::max());
+}
+
+inline auto pipeline::push(request req, response_sink* sink, time_point deadline) -> void {
   REDISCORO_ASSERT(sink != nullptr);
   REDISCORO_ASSERT(req.reply_count() == sink->expected_replies());
 
-  pending_write_.push_back(pending_item{std::move(req), sink, 0});
+  pending_write_.push_back(pending_item{std::move(req), sink, 0, deadline});
 }
 
 inline auto pipeline::has_pending_write() const noexcept -> bool {
@@ -38,14 +42,14 @@ inline auto pipeline::on_write_done(std::size_t n) -> void {
 
   if (front.written == wire.size()) {
     // Entire request written: move to awaiting read queue.
-    awaiting_read_.push_back(front.sink);
+    awaiting_read_.push_back(awaiting_item{front.sink, front.deadline});
     pending_write_.pop_front();
   }
 }
 
 inline auto pipeline::on_message(resp3::message msg) -> void {
   REDISCORO_ASSERT(!awaiting_read_.empty());
-  auto* sink = awaiting_read_.front();
+  auto* sink = awaiting_read_.front().sink;
   REDISCORO_ASSERT(sink != nullptr);
 
   sink->deliver(std::move(msg));
@@ -56,7 +60,7 @@ inline auto pipeline::on_message(resp3::message msg) -> void {
 
 inline auto pipeline::on_error(resp3::error err) -> void {
   REDISCORO_ASSERT(!awaiting_read_.empty());
-  auto* sink = awaiting_read_.front();
+  auto* sink = awaiting_read_.front().sink;
   REDISCORO_ASSERT(sink != nullptr);
 
   sink->deliver_error(err);
@@ -74,11 +78,28 @@ inline auto pipeline::clear_all(rediscoro::error err) -> void {
   pending_write_.clear();
 
   // Awaiting reads: fail all remaining replies.
-  for (auto* sink : awaiting_read_) {
-    REDISCORO_ASSERT(sink != nullptr);
-    sink->fail_all(err);
+  for (auto const& a : awaiting_read_) {
+    REDISCORO_ASSERT(a.sink != nullptr);
+    a.sink->fail_all(err);
   }
   awaiting_read_.clear();
+}
+
+inline auto pipeline::next_deadline() const noexcept -> time_point {
+  time_point a = time_point::max();
+  time_point b = time_point::max();
+  if (!pending_write_.empty()) {
+    a = pending_write_.front().deadline;
+  }
+  if (!awaiting_read_.empty()) {
+    b = awaiting_read_.front().deadline;
+  }
+  return std::min(a, b);
+}
+
+inline auto pipeline::has_expired(time_point now) const noexcept -> bool {
+  const auto d = next_deadline();
+  return d != time_point::max() && d <= now;
 }
 
 }  // namespace rediscoro::detail
