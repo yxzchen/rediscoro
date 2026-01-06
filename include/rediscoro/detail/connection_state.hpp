@@ -26,17 +26,83 @@ namespace rediscoro::detail {
 ///  (cancel)
 ///
 /// State transitions:
-/// - INIT -> CONNECTING: start() called, begin TCP connection
-/// - CONNECTING -> OPEN: TCP connected, handshake complete
-/// - CONNECTING -> FAILED: connection timeout or error
-/// - OPEN -> CLOSING: stop() called (graceful shutdown)
-/// - OPEN -> FAILED: IO error during operation
-/// - FAILED -> RECONNECTING: immediate reconnect attempt (if enabled)
-/// - FAILED -> FAILED: exponential backoff sleep between reconnects
-/// - RECONNECTING -> OPEN: reconnection successful
-/// - RECONNECTING -> FAILED: reconnection failed, retry
-/// - CLOSING -> CLOSED: all pending requests completed, socket closed
-/// - FAILED/RECONNECTING -> CLOSED: user cancel (stop() or destructor)
+/// - INIT -> CONNECTING: connect() begins initial TCP+handshake
+/// - CONNECTING -> OPEN: initial connection succeeded (TCP + handshake complete)
+/// - CONNECTING -> CLOSING -> CLOSED: initial connection failed (connect() unifies cleanup via close())
+/// - OPEN -> FAILED: runtime IO error occurred during normal operation (read/write path calls handle_error())
+/// - OPEN -> CLOSING -> CLOSED: close() requested by user
+/// - FAILED -> RECONNECTING: control_loop begins reconnection attempt (if enabled)
+/// - FAILED -> FAILED: control_loop backoff sleep between reconnection attempts
+/// - FAILED -> CLOSING -> CLOSED: close() requested OR reconnection disabled and deterministic cleanup is chosen
+/// - RECONNECTING -> OPEN: reconnection succeeded (TCP + handshake complete)
+/// - RECONNECTING -> FAILED: reconnection failed, retry with backoff
+/// - RECONNECTING -> CLOSING -> CLOSED: close() requested by user
+/// - CLOSING -> CLOSED: actor_loop shutdown completes (transition_to_closed())
+///
+/// State write authority (CRITICAL):
+/// - Only transition_to_closed() is allowed to set state_ = CLOSED.
+/// - close() transitions to CLOSING and then joins the background actor; the actor performs
+///   transition_to_closed() exactly once.
+/// - FAILED is reserved for runtime IO errors AFTER reaching OPEN; initial connect() failures
+///   MUST NOT enter FAILED.
+///
+/// Initial CONNECTING vs RECONNECTING asymmetry (IMPORTANT INVARIANT):
+/// - CONNECTING (initial): strict boundary. No user work is accepted before the first successful
+///   handshake completes (enqueue() is rejected with not_connected).
+/// - RECONNECTING (after having been OPEN): lenient recovery. User work is buffered optimistically
+///   to allow transport recovery (enqueue() is accepted and queued).
+/// - Rationale: This keeps the initial handshake phase simple and deterministic, while allowing
+///   better UX under transient network faults after the connection has been established once.
+///
+/// Legal transition table + trigger source (who changes state):
+///
+/// - INIT -> CONNECTING:
+///   - Trigger: connection::connect() (on connection strand)
+///   - Condition: connect() called and not already connecting/open
+///
+/// - INIT -> CLOSING -> CLOSED:
+///   - Trigger: connection::close() (on strand) + actor_loop/transition_to_closed()
+///   - Condition: user calls close() before connect()
+///
+/// - CONNECTING -> OPEN:
+///   - Trigger: connection::connect()/do_connect() (handshake path, on strand)
+///   - Condition: TCP connect + RESP3 handshake succeeds
+///
+/// - CONNECTING -> CLOSING -> CLOSED:
+///   - Trigger: connection::connect() failure path calls connection::close()
+///   - Condition: resolve/connect/handshake failure OR user cancels during connect()
+///
+/// - OPEN -> FAILED:
+///   - Trigger: read_loop/write_loop (runtime IO path) calls handle_error()
+///   - Condition: socket read/write error, protocol error, etc. while OPEN
+///
+/// - OPEN -> CLOSING -> CLOSED:
+///   - Trigger: connection::close() + actor_loop join
+///   - Condition: user calls close()
+///
+/// - FAILED -> RECONNECTING:
+///   - Trigger: control_loop
+///   - Condition: reconnection enabled and an attempt is scheduled (immediate or after backoff)
+///
+/// - FAILED -> FAILED:
+///   - Trigger: control_loop
+///   - Condition: reconnection enabled and backoff sleep is in progress
+///
+/// - FAILED -> CLOSING -> CLOSED:
+///   - Trigger: connection::close() OR control_loop chooses deterministic shutdown when reconnection disabled
+///   - Condition: user closes OR reconnection disabled
+///
+/// - RECONNECTING -> OPEN:
+///   - Trigger: control_loop/do_connect()
+///   - Condition: reconnection succeeds (TCP + handshake)
+///
+/// - RECONNECTING -> FAILED:
+///   - Trigger: control_loop/do_connect()
+///   - Condition: reconnection attempt fails
+///
+/// - RECONNECTING -> CLOSING -> CLOSED:
+///   - Trigger: connection::close() + actor_loop join
+///   - Condition: user calls close() during reconnection
 ///
 /// State properties and operation semantics:
 ///
@@ -44,28 +110,33 @@ namespace rediscoro::detail {
 /// - Socket not connected
 /// - enqueue(): REJECTED immediately with not_connected
 /// - connect(): transitions to CONNECTING
-/// - stop(): transitions to CLOSED immediately
+/// - close(): transitions to CLOSING -> CLOSED
 ///
 /// CONNECTING:
 /// - TCP connection in progress
 /// - enqueue(): REJECTED immediately with not_connected
-/// - stop(): transitions to CLOSING
+/// - close(): transitions to CLOSING -> CLOSED (connect() observes cancellation and unifies cleanup)
 /// - On success: transitions to OPEN
-/// - On error: transitions to FAILED
+/// - On error: transitions to CLOSING -> CLOSED (initial connect failure MUST NOT enter FAILED)
 ///
 /// OPEN:
 /// - Connected and actively processing requests
 /// - enqueue(): ACCEPTED (normal operation)
-/// - stop(): transitions to CLOSING
+/// - close(): transitions to CLOSING -> CLOSED
 /// - On IO error: transitions to FAILED
 /// - read_loop / write_loop process IO concurrently (full-duplex) on the same strand
 ///
 /// FAILED:
-/// - Error occurred (IO error, timeout, handshake failure, etc.)
+/// - Error occurred during normal operation AFTER reaching OPEN (runtime IO error)
 /// - enqueue(): REJECTED immediately with connection_lost
 /// - All pending requests at time of error are failed via pipeline.clear_all()
 /// - IO loops IMMEDIATELY stop normal IO (no drain, no further reads/writes)
 /// - Socket closed
+///
+/// Cancellation requirement during FAILED backoff (MUST IMPLEMENT):
+/// - FAILED may include an exponential backoff sleep between reconnection attempts.
+/// - close() MUST interrupt any backoff delay immediately (no waiting for sleep to expire).
+/// - Therefore: all sleeps MUST be cancellation-aware (e.g. timer wait composed with cancel/wakeup).
 ///
 /// FAILED has two sub-phases:
 ///
@@ -80,6 +151,10 @@ namespace rediscoro::detail {
 ///    - After sleep → transitions to RECONNECTING
 ///    - This creates a deliberate window where requests fail
 ///
+/// Note on transient window (IMPORTANT):
+/// - There exists a small window in FAILED (before transitioning to RECONNECTING) where enqueue()
+///   may fail even though reconnection will start soon. This is by design.
+///
 /// Transitions out of FAILED:
 /// - If reconnection enabled: → RECONNECTING (after optional sleep)
 /// - If reconnection disabled: → CLOSED (for deterministic cleanup)
@@ -88,17 +163,25 @@ namespace rediscoro::detail {
 /// RECONNECTING:
 /// - Actively attempting to reconnect
 /// - enqueue(): ACCEPTED and queued (unlimited queue)
+/// - Requests are buffered; write_loop is gated on OPEN and will only flush after reconnection succeeds
 /// - Attempts: TCP connect → handshake (HELLO/AUTH/SELECT/SETNAME)
 /// - Success → OPEN (reconnect_count_ reset to 0)
 /// - Failure → FAILED (reconnect_count_++, retry with backoff)
 /// - Infinite retry loop (only stops on user cancel)
 ///
 /// CLOSING:
-/// - Graceful shutdown in progress
+/// - Shutdown in progress
 /// - enqueue(): REJECTED immediately with connection_closed
-/// - write_loop flushes pending writes
-/// - read_loop drains pending reads (optional, may be bounded by timeout)
-/// - Then transitions to CLOSED
+///
+/// Phase-1 behavior (determinism-first):
+/// - No flush guarantee (no best-effort drain).
+/// - Immediately fail all pending work via pipeline.clear_all(connection_closed) and close the socket.
+///
+/// Future optional enhancement:
+/// - A graceful shutdown mode MAY flush pending writes and/or drain pending reads with a bounded timeout.
+/// - If implemented, it must be specified precisely (flush boundary, failure behavior, timeouts).
+///
+/// Then transitions to CLOSED (via transition_to_closed()).
 ///
 /// CLOSED:
 /// - Terminal state, socket closed
@@ -114,10 +197,12 @@ namespace rediscoro::detail {
 /// 4. FAILED can transition to OPEN (via RECONNECTING)
 /// 5. control_loop runs until CLOSED and owns state transitions
 /// 6. Only one state transition per handle_error() call
+/// 7. Only transition_to_closed() writes CLOSED (single writer)
 ///
 /// Reconnection semantics:
 /// - Automatic reconnection is SUPPORTED
 /// - Request replay is NOT SUPPORTED
+/// - Users should treat reconnection as transport recovery only, not application-level retry.
 ///
 /// What happens on connection failure:
 /// 1. All pending requests at time of error are failed immediately
@@ -146,9 +231,12 @@ namespace rediscoro::detail {
 ///   t=Z: Reconnection succeeds → queued request processed
 ///
 /// User responsibility:
-/// - Decide when to give up (call stop() or destroy client)
+/// - Decide when to give up (call close() or destroy client)
 /// - Implement application-level retry for failed requests (if needed)
 /// - Handle partial failures in multi-command transactions
+///
+/// Enum ordering note:
+/// - The enum numeric ordering has no semantic meaning; transitions are explicitly controlled.
 enum class connection_state{
   INIT = 1,
   CONNECTING,
