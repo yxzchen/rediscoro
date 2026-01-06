@@ -5,6 +5,9 @@
 #include <iocoro/co_spawn.hpp>
 #include <iocoro/this_coro.hpp>
 
+#include <cstddef>
+#include <span>
+
 namespace rediscoro::detail {
 
 inline connection::connection(iocoro::io_executor ex, config cfg)
@@ -150,18 +153,16 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
 }
 
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
-  // Phase-1 minimal actor:
-  // - No sub-loops yet.
-  // - Exists so close() has a single join point (actor_awaitable_).
+  // Minimal actor (step-2):
+  // - Own write_loop lifetime so close() can use actor_awaitable_ as the shutdown barrier.
+  // - Future: spawn read_loop/control_loop as use_awaitable and join them here.
   //
-  // Future hard constraint (IMPORTANT):
-  // - When we add write_loop/read_loop/control_loop, actor_loop MUST own their lifetime.
-  // - Do NOT spawn them as detached coroutines without joining, otherwise actor_loop could exit
-  //   while sub-loops are still running/blocked.
-  // - Preferred pattern: co_spawn(use_awaitable) each loop and co_await iocoro::when_all(...) to join.
-  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
-    co_await control_wakeup_.wait();
-  }
+  // Hard constraint (IMPORTANT):
+  // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
+
+  auto ex = executor_.strand().any_executor();
+  auto writer = iocoro::co_spawn(ex, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
+  co_await std::move(writer);
 
   // CRITICAL: Only transition_to_closed() is allowed to write state_ = CLOSED.
   transition_to_closed();
@@ -169,11 +170,15 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::write_loop() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  // - co_await write_wakeup_.wait() when no work / not OPEN
-  // - while (state_ == OPEN && pipeline_.has_pending_write()) { drain write }
-  // - on progress: notify read_wakeup_ if new pending reads become available
-  // - on error: handle_error(ec) and notify control_wakeup_
+  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+    if (state_ != connection_state::OPEN || !pipeline_.has_pending_write()) {
+      co_await write_wakeup_.wait();
+      continue;
+    }
+
+    co_await do_write();
+  }
+
   co_return;
 }
 
@@ -255,18 +260,69 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::do_write() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  // - Get next_write_buffer from pipeline
-  // - async_write to socket
-  // - Notify pipeline of bytes written
+  if (state_ != connection_state::OPEN) {
+    co_return;
+  }
+
+  struct in_flight_guard {
+    bool& flag;
+    explicit in_flight_guard(bool& f) : flag(f) {
+      REDISCORO_ASSERT(!flag, "concurrent write detected");
+      flag = true;
+    }
+    ~in_flight_guard() { flag = false; }
+  };
+
+  in_flight_guard guard{write_in_flight_};
+
+  while (!cancel_.is_cancelled() && state_ == connection_state::OPEN && pipeline_.has_pending_write()) {
+    auto view = pipeline_.next_write_buffer();
+    auto buf = std::span<std::byte const>{
+      reinterpret_cast<std::byte const*>(view.data()),
+      view.size()
+    };
+
+    auto r = co_await socket_.async_write_some(buf);
+    if (!r.has_value()) {
+      handle_error(r.error());
+      co_return;
+    }
+
+    pipeline_.on_write_done(*r);
+  }
+
   co_return;
 }
 
 inline auto connection::handle_error(std::error_code ec) -> void {
-  // TODO: Implementation
-  // - Log error
-  // - Transition to FAILED state
-  // - Clear pipeline with error
+  // Minimal error handling for step-2:
+  // - Only OPEN runtime IO errors should transition to FAILED.
+  // - FAILED/RECONNECTING/CLOSING/CLOSED are terminal-ish for normal IO.
+
+  if (state_ == connection_state::FAILED ||
+      state_ == connection_state::RECONNECTING ||
+      state_ == connection_state::CLOSING ||
+      state_ == connection_state::CLOSED) {
+    return;
+  }
+
+  last_error_ = ec;
+
+  if (state_ == connection_state::OPEN) {
+    state_ = connection_state::FAILED;
+    pipeline_.clear_all(::rediscoro::error::connection_lost);
+    if (socket_.is_open()) {
+      socket_.close();
+    }
+    control_wakeup_.notify();
+    write_wakeup_.notify();
+    read_wakeup_.notify();
+    return;
+  }
+
+  // During CONNECTING/INIT, do_connect() is responsible for mapping errors; keep state as-is.
+  cancel_.request_cancel();
+  control_wakeup_.notify();
 }
 
 inline auto connection::transition_to_closed() -> void {
