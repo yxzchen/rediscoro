@@ -519,8 +519,14 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
       pipeline_.clear_all(error::connection_reset);
       last_error_ = error::connection_reset;
     } else {
-      pipeline_.clear_all(error::connect_failed);
-      last_error_ = error::connect_failed;
+      // TCP is already connected here; any remaining error is either:
+      // - a handshake/protocol failure (RESP3 parse/redis error), or
+      // - an IO failure during handshake (system error_code).
+      //
+      // Use handshake_failed to fail the internal handshake sink deterministically, but preserve
+      // the original error_code for diagnostics / connect() return when possible.
+      pipeline_.clear_all(error::handshake_failed);
+      last_error_ = handshake_ec;
     }
     co_return;
   }
