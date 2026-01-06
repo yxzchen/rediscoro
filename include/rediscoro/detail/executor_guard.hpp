@@ -70,7 +70,9 @@ public:
   }
 
   /// Get the underlying io_executor (for socket construction).
-  [[nodiscard]] auto get_io_executor() const -> iocoro::io_executor;
+  [[nodiscard]] auto get_io_executor() const -> iocoro::io_executor {
+    return io_executor_;
+  }
 
 private:
   iocoro::io_executor io_executor_{};
@@ -78,5 +80,3 @@ private:
 };
 
 }  // namespace rediscoro::detail
-
-#include <rediscoro/detail/impl/executor_guard.ipp>
