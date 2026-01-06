@@ -24,6 +24,12 @@ namespace rediscoro::detail {
 
 /// Core connection actor.
 ///
+/// Design philosophy (CRITICAL):
+/// This class enforces a clean separation between connection establishment and normal operation:
+/// - BEFORE connect() succeeds → NO user requests accepted (enqueue returns not_connected)
+/// - AFTER connect() succeeds → Normal request processing begins
+/// This eliminates all handshake/request interleaving complexity.
+///
 /// Responsibilities:
 /// - Manage socket lifecycle on a single strand
 /// - Run the worker_loop coroutine
@@ -33,7 +39,7 @@ namespace rediscoro::detail {
 /// Structural constraints:
 /// - Only one worker_loop coroutine instance at a time
 /// - worker_loop runs until CLOSED state
-/// - Socket only accessed within worker_loop
+/// - Socket exclusively accessed by either connect() or worker_loop (never both)
 /// - External requests enqueued via thread-safe methods
 ///
 /// Thread safety and concurrent operations:
@@ -44,28 +50,48 @@ namespace rediscoro::detail {
 /// Critical invariants:
 /// 1. Single worker instance: worker_awaitable_.has_value() == (worker is running)
 /// 2. Strand serialization: All state_, socket_, pipeline_ mutations on strand
-/// 3. Cancel handling: connect() checks cancel_ at each await point
-/// 4. Resource cleanup: On failure/close, wait for worker_loop to exit completely
-/// 5. Retry support: After CLOSED, connect() can reset and retry
+/// 3. Handshake exclusivity: connect() owns socket during CONNECTING, worker_loop does nothing
+/// 4. Request rejection: enqueue() rejects all requests during INIT/CONNECTING
+/// 5. Cancel handling: connect() checks cancel_ at each await point
+/// 6. Resource cleanup: On failure/close, wait for worker_loop to exit completely
+/// 7. Retry support: After CLOSED, connect() can reset and retry
 ///
 /// State transition rules:
 /// - connect() success: INIT → CONNECTING → OPEN
 /// - connect() failure: INIT → CONNECTING → CLOSED (with full cleanup)
 /// - Runtime error: OPEN → FAILED → RECONNECTING (if enabled) OR CLOSED
 /// - close() called: any state → CLOSED
+///
+/// Ownership during states:
+/// - INIT: No owner (waiting for connect())
+/// - CONNECTING: connect() owns socket exclusively
+/// - OPEN: worker_loop processes requests, connect() is idle
+/// - FAILED/RECONNECTING: worker_loop handles reconnection
+/// - CLOSED: No owner
 class connection : public std::enable_shared_from_this<connection> {
 public:
   explicit connection(iocoro::io_executor ex, config cfg);
 
   /// Perform initial connection to Redis server.
   ///
+  /// Design philosophy:
+  /// This method establishes a clean boundary: BEFORE connect() completes successfully,
+  /// NO user requests are accepted. This simplifies the entire system by ensuring that
+  /// handshake and normal operation never overlap.
+  ///
   /// Semantics (CRITICAL):
   /// This is a "strand-serialized operation". All state mutations (state_, socket_, pipeline_)
   /// MUST occur on the connection's strand to prevent data races with worker_loop.
   ///
+  /// Responsibilities during handshake:
+  /// - connect() OWNS the socket and pipeline during CONNECTING state
+  /// - worker_loop does NOT process requests until state becomes OPEN
+  /// - enqueue() REJECTS all requests during INIT/CONNECTING states (error::not_connected)
+  /// - This exclusive ownership eliminates all handshake/request interleaving complexity
+  ///
   /// Post-condition guarantee:
   /// When this method returns, the connection is in one of two states:
-  /// - OPEN: Connection established, ready for requests
+  /// - OPEN: Connection established, handshake complete, ready for user requests
   /// - CLOSED: Connection failed and all resources cleaned up (socket closed, pipeline cleared,
   ///           worker_loop exited)
   ///
@@ -125,10 +151,17 @@ public:
   /// Can be called from any executor.
   /// Returns a pending_response that will be completed when all replies arrive.
   ///
+  /// IMPORTANT: Requests can only be enqueued AFTER connect() succeeds.
+  /// This design ensures clean separation between connection establishment and normal operation.
+  ///
   /// Behavior by state:
-  /// - INIT, CONNECTING, OPEN, RECONNECTING: Request accepted and queued
-  /// - FAILED: Request is rejected immediately (client_error: connection_error)
-  /// - CLOSING, CLOSED: Request is rejected immediately (client_error: connection_closed)
+  /// - INIT, CONNECTING: Request rejected immediately (error::not_connected)
+  ///                     User must wait for connect() to complete
+  /// - OPEN, RECONNECTING: Request accepted and queued
+  /// - FAILED: Request rejected immediately (error::connection_error)
+  ///           Connection is in error state, automatic reconnection may be in progress
+  /// - CLOSING, CLOSED: Request rejected immediately (error::connection_closed)
+  ///                    Connection has been shut down
   template <typename... Ts>
   auto enqueue(request req) -> std::shared_ptr<pending_response<Ts...>>;
 
@@ -180,28 +213,51 @@ private:
   /// Main worker loop coroutine.
   /// Runs on the connection's strand until CLOSED.
   ///
+  /// Design simplification (CRITICAL):
+  /// This loop does NOT handle initial connection. It only processes requests after the
+  /// connection reaches OPEN state. This eliminates all handshake/request interleaving logic.
+  ///
   /// Responsibilities:
-  /// - Process pending requests (do_write)
+  /// - Process pending user requests (do_write)
   /// - Read responses from server (do_read)
   /// - Handle runtime connection errors and automatic reconnection
   ///
   /// NOT responsible for:
-  /// - Initial connection (handled by connect())
+  /// - Initial connection and handshake (handled by connect())
+  /// - Processing requests during CONNECTING state (enqueue() rejects them)
   /// - Starting the loop (handled by run_worker())
+  ///
+  /// Loop structure:
+  /// while (!cancel_ && state_ != CLOSED) {
+  ///   co_await wakeup_.wait();
+  ///
+  ///   if (state_ == OPEN) {
+  ///     // Normal operation - drain all pending work
+  ///     while (has_pending_write() || has_pending_read()) {
+  ///       if (has_pending_write()) co_await do_write();
+  ///       if (has_pending_read()) co_await do_read();
+  ///     }
+  ///   }
+  ///   else if (state_ == FAILED) {
+  ///     // Runtime error - handle reconnection
+  ///     co_await do_reconnect_or_close();
+  ///   }
+  ///   // INIT/CONNECTING/RECONNECTING: do nothing, connect() is in charge
+  /// }
   ///
   /// Loop invariant (CRITICAL):
   /// - Each wakeup drains ALL pending work before next wait
   /// - Never suspend while work is available
   /// - This prevents "work queued but loop sleeping" deadlock
   ///
-  /// Drain strategy (OPEN state):
-  /// 1. Wait for wakeup notification (may have multiple counts)
-  /// 2. Loop until no work remains:
-  ///    - Write all pending requests (until socket blocks)
-  ///    - Read all available responses (until socket blocks or no pending reads)
-  /// 3. Only then wait for next wakeup
+  /// State handling:
+  /// - INIT/CONNECTING: No-op, connect() owns the socket
+  /// - OPEN: Process requests normally (do_write + do_read)
+  /// - FAILED: Cleanup and attempt reconnection (runtime errors only)
+  /// - RECONNECTING: No-op during handshake, resume OPEN after success
+  /// - CLOSING/CLOSED: Exit loop
   ///
-  /// Drain strategy (FAILED state - runtime errors only):
+  /// FAILED state handling (runtime errors only):
   /// - IMMEDIATELY stop all normal socket IO (do_read/do_write)
   /// - Do NOT attempt do_read() or do_write() after state_ becomes FAILED
   /// - Close socket and clear all in-flight requests with error via pipeline.clear_all()
@@ -211,14 +267,8 @@ private:
   /// - If reconnection is disabled: transition to CLOSED
   /// - Rationale: Once FAILED, the socket is in unknown state; further reads/writes are unsafe.
   ///
-  /// State transition on error:
-  /// - Any do_read/do_write error → call handle_error(ec)
-  /// - handle_error() sets state = FAILED
-  /// - Worker loop MUST NOT continue do_read/do_write in the same drain pass after FAILED
-  /// - Next drain pass sees FAILED → cleanup + optional reconnection path only
-  ///
   /// Work availability check (when state == OPEN):
-  /// - has_pending_write() || has_pending_read() || cancel_requested()
+  /// - has_pending_write() || has_pending_read()
   auto worker_loop() -> iocoro::awaitable<void>;
 
   /// Connect to Redis server with timeout and retry.

@@ -16,6 +16,8 @@ class error_category_impl : public std::error_category {
         return "connection closed";
       case error::connection_error:
         return "connection error";
+      case error::not_connected:
+        return "not connected";
       default:
         return "unknown error";
     }

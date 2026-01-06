@@ -119,29 +119,86 @@ inline auto connection::close() -> iocoro::awaitable<void> {
 
 inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
   // TODO: Implementation
-  // - Add request to pipeline (thread-safe)
-  // - Notify worker loop via wakeup_.notify()
+  //
+  // 1. Check current state and reject early if not ready
+  //    switch (state_) {
+  //      case INIT:
+  //      case CONNECTING:
+  //        // Connection not established yet
+  //        sink->deliver_error(make_error_code(error::not_connected));
+  //        return;
+  //
+  //      case FAILED:
+  //        // Connection in error state (may be reconnecting in background)
+  //        sink->deliver_error(make_error_code(error::connection_error));
+  //        return;
+  //
+  //      case CLOSING:
+  //      case CLOSED:
+  //        // Connection shut down
+  //        sink->deliver_error(make_error_code(error::connection_closed));
+  //        return;
+  //
+  //      case OPEN:
+  //      case RECONNECTING:
+  //        // Accept request
+  //        break;
+  //    }
+  //
+  // 2. Add request to pipeline
+  //    pipeline_.push(std::move(req), sink);
+  //
+  // 3. Notify worker loop to process the request
+  //    wakeup_.notify();
 }
 
 inline auto connection::worker_loop() -> iocoro::awaitable<void> {
   // TODO: Implementation
   //
-  // Main loop: Process requests and responses while connection is active
-  // - while (!cancelled && state != CLOSED):
-  //   - wait for wakeup_
-  //   - if cancelled: break
-  //   - if state == FAILED: handle runtime reconnection
-  //     * Only triggered by runtime IO errors AFTER reaching OPEN state
-  //     * NOT triggered by initial connection failure (handled by connect())
-  //     * If reconnection enabled: co_await do_reconnect()
-  //     * If reconnection disabled: break
-  //   - if has_pending_write: do_write()
-  //   - if has_pending_read: do_read()
+  // Design philosophy: This loop is a pure "runtime request processor".
+  // It does NOT handle initial connection/handshake - that's connect()'s job.
+  //
+  // Main loop structure:
+  // while (!cancel_.is_cancelled() && state_ != CLOSED) {
+  //   co_await wakeup_.wait();
+  //
+  //   if (cancel_.is_cancelled()) break;
+  //
+  //   // State dispatch
+  //   if (state_ == OPEN) {
+  //     // Normal operation: drain all pending work
+  //     while (pipeline_.has_pending_write() || pipeline_.has_pending_read()) {
+  //       if (pipeline_.has_pending_write()) {
+  //         co_await do_write();
+  //         if (state_ == FAILED) break;  // Error during write
+  //       }
+  //       if (pipeline_.has_pending_read()) {
+  //         co_await do_read();
+  //         if (state_ == FAILED) break;  // Error during read
+  //       }
+  //     }
+  //   }
+  //   else if (state_ == FAILED) {
+  //     // Runtime error - attempt reconnection or close
+  //     // NOTE: This is ONLY for runtime errors after reaching OPEN
+  //     // Initial connection failure is handled by connect() directly
+  //     if (cfg_.reconnection.enabled) {
+  //       co_await do_reconnect();  // Attempts reconnection, may transition to OPEN or CLOSED
+  //     } else {
+  //       break;  // Exit, will transition to CLOSED in cleanup
+  //     }
+  //   }
+  //   // INIT/CONNECTING/RECONNECTING: do nothing, connect() owns the socket
+  // }
   //
   // Cleanup:
   // - transition_to_closed()
   //
-  // NOTE: Initial connection is NOT handled here, it's handled by connect()
+  // KEY INSIGHT: By not handling initial connection here, we eliminate:
+  // - Handshake/request interleaving logic
+  // - CONNECTING state special cases
+  // - Pipeline phase distinction (handshake vs normal)
+  // - Worker/connect coordination complexity
   co_return;
 }
 

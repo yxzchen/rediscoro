@@ -14,6 +14,10 @@ enum class error {
 
   /// Connection failed (IO error, handshake failure, etc.) and request cannot be completed.
   connection_error = 3,
+
+  /// Connection not established yet (state is INIT or CONNECTING).
+  /// User must wait for connect() to complete before enqueuing requests.
+  not_connected = 4,
 };
 
 auto make_error_code(error e) -> std::error_code;
