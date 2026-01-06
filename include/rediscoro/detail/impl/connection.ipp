@@ -192,7 +192,7 @@ inline auto connection::write_loop() -> iocoro::awaitable<void> {
 
 inline auto connection::read_loop() -> iocoro::awaitable<void> {
   while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
-    if (state_ != connection_state::OPEN || !pipeline_.has_pending_read()) {
+    if (state_ != connection_state::OPEN) {
       co_await read_wakeup_.wait();
       continue;
     }
@@ -218,6 +218,13 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
       cancel_.request_cancel();
       write_wakeup_.notify();
       read_wakeup_.notify();
+      // Do not wait here: cancellation must take effect immediately.
+      continue;
+    }
+
+    if (state_ == connection_state::CLOSING) {
+      // close() or error path requested shutdown; let actor_loop join complete.
+      break;
     }
 
     co_await control_wakeup_.wait();
@@ -295,59 +302,55 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 
   in_flight_guard guard{read_in_flight_};
 
-  while (!cancel_.is_cancelled() && state_ == connection_state::OPEN && pipeline_.has_pending_read()) {
-    auto writable = parser_.prepare();
-    auto buf = std::span<std::byte>{
-      reinterpret_cast<std::byte*>(writable.data()),
-      writable.size()
-    };
+  // Socket-driven read: perform one read operation (may parse multiple messages from the buffer).
+  // This allows detecting peer close even when no pending_read exists.
+  auto writable = parser_.prepare();
+  auto buf = std::span<std::byte>{
+    reinterpret_cast<std::byte*>(writable.data()),
+    writable.size()
+  };
 
-    auto r = co_await socket_.async_read_some(buf);
-    if (!r.has_value()) {
-      handle_error(r.error());
-      co_return;
-    }
+  auto r = co_await socket_.async_read_some(buf);
+  if (!r.has_value()) {
+    handle_error(r.error());
+    co_return;
+  }
 
-    if (*r == 0) {
-      // Peer closed.
-      handle_error(std::make_error_code(std::errc::connection_reset));
-      co_return;
-    }
+  if (*r == 0) {
+    // Peer closed (EOF).
+    handle_error(std::make_error_code(std::errc::connection_reset));
+    co_return;
+  }
 
-    parser_.commit(*r);
+  parser_.commit(*r);
 
-    for (;;) {
-      auto parsed = parser_.parse_one();
-      if (!parsed.has_value()) {
-        if (parsed.error() == resp3::error::needs_more) {
-          break;
-        }
-
-        // Deliver parser error into the pipeline, then treat it as a fatal connection error.
-        if (pipeline_.has_pending_read()) {
-          pipeline_.on_error(parsed.error());
-        }
-        handle_error(resp3::make_error_code(parsed.error()));
-        co_return;
-      }
-
-      if (!pipeline_.has_pending_read()) {
-        // Unsolicited message (e.g. PUSH) is not supported yet.
-        // Temporary policy: treat as "unsupported feature" rather than protocol violation.
-        handle_error(std::make_error_code(std::errc::not_supported));
-        co_return;
-      }
-
-      auto msg = resp3::build_message(parser_.tree(), *parsed);
-      pipeline_.on_message(std::move(msg));
-
-      // Critical for zero-copy parser: reclaim before parsing the next message.
-      parser_.reclaim();
-
-      if (!pipeline_.has_pending_read()) {
+  for (;;) {
+    auto parsed = parser_.parse_one();
+    if (!parsed.has_value()) {
+      if (parsed.error() == resp3::error::needs_more) {
         break;
       }
+
+      // Deliver parser error into the pipeline, then treat it as a fatal connection error.
+      if (pipeline_.has_pending_read()) {
+        pipeline_.on_error(parsed.error());
+      }
+      handle_error(resp3::make_error_code(parsed.error()));
+      co_return;
     }
+
+    if (!pipeline_.has_pending_read()) {
+      // Unsolicited message (e.g. PUSH) is not supported yet.
+      // Temporary policy: treat as "unsupported feature" rather than protocol violation.
+      handle_error(std::make_error_code(std::errc::not_supported));
+      co_return;
+    }
+
+    auto msg = resp3::build_message(parser_.tree(), *parsed);
+    pipeline_.on_message(std::move(msg));
+
+    // Critical for zero-copy parser: reclaim before parsing the next message.
+    parser_.reclaim();
   }
 
   co_return;
