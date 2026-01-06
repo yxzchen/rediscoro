@@ -81,12 +81,18 @@ client
 awaitable<void> connection::worker_loop() {
   co_await do_connect();
 
-  while (state_ == OPEN) {
+  while (!cancel_.is_cancelled() && state_ != CLOSED) {
     co_await wakeup_.wait();
 
     if (cancel_.is_cancelled()) {
-      state_ = CLOSED;
       break;
+    }
+
+    if (state_ == FAILED) {
+      // Backoff sleep may happen here (state stays FAILED during sleep),
+      // then transition to RECONNECTING and attempt reconnection.
+      co_await do_reconnect();
+      continue;
     }
 
     if (pipeline_.has_pending_write()) {
@@ -98,7 +104,7 @@ awaitable<void> connection::worker_loop() {
     }
   }
 
-  transition_to_closed();
+  transition_to_closed();  // stop() waits until CLOSED
 }
 ```
 
@@ -114,25 +120,35 @@ awaitable<void> connection::worker_loop() {
    INIT
     |
     v
-  CONNECTING -----> FAILED
-    |                 |
-    v                 |
-   OPEN -----------> FAILED
-    |                 |
-    v                 |
-  CLOSING             |
-    |                 |
-    v                 v
-              CLOSED
+  CONNECTING -----> FAILED <------+
+    |                 |           |
+    v                 v           |
+   OPEN ---------> FAILED ------> RECONNECTING
+    |               (sleep)         |
+    v                 ^             |
+  CLOSING             |             |
+    |                 +-------------+
+    v                              (fail)
+  CLOSED <---------------------------+
+    ^
+    |
+  (cancel)
 ```
 
 **States:**
 - `INIT` - Initial state, not connected
 - `CONNECTING` - TCP connection in progress
 - `OPEN` - Connected and ready
-- `FAILED` - Unrecoverable error
+- `FAILED` - Error occurred, or waiting in backoff sleep before next reconnect attempt
+- `RECONNECTING` - Actively attempting to reconnect (TCP connect + handshake)
 - `CLOSING` - Graceful shutdown
 - `CLOSED` - Terminal state
+
+**Backoff window semantics (重要):**
+- `FAILED → (sleep delay) → RECONNECTING`
+- During the sleep delay, state remains `FAILED` (no extra "waiting" substate).
+- `FAILED` rejects new enqueue() (this is the deliberate "window where requests fail").
+- `RECONNECTING` accepts new enqueue() and queues requests (no request replay for already-failed requests).
 
 ### 5. pipeline
 
@@ -471,31 +487,29 @@ auto [r1, r2, r3] = co_await client.pipeline(
 - Out-of-band message dispatch
 - Subscribe/unsubscribe commands
 
-### Reconnection (NOT CURRENTLY SUPPORTED)
+### Reconnection (SUPPORTED, no request replay)
 
 **Current behavior:**
-- Connection enters FAILED → CLOSED on error
-- All pending requests fail
-- No automatic reconnection
-- No request replay
+- Connection enters `FAILED` on IO/handshake error
+- All pending in-flight requests at the moment of error fail immediately (no replay)
+- If reconnection is enabled, connection keeps trying to reconnect indefinitely until success or user cancel
+- New requests during `RECONNECTING` are queued; during `FAILED` (backoff sleep window) are rejected
 
-**Why deferred:**
-- Adds significant complexity to state machine
-- Requires request replay buffer
-- Idempotency concerns (not all Redis commands safe to replay)
-- Memory management for replay buffer
+**State semantics during reconnection:**
+- `FAILED`: either a very short transient between attempts, or the deliberate backoff sleep window; enqueue() rejects
+- `RECONNECTING`: actively attempting TCP connect + handshake; enqueue() accepts and queues
+- On successful reconnection: `state = OPEN` and `reconnect_count_` is reset to 0
 
-**If implemented in future:**
-- New `RECONNECTING` state
-- Separate `reconnection_policy` component
-- Opt-in request replay with idempotency tags
-- Exponential backoff
-- Max retry limits
+**do_reconnect() return semantics:**
+- do_reconnect() does not "fail return": it loops until either success (returns with `state = OPEN`) or user cancel (returns with `state = CLOSED`).
 
-**Current workaround:**
-- Client layer detects failure
-- Creates new connection
-- Manually retries safe operations
+**Error de-duplication (重要):**
+- Multiple IO paths may report errors close together (e.g., read and write both observe a broken socket).
+- `handle_error()` must be idempotent / guarded so reconnection is initiated only once.
+
+**Not supported:**
+- Request replay / automatic retry of already-failed requests
+- Command idempotency tagging for safe replay
 
 ## Implementation Status
 
