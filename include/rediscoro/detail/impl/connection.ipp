@@ -123,16 +123,16 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
   switch (state_) {
     case connection_state::INIT:
     case connection_state::CONNECTING: {
-      sink->deliver_error(::rediscoro::error::not_connected);
+      sink->fail_all(::rediscoro::error::not_connected);
       return;
     }
     case connection_state::FAILED: {
-      sink->deliver_error(::rediscoro::error::connection_lost);
+      sink->fail_all(::rediscoro::error::connection_lost);
       return;
     }
     case connection_state::CLOSING:
     case connection_state::CLOSED: {
-      sink->deliver_error(::rediscoro::error::connection_closed);
+      sink->fail_all(::rediscoro::error::connection_closed);
       return;
     }
     case connection_state::OPEN:

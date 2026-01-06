@@ -69,18 +69,14 @@ inline auto pipeline::clear_all(rediscoro::error err) -> void {
   // Pending writes: none of the replies will arrive; fail all expected replies.
   for (auto& p : pending_write_) {
     REDISCORO_ASSERT(p.sink != nullptr);
-    while (!p.sink->is_complete()) {
-      p.sink->deliver_error(err);
-    }
+    p.sink->fail_all(err);
   }
   pending_write_.clear();
 
   // Awaiting reads: fail all remaining replies.
   for (auto* sink : awaiting_read_) {
     REDISCORO_ASSERT(sink != nullptr);
-    while (!sink->is_complete()) {
-      sink->deliver_error(err);
-    }
+    sink->fail_all(err);
   }
   awaiting_read_.clear();
 }

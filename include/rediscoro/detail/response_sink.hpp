@@ -114,6 +114,27 @@ public:
     do_deliver_error(error_variant{err});
   }
 
+  /// Fail this sink until it becomes complete.
+  ///
+  /// Rationale:
+  /// - A request may contain multiple commands (expected_replies() > 1).
+  /// - On connection close/error, the caller often needs to fail ALL remaining replies.
+  ///
+  /// Semantics:
+  /// - Repeatedly calls deliver_error(err) until is_complete() becomes true.
+  /// - Defensive: if already complete, does nothing.
+  template <typename E>
+  auto fail_all(E err) -> void {
+    static_assert(
+      std::is_same_v<E, resp3::error> || std::is_same_v<E, rediscoro::error>,
+      "fail_all only accepts resp3::error or rediscoro::error"
+    );
+
+    while (!is_complete()) {
+      deliver_error(err);
+    }
+  }
+
   /// Check if delivery is complete (for diagnostics).
   [[nodiscard]] virtual auto is_complete() const noexcept -> bool = 0;
 
