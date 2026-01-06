@@ -46,13 +46,13 @@ namespace rediscoro::detail {
 /// - FAILED is reserved for runtime IO errors AFTER reaching OPEN; initial connect() failures
 ///   MUST NOT enter FAILED.
 ///
-/// Initial CONNECTING vs RECONNECTING asymmetry (IMPORTANT INVARIANT):
-/// - CONNECTING (initial): strict boundary. No user work is accepted before the first successful
-///   handshake completes (enqueue() is rejected with not_connected).
-/// - RECONNECTING (after having been OPEN): lenient recovery. User work is buffered optimistically
-///   to allow transport recovery (enqueue() is accepted and queued).
-/// - Rationale: This keeps the initial handshake phase simple and deterministic, while allowing
-///   better UX under transient network faults after the connection has been established once.
+/// Enqueue policy invariant (IMPORTANT):
+/// - Only OPEN accepts user work (enqueue() is accepted).
+/// - All other states reject enqueue() immediately:
+///   * INIT/CONNECTING: not_connected
+///   * FAILED/RECONNECTING: connection_lost
+///   * CLOSING/CLOSED: connection_closed
+/// - Rationale: deterministic failure semantics + avoid buffering across connection generations.
 ///
 /// Legal transition table + trigger source (who changes state):
 ///
@@ -152,8 +152,9 @@ namespace rediscoro::detail {
 ///    - This creates a deliberate window where requests fail
 ///
 /// Note on transient window (IMPORTANT):
-/// - There exists a small window in FAILED (before transitioning to RECONNECTING) where enqueue()
-///   may fail even though reconnection will start soon. This is by design.
+/// - There exists a small window where the connection is not usable and enqueue() fails:
+///   FAILED (before transitioning to RECONNECTING) and the entire RECONNECTING phase.
+///   This is by design.
 ///
 /// Transitions out of FAILED:
 /// - If reconnection enabled: → RECONNECTING (after optional sleep)
@@ -162,8 +163,7 @@ namespace rediscoro::detail {
 ///
 /// RECONNECTING:
 /// - Actively attempting to reconnect
-/// - enqueue(): ACCEPTED and queued (unlimited queue)
-/// - Requests are buffered; write_loop is gated on OPEN and will only flush after reconnection succeeds
+/// - enqueue(): REJECTED immediately with connection_lost
 /// - Attempts: TCP connect → handshake (HELLO/AUTH/SELECT/SETNAME)
 /// - Success → OPEN (reconnect_count_ reset to 0)
 /// - Failure → FAILED (reconnect_count_++, retry with backoff)
@@ -191,7 +191,7 @@ namespace rediscoro::detail {
 /// - Object can be destroyed safely
 ///
 /// State invariants (MUST hold at all times):
-/// 1. OPEN and RECONNECTING accept new work
+/// 1. Only OPEN accepts new work
 /// 2. FAILED and CLOSING reject new work immediately
 /// 3. CLOSED is terminal (no transitions out)
 /// 4. FAILED can transition to OPEN (via RECONNECTING)

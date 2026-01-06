@@ -130,7 +130,8 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
       sink->fail_all(::rediscoro::error::not_connected);
       return;
     }
-    case connection_state::FAILED: {
+    case connection_state::FAILED:
+    case connection_state::RECONNECTING: {
       sink->fail_all(::rediscoro::error::connection_lost);
       return;
     }
@@ -139,8 +140,7 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
       sink->fail_all(::rediscoro::error::connection_closed);
       return;
     }
-    case connection_state::OPEN:
-    case connection_state::RECONNECTING: {
+    case connection_state::OPEN: {
       break;
     }
   }

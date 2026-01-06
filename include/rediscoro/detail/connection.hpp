@@ -189,11 +189,11 @@ public:
   /// Behavior by state:
   /// - INIT, CONNECTING: Request rejected immediately (error::not_connected)
   ///                     User must wait for connect() to complete
-  /// - OPEN, RECONNECTING: Request accepted and queued
-  ///   * RECONNECTING semantic: requests are buffered in pipeline_ and will be written only after
-  ///     control_loop transitions back to OPEN (write_loop is gated on OPEN).
+  /// - OPEN: Request accepted and queued
   /// - FAILED: Request rejected immediately (error::connection_lost)
   ///           Connection lost due to runtime error, automatic reconnection may be in progress
+  /// - RECONNECTING: Request rejected immediately (error::connection_lost)
+  ///                Connection is not usable during reconnection attempts
   /// - CLOSING, CLOSED: Request rejected immediately (error::connection_closed)
   ///                    Connection has been shut down
   template <typename... Ts>
