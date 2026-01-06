@@ -53,7 +53,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   }
 
   if (state_ == connection_state::CONNECTING) {
-    co_return make_error_code(::rediscoro::error::already_in_progress);
+    co_return ::rediscoro::error::already_in_progress;
   }
 
   if (state_ == connection_state::CLOSED) {
@@ -65,7 +65,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   }
 
   if (cancel_.is_cancelled()) {
-    co_return make_error_code(::rediscoro::error::operation_aborted);
+    co_return ::rediscoro::error::operation_aborted;
   }
 
   if (!actor_awaitable_.has_value()) {
@@ -82,7 +82,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   if (cancel_.is_cancelled()) {
     // close() won; unify cleanup via close().
     co_await close();
-    co_return make_error_code(::rediscoro::error::operation_aborted);
+    co_return ::rediscoro::error::operation_aborted;
   }
 
   if (state_ == connection_state::OPEN) {
@@ -95,7 +95,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
 
   // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
   // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
-  auto ec = last_error_.value_or(make_error_code(::rediscoro::error::connect_failed));
+  auto ec = last_error_.value_or(::rediscoro::error::connect_failed);
   co_await close();
   co_return ec;
 }
@@ -241,7 +241,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
     if (state_ == connection_state::OPEN && cfg_.request_timeout > std::chrono::milliseconds{0}) {
       auto now = pipeline::clock::now();
       if (pipeline_.has_expired(now)) {
-        handle_error(make_error_code(::rediscoro::error::request_timeout));
+        handle_error(::rediscoro::error::request_timeout);
         continue;
       }
 
@@ -336,7 +336,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   last_error_.reset();
 
   if (cancel_.is_cancelled()) {
-    last_error_ = make_error_code(::rediscoro::error::operation_aborted);
+    last_error_ = ::rediscoro::error::operation_aborted;
     co_return;
   }
 
@@ -357,19 +357,19 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   );
   if (!res.has_value()) {
     if (res.error() == iocoro::make_error_code(iocoro::error::timed_out)) {
-      last_error_ = make_error_code(::rediscoro::error::resolve_timeout);
+      last_error_ = ::rediscoro::error::resolve_timeout;
     } else {
-      last_error_ = make_error_code(::rediscoro::error::resolve_failed);
+      last_error_ = ::rediscoro::error::resolve_failed;
     }
     co_return;
   }
   if (res->empty()) {
-    last_error_ = make_error_code(::rediscoro::error::resolve_failed);
+    last_error_ = ::rediscoro::error::resolve_failed;
     co_return;
   }
 
   if (cancel_.is_cancelled()) {
-    last_error_ = make_error_code(::rediscoro::error::operation_aborted);
+    last_error_ = ::rediscoro::error::operation_aborted;
     co_return;
   }
 
@@ -391,17 +391,17 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
-      last_error_ = make_error_code(::rediscoro::error::connect_timeout);
+      last_error_ = ::rediscoro::error::connect_timeout;
     } else if (connect_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
-      last_error_ = make_error_code(::rediscoro::error::operation_aborted);
+      last_error_ = ::rediscoro::error::operation_aborted;
     } else {
-      last_error_ = make_error_code(::rediscoro::error::connect_failed);
+      last_error_ = ::rediscoro::error::connect_failed;
     }
     co_return;
   }
 
   if (cancel_.is_cancelled()) {
-    last_error_ = make_error_code(::rediscoro::error::operation_aborted);
+    last_error_ = ::rediscoro::error::operation_aborted;
     co_return;
   }
 
@@ -497,13 +497,13 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
 
   if (cancel_.is_cancelled() || handshake_ec == iocoro::make_error_code(iocoro::error::operation_aborted)) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = make_error_code(::rediscoro::error::operation_aborted);
+    last_error_ = ::rediscoro::error::operation_aborted;
     co_return;
   }
 
   if (handshake_ec == iocoro::make_error_code(iocoro::error::timed_out)) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = make_error_code(::rediscoro::error::handshake_timeout);
+    last_error_ = ::rediscoro::error::handshake_timeout;
     co_return;
   }
 
@@ -511,9 +511,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
     // Unsolicited server messages during handshake are treated as unsupported feature for now.
     if (handshake_ec == std::make_error_code(std::errc::not_supported)) {
-      last_error_ = make_error_code(::rediscoro::error::handshake_failed);
+      last_error_ = ::rediscoro::error::handshake_failed;
     } else {
-      last_error_ = make_error_code(::rediscoro::error::connect_failed);
+      last_error_ = ::rediscoro::error::connect_failed;
     }
     co_return;
   }
@@ -524,14 +524,14 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
     pipeline_.clear_all(::rediscoro::error::connection_closed);
-    last_error_ = make_error_code(::rediscoro::error::handshake_failed);
+    last_error_ = ::rediscoro::error::handshake_failed;
     co_return;
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i].has_value()) {
       pipeline_.clear_all(::rediscoro::error::connection_closed);
-      last_error_ = make_error_code(::rediscoro::error::handshake_failed);
+      last_error_ = ::rediscoro::error::handshake_failed;
       co_return;
     }
   }
@@ -677,7 +677,7 @@ inline auto connection::handle_error(std::error_code ec) -> void {
   last_error_ = ec;
   state_ = connection_state::FAILED;
   auto clear_err = ::rediscoro::error::connection_lost;
-  if (ec == make_error_code(::rediscoro::error::request_timeout)) {
+  if (ec == ::rediscoro::error::request_timeout) {
     clear_err = ::rediscoro::error::request_timeout;
   }
   pipeline_.clear_all(clear_err);
