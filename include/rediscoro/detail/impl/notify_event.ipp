@@ -1,7 +1,7 @@
 #pragma once
 
 #include <rediscoro/detail/notify_event.hpp>
-#include <iocoro/detail/executor_guard.hpp>
+
 #include <iocoro/this_coro.hpp>
 
 namespace rediscoro::detail {
@@ -25,7 +25,7 @@ struct notify_event::awaiter {
 
     // Otherwise, register waiter atomically with the decision to suspend.
     self->awaiting_ = h;
-    self->executor_ = iocoro::detail::get_current_executor();
+    self->executor_ = iocoro::this_coro::get_executor();
     return true;  // suspend
   }
 
