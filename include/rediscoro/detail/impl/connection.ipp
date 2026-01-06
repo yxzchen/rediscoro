@@ -8,10 +8,13 @@
 #include <iocoro/co_spawn.hpp>
 #include <iocoro/io/connect.hpp>
 #include <iocoro/ip/resolver.hpp>
+#include <iocoro/steady_timer.hpp>
 #include <iocoro/this_coro.hpp>
 #include <iocoro/with_timeout.hpp>
 #include <iocoro/when_all.hpp>
+#include <iocoro/when_any.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <string>
@@ -123,7 +126,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
 
   if (actor_awaitable_.has_value()) {
     // Critical: actor_awaitable_ can only be awaited once.
-    co_await *actor_awaitable_;
+    co_await std::move(*actor_awaitable_);
     actor_awaitable_.reset();
   }
 
@@ -208,21 +211,25 @@ inline auto connection::read_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::control_loop() -> iocoro::awaitable<void> {
-  // Minimal control loop (step-3):
-  // - Ensures control_wakeup_ is not a ghost and can be used as the centralized state driver.
-  // - Reconnection will be implemented later; for now, runtime FAILED triggers deterministic shutdown.
+  // Control loop (step-6):
+  // - Centralized state transitions and reconnection policy.
   //
   // IMPORTANT constraints:
   // - Must NOT write CLOSED (only transition_to_closed()).
   // - Must be cancel-aware so close() can interrupt promptly.
   while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
     if (state_ == connection_state::FAILED) {
-      // Phase-3 policy: deterministic shutdown on runtime error (no reconnection yet).
-      state_ = connection_state::CLOSING;
-      cancel_.request_cancel();
-      write_wakeup_.notify();
-      read_wakeup_.notify();
-      // Do not wait here: cancellation must take effect immediately.
+      if (!cfg_.reconnection.enabled) {
+        // Deterministic shutdown: no reconnection.
+        state_ = connection_state::CLOSING;
+        cancel_.request_cancel();
+        write_wakeup_.notify();
+        read_wakeup_.notify();
+        // Do not wait here: cancellation must take effect immediately.
+        continue;
+      }
+
+      co_await do_reconnect();
       continue;
     }
 
@@ -235,6 +242,68 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
   }
 
   co_return;
+}
+
+inline auto connection::calculate_reconnect_delay() const -> std::chrono::milliseconds {
+  if (reconnect_count_ < cfg_.reconnection.immediate_attempts) {
+    return std::chrono::milliseconds{0};
+  }
+
+  const auto backoff_index = reconnect_count_ - cfg_.reconnection.immediate_attempts;
+  const auto base_ms = static_cast<double>(cfg_.reconnection.initial_delay.count());
+  const auto factor = std::pow(cfg_.reconnection.backoff_factor, static_cast<double>(backoff_index));
+  const auto delay_ms = base_ms * factor;
+
+  const auto capped = std::min<double>(delay_ms, static_cast<double>(cfg_.reconnection.max_delay.count()));
+  const auto out = static_cast<std::int64_t>(capped);
+  if (out <= 0) {
+    return std::chrono::milliseconds{0};
+  }
+  return std::chrono::milliseconds{out};
+}
+
+inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
+  // Precondition: called on strand.
+  // State intent: FAILED -> (sleep) -> RECONNECTING -> OPEN, or exit early on close/cancel.
+  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+    // Backoff sleep happens in FAILED.
+    state_ = connection_state::FAILED;
+    const auto delay = calculate_reconnect_delay();
+
+    if (delay.count() > 0) {
+      iocoro::steady_timer timer{socket_.get_executor()};
+      timer.expires_after(delay);
+
+      // Wait either for the timer or for an external control signal (close/notify).
+      auto timer_wait = timer.async_wait(iocoro::use_awaitable);
+      auto wake_wait = control_wakeup_.wait();
+      (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
+    }
+
+    if (cancel_.is_cancelled() || state_ == connection_state::CLOSING) {
+      co_return;
+    }
+
+    // Attempt reconnect.
+    state_ = connection_state::RECONNECTING;
+    co_await do_connect();
+
+    if (state_ == connection_state::OPEN) {
+      reconnect_count_ = 0;
+      read_wakeup_.notify();
+      write_wakeup_.notify();
+      control_wakeup_.notify();
+      co_return;
+    }
+
+    if (cancel_.is_cancelled() || state_ == connection_state::CLOSING) {
+      co_return;
+    }
+
+    // Failed attempt: transition back to FAILED and schedule next delay.
+    state_ = connection_state::FAILED;
+    reconnect_count_ += 1;
+  }
 }
 
 inline auto connection::do_connect() -> iocoro::awaitable<void> {
