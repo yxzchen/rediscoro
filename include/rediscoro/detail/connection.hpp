@@ -115,12 +115,20 @@ public:
   /// - This allows retrying connection without creating a new connection object
   ///
   /// Concurrent call handling:
-  /// - connect() + connect(): If state is CONNECTING, returns connection_error
+  /// - connect() + connect(): If state is CONNECTING, returns concurrent_operation
   /// - connect() + close(): close() wins, connect() checks cancel_ at each await point
   ///                        and returns operation_aborted if cancelled
   ///
   /// IMPORTANT: This method does NOT trigger automatic reconnection.
   /// Automatic reconnection only applies to connection failures AFTER reaching OPEN state.
+  ///
+  /// Possible error codes:
+  /// - std::error_code{} (empty): Success, connection is OPEN
+  /// - error::concurrent_operation: Another connect() is already in progress
+  /// - error::operation_aborted: close() was called during connection
+  /// - error::timeout: TCP connection or handshake timed out
+  /// - error::handshake_failed: RESP3 handshake failed (HELLO/AUTH/SELECT)
+  /// - system error codes: TCP connection failed, DNS resolution failed, etc.
   ///
   /// Thread-safety: Can be called from any executor (switches to strand internally)
   auto connect() -> iocoro::awaitable<std::error_code>;
@@ -158,8 +166,8 @@ public:
   /// - INIT, CONNECTING: Request rejected immediately (error::not_connected)
   ///                     User must wait for connect() to complete
   /// - OPEN, RECONNECTING: Request accepted and queued
-  /// - FAILED: Request rejected immediately (error::connection_error)
-  ///           Connection is in error state, automatic reconnection may be in progress
+  /// - FAILED: Request rejected immediately (error::connection_lost)
+  ///           Connection lost due to runtime error, automatic reconnection may be in progress
   /// - CLOSING, CLOSED: Request rejected immediately (error::connection_closed)
   ///                    Connection has been shut down
   template <typename... Ts>

@@ -14,10 +14,16 @@ class error_category_impl : public std::error_category {
         return "operation aborted";
       case error::connection_closed:
         return "connection closed";
-      case error::connection_error:
-        return "connection error";
       case error::not_connected:
         return "not connected";
+      case error::connection_lost:
+        return "connection lost";
+      case error::handshake_failed:
+        return "handshake failed";
+      case error::timeout:
+        return "timeout";
+      case error::concurrent_operation:
+        return "concurrent operation";
       default:
         return "unknown error";
     }

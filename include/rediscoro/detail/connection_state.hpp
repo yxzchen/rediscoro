@@ -62,7 +62,7 @@ namespace rediscoro::detail {
 ///
 /// FAILED:
 /// - Error occurred (IO error, timeout, handshake failure, etc.)
-/// - enqueue(): REJECTED immediately with connection_error
+/// - enqueue(): REJECTED immediately with connection_lost
 /// - All pending requests at time of error are failed via pipeline.clear_all()
 /// - worker_loop IMMEDIATELY stops IO (no drain, no further reads/writes)
 /// - Socket closed
