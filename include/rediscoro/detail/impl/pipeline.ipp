@@ -5,8 +5,10 @@
 namespace rediscoro::detail {
 
 inline auto pipeline::push(request req, response_sink* sink) -> void {
-  // TODO: Implementation
-  // - Add request to pending_write_ queue
+  REDISCORO_ASSERT(sink != nullptr);
+  REDISCORO_ASSERT(req.reply_count() == sink->expected_replies());
+
+  pending_write_.push_back(pending_item{std::move(req), sink, 0});
 }
 
 inline auto pipeline::has_pending_write() const noexcept -> bool {
@@ -20,35 +22,74 @@ inline auto pipeline::has_pending_read() const noexcept -> bool {
 }
 
 inline auto pipeline::next_write_buffer() -> std::string_view {
-  // TODO: Implementation
-  // - Return view into next request's wire bytes
-  // - Account for bytes already written
-  return {};
+  REDISCORO_ASSERT(!pending_write_.empty());
+  auto& front = pending_write_.front();
+  const auto& wire = front.req.wire();
+  REDISCORO_ASSERT(front.written <= wire.size());
+  return std::string_view{wire}.substr(front.written);
 }
 
 inline auto pipeline::on_write_done(std::size_t n) -> void {
-  // TODO: Implementation
-  // - Update bytes written for front request
-  // - If request fully written, move to awaiting_read_
+  REDISCORO_ASSERT(!pending_write_.empty());
+  auto& front = pending_write_.front();
+  const auto& wire = front.req.wire();
+  REDISCORO_ASSERT(front.written <= wire.size());
+  REDISCORO_ASSERT(n <= (wire.size() - front.written));
+
+  front.written += n;
+
+  if (front.written == wire.size()) {
+    // Entire request written: move to awaiting read queue with reply count.
+    awaiting_read_.push_back(awaiting_item{front.sink, front.req.reply_count()});
+    pending_write_.pop_front();
+  }
 }
 
 inline auto pipeline::on_message(resp3::message msg) -> void {
-  // TODO: Implementation
-  // - Get front from awaiting_read_
-  // - Adapt message to expected type
-  // - Set value/error on pending_response
+  REDISCORO_ASSERT(!awaiting_read_.empty());
+  auto& a = awaiting_read_.front();
+  REDISCORO_ASSERT(a.sink != nullptr);
+  REDISCORO_ASSERT(a.remaining > 0);
+
+  a.sink->deliver(std::move(msg));
+  a.remaining -= 1;
+  if (a.remaining == 0) {
+    awaiting_read_.pop_front();
+  }
 }
 
 inline auto pipeline::on_error(resp3::error err) -> void {
-  // TODO: Implementation
-  // - Get front from awaiting_read_
-  // - Set error on pending_response
+  REDISCORO_ASSERT(!awaiting_read_.empty());
+  auto& a = awaiting_read_.front();
+  REDISCORO_ASSERT(a.sink != nullptr);
+  REDISCORO_ASSERT(a.remaining > 0);
+
+  a.sink->deliver_error(response_error{err});
+  a.remaining -= 1;
+  if (a.remaining == 0) {
+    awaiting_read_.pop_front();
+  }
 }
 
 inline auto pipeline::clear_all(response_error err) -> void {
-  // TODO: Implementation
-  // - Set error on all pending responses
-  // - Clear all queues
+  // Pending writes: none of the replies will arrive; fail all expected replies.
+  for (auto& p : pending_write_) {
+    REDISCORO_ASSERT(p.sink != nullptr);
+    const auto replies = p.req.reply_count();
+    for (std::size_t i = 0; i < replies; ++i) {
+      p.sink->deliver_error(err);
+    }
+  }
+  pending_write_.clear();
+
+  // Awaiting reads: fail all remaining replies.
+  for (auto& a : awaiting_read_) {
+    REDISCORO_ASSERT(a.sink != nullptr);
+    for (std::size_t i = 0; i < a.remaining; ++i) {
+      a.sink->deliver_error(err);
+    }
+  }
+  awaiting_read_.clear();
 }
 
 }  // namespace rediscoro::detail

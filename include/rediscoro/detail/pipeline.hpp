@@ -79,6 +79,11 @@ public:
   }
 
 private:
+  struct awaiting_item {
+    response_sink* sink;
+    std::size_t remaining;
+  };
+
   struct pending_item {
     request req;
     response_sink* sink;  // Abstract interface, no knowledge of coroutines
@@ -89,7 +94,7 @@ private:
   std::deque<pending_item> pending_write_{};
 
   // Response sinks waiting for responses (one per sent request)
-  std::deque<response_sink*> awaiting_read_{};
+  std::deque<awaiting_item> awaiting_read_{};
 };
 
 }  // namespace rediscoro::detail

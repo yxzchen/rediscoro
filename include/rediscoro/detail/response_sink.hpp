@@ -2,7 +2,7 @@
 
 #include <rediscoro/assert.hpp>
 #include <rediscoro/resp3/message.hpp>
-#include <rediscoro/resp3/error.hpp>
+#include <rediscoro/response.hpp>
 
 #include <cstddef>
 
@@ -80,25 +80,24 @@ public:
     do_deliver(std::move(msg));
   }
 
-  /// Deliver a RESP3 protocol error.
-  /// Called by pipeline when parsing fails or RESP error received.
+  /// Deliver an error.
+  /// Called by pipeline when parsing fails, connection closes, or other non-success events occur.
   ///
   /// Responsibilities of implementation:
-  /// 1. Convert to response_error
-  /// 2. Store error
-  /// 3. Notify waiting coroutine (on its executor)
+  /// 1. Store error
+  /// 2. Notify waiting coroutine (on its executor)
   ///
   /// MUST NOT:
   /// - Block the calling thread
   /// - Execute user code directly
   /// - Resume coroutine inline
-  auto deliver_error(resp3::error err) -> void {
+  auto deliver_error(response_error err) -> void {
     // Structural defense: a pipeline bug must be caught immediately.
     REDISCORO_ASSERT(!is_complete() && "deliver_error() called on a completed sink - pipeline bug!");
     if (is_complete()) {
       return;  // Defensive in release builds
     }
-    do_deliver_error(err);
+    do_deliver_error(std::move(err));
   }
 
   /// Check if delivery is complete (for diagnostics).
@@ -107,7 +106,7 @@ public:
 protected:
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;
-  virtual auto do_deliver_error(resp3::error err) -> void = 0;
+  virtual auto do_deliver_error(response_error err) -> void = 0;
 };
 
 }  // namespace rediscoro::detail

@@ -55,7 +55,7 @@ public:
 
 protected:
   auto do_deliver(resp3::message msg) -> void override;
-  auto do_deliver_error(resp3::error err) -> void override;
+  auto do_deliver_error(response_error err) -> void override;
 
 private:
   notify_event event_{};
@@ -82,7 +82,7 @@ public:
 
 protected:
   auto do_deliver(resp3::message msg) -> void override;
-  auto do_deliver_error(resp3::error err) -> void override;
+  auto do_deliver_error(response_error err) -> void override;
 
 private:
   notify_event event_{};
