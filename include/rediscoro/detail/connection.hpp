@@ -32,14 +32,17 @@ namespace rediscoro::detail {
 ///
 /// Responsibilities:
 /// - Manage socket lifecycle on a single strand
-/// - Run the worker_loop coroutine
-/// - Serialize all socket operations
+/// - Run the background connection actor (read_loop / write_loop / control_loop)
+/// - Serialize all state_ / pipeline_ mutations on a single strand
 /// - Dispatch incoming responses via pipeline
 ///
 /// Structural constraints:
-/// - Only one worker_loop coroutine instance at a time
-/// - worker_loop runs until CLOSED state
-/// - Socket exclusively accessed by either connect() or worker_loop (never both)
+/// - Only one background actor instance at a time
+/// - The actor runs until CLOSED state
+/// - Socket exclusively accessed by either:
+///   - connect() handshake (during CONNECTING), OR
+///   - IO loops (during OPEN), OR
+///   - reconnection handshake (during RECONNECTING, driven by control_loop)
 /// - External requests enqueued via thread-safe methods
 ///
 /// Thread safety and concurrent operations:
@@ -48,12 +51,12 @@ namespace rediscoro::detail {
 /// - close() can be called from any executor
 ///
 /// Critical invariants:
-/// 1. Single worker instance: worker_awaitable_.has_value() == (worker is running)
+/// 1. Single actor instance: actor_awaitable_.has_value() == (actor is running)
 /// 2. Strand serialization: All state_, socket_, pipeline_ mutations on strand
-/// 3. Handshake exclusivity: connect() owns socket during CONNECTING, worker_loop does nothing
+/// 3. Handshake exclusivity: connect() owns socket during CONNECTING, IO loops do nothing
 /// 4. Request rejection: enqueue() rejects all requests during INIT/CONNECTING
 /// 5. Cancel handling: connect() checks cancel_ at each await point
-/// 6. Resource cleanup: On failure/close, wait for worker_loop to exit completely
+/// 6. Resource cleanup: On failure/close, wait for background actor to exit completely
 /// 7. Retry support: After CLOSED, connect() can reset and retry
 ///
 /// State transition rules:
@@ -65,8 +68,8 @@ namespace rediscoro::detail {
 /// Ownership during states:
 /// - INIT: No owner (waiting for connect())
 /// - CONNECTING: connect() owns socket exclusively
-/// - OPEN: worker_loop processes requests, connect() is idle
-/// - FAILED/RECONNECTING: worker_loop handles reconnection
+/// - OPEN: read_loop/write_loop process IO, connect() is idle
+/// - FAILED/RECONNECTING: control_loop handles reconnection policy and transitions
 /// - CLOSED: No owner
 class connection : public std::enable_shared_from_this<connection> {
 public:
@@ -81,12 +84,12 @@ public:
   ///
   /// Semantics (CRITICAL):
   /// This is a "strand-serialized operation". All state mutations (state_, socket_, pipeline_)
-  /// MUST occur on the connection's strand to prevent data races with worker_loop.
+  /// MUST occur on the connection's strand to prevent data races with the background loops.
   ///
   /// Responsibilities during handshake:
   /// - connect() OWNS the socket and pipeline during CONNECTING state
   /// - connect() sends handshake commands (HELLO/AUTH/SELECT/CLIENT SETNAME) via pipeline
-  /// - worker_loop does NOT process requests until state becomes OPEN
+  /// - read_loop/write_loop do NOT perform socket IO until state becomes OPEN
   /// - enqueue() REJECTS user requests during INIT/CONNECTING states (error::not_connected)
   /// - This exclusive ownership eliminates all handshake/user-request interleaving complexity
   ///
@@ -100,16 +103,16 @@ public:
   /// When this method returns, the connection is in one of two states:
   /// - OPEN: Connection established, handshake complete, ready for user requests
   /// - CLOSED: Connection failed and all resources cleaned up (socket closed, pipeline cleared,
-  ///           worker_loop exited)
+  ///           background actor exited)
   ///
   /// Behavior:
-  /// - Starts the background worker_loop (if not already started)
+  /// - Starts the background connection actor (if not already started)
   /// - Switches to connection's strand for all state operations
   /// - Executes TCP connection + RESP3 handshake (HELLO, AUTH, SELECT, CLIENT SETNAME)
   /// - On success: transitions to OPEN state, returns empty error_code
   /// - On failure:
   ///   * Cleans up all resources (closes socket, clears pipeline)
-  ///   * Waits for worker_loop to exit (co_await worker_awaitable_)
+  ///   * Waits for actor to exit (co_await actor_awaitable_)
   ///   * Transitions to CLOSED state
   ///   * Returns error details
   ///
@@ -117,7 +120,7 @@ public:
   /// - If state is CLOSED (from previous connection failure), this method will:
   ///   * Reset state to INIT
   ///   * Clear last_error and reconnect_count
-  ///   * Restart a new worker_loop instance
+  ///   * Restart a new background actor instance
   ///   * Retry the connection
   /// - This allows retrying connection without creating a new connection object
   ///
@@ -144,8 +147,8 @@ public:
   ///
   /// Behavior:
   /// - Set cancel flag (cancel_.request_cancel())
-  /// - Notify worker_loop to wake up (wakeup_.notify())
-  /// - Wait for worker_loop to reach CLOSED state (co_await worker_awaitable_)
+  /// - Notify all loops to wake up (write_wakeup_/read_wakeup_/control_wakeup_)
+  /// - Wait for background actor to reach CLOSED state (co_await actor_awaitable_)
   /// - If called during RECONNECTING, interrupts reconnection
   ///
   /// Concurrent call handling:
@@ -156,7 +159,7 @@ public:
   /// - state_ == CLOSED
   /// - Socket closed
   /// - All pending requests cleared
-  /// - worker_loop exited
+  /// - All background loops exited
   ///
   /// Thread-safety: Can be called from any executor
   /// Idempotency: Safe to call multiple times
@@ -206,85 +209,59 @@ public:
   }
 
 private:
-  /// Start the background worker loop coroutine (internal use only).
+  /// Start the background connection actor (internal use only).
   ///
   /// Semantics:
-  /// - Spawns worker_loop() on the connection's strand
-  /// - Uses use_awaitable completion token and saves the awaitable in worker_awaitable_
-  /// - MUST NOT be called if worker_awaitable_.has_value() is true (worker already running)
+  /// - Spawns actor_loop() on the connection's strand
+  /// - Uses use_awaitable completion token and saves the awaitable in actor_awaitable_
+  /// - MUST NOT be called if actor_awaitable_.has_value() is true (actor already running)
   ///
   /// Single-instance guarantee:
-  /// - Only one worker_loop instance can run at a time
-  /// - Checked by: worker_awaitable_.has_value()
-  /// - If worker failed and exited, connect() clears worker_awaitable_ after co_await,
-  ///   allowing a new worker to be started on retry
+  /// - Only one actor_loop instance can run at a time
+  /// - Checked by: actor_awaitable_.has_value()
+  /// - If actor exited, connect() clears actor_awaitable_ after co_await,
+  ///   allowing a new actor to be started on retry
   ///
-  /// Called by connect() to ensure worker is running before connection attempt.
+  /// Called by connect() to ensure the actor is running before connection attempt.
   ///
-  /// PRE: worker_awaitable_.has_value() == false
-  /// POST: worker_awaitable_.has_value() == true
-  auto run_worker() -> void;
+  /// PRE: actor_awaitable_.has_value() == false
+  /// POST: actor_awaitable_.has_value() == true
+  auto run_actor() -> void;
 
-  /// Main worker loop coroutine.
+  /// Top-level connection actor coroutine.
   /// Runs on the connection's strand until CLOSED.
   ///
-  /// Design simplification (CRITICAL):
-  /// This loop does NOT handle initial connection. It only processes requests after the
-  /// connection reaches OPEN state. This eliminates all handshake/request interleaving logic.
+  /// Why the actor is split into three coroutines (CRITICAL):
+  /// - A single worker_loop that serializes do_write/do_read introduces structural write latency:
+  ///   when the coroutine is suspended in read (or any other await point), a new enqueue cannot
+  ///   trigger an immediate write flush even if the socket is writable.
+  /// - TCP sockets are full-duplex: write readiness and read readiness are independent.
+  /// - Correctness goal: "writes should flush ASAP" AND "responses should be drained continuously".
+  ///   This requires independent progress of read vs write.
   ///
-  /// Responsibilities:
-  /// - Process pending user requests (do_write)
-  /// - Read responses from server (do_read)
-  /// - Handle runtime connection errors and automatic reconnection
+  /// Actor structure:
+  /// - write_loop(): only writes; flushes whenever pipeline has pending write
+  /// - read_loop(): only reads; drains whenever pipeline has pending read
+  /// - control_loop(): owns state transitions (FAILED/RECONNECTING/CLOSING/CLOSED) and reconnection
   ///
-  /// NOT responsible for:
-  /// - Initial connection and handshake (handled by connect())
-  /// - Processing requests during CONNECTING state (enqueue() rejects them)
-  /// - Starting the loop (handled by run_worker())
-  ///
-  /// Loop structure:
-  /// while (!cancel_ && state_ != CLOSED) {
-  ///   co_await wakeup_.wait();
-  ///
-  ///   if (state_ == OPEN) {
-  ///     // Normal operation - drain all pending work
-  ///     while (has_pending_write() || has_pending_read()) {
-  ///       if (has_pending_write()) co_await do_write();
-  ///       if (has_pending_read()) co_await do_read();
-  ///     }
-  ///   }
-  ///   else if (state_ == FAILED) {
-  ///     // Runtime error - handle reconnection
-  ///     co_await do_reconnect_or_close();
-  ///   }
-  ///   // INIT/CONNECTING/RECONNECTING: do nothing, connect() is in charge
-  /// }
-  ///
-  /// Loop invariant (CRITICAL):
-  /// - Each wakeup drains ALL pending work before next wait
-  /// - Never suspend while work is available
-  /// - This prevents "work queued but loop sleeping" deadlock
-  ///
-  /// State handling:
-  /// - INIT/CONNECTING: No-op, connect() owns the socket
-  /// - OPEN: Process requests normally (do_write + do_read)
-  /// - FAILED: Cleanup and attempt reconnection (runtime errors only)
-  /// - RECONNECTING: No-op during handshake, resume OPEN after success
-  /// - CLOSING/CLOSED: Exit loop
-  ///
-  /// FAILED state handling (runtime errors only):
-  /// - IMMEDIATELY stop all normal socket IO (do_read/do_write)
-  /// - Do NOT attempt do_read() or do_write() after state_ becomes FAILED
-  /// - Close socket and clear all in-flight requests with error via pipeline.clear_all()
-  /// - If reconnection is enabled:
-  ///   - Remain in FAILED during backoff sleep (no socket IO)
-  ///   - Transition to RECONNECTING and attempt TCP connect + handshake (do_reconnect)
-  /// - If reconnection is disabled: transition to CLOSED
-  /// - Rationale: Once FAILED, the socket is in unknown state; further reads/writes are unsafe.
-  ///
-  /// Work availability check (when state == OPEN):
-  /// - has_pending_write() || has_pending_read()
-  auto worker_loop() -> iocoro::awaitable<void>;
+  /// Concurrency constraints (MUST hold):
+  /// - All three loops run on the same strand (no parallel executors)
+  /// - At most ONE in-flight async_read_some at any time (read_in_flight_)
+  /// - At most ONE in-flight async_write_some at any time (write_in_flight_)
+  /// - Error handling is centralized: any IO error funnels into handle_error(ec) on strand
+  auto actor_loop() -> iocoro::awaitable<void>;
+
+  /// Write loop (full-duplex direction: write).
+  /// Woken by: enqueue(), reconnect success, and internal progress.
+  auto write_loop() -> iocoro::awaitable<void>;
+
+  /// Read loop (full-duplex direction: read).
+  /// Woken by: first transition to pending-read, reconnect success, and internal progress.
+  auto read_loop() -> iocoro::awaitable<void>;
+
+  /// Control loop: centralized state transitions and reconnection policy.
+  /// Woken by: handle_error(), connect()/handshake completion, close(), timers.
+  auto control_loop() -> iocoro::awaitable<void>;
 
   /// Connect to Redis server with timeout and retry.
   /// After TCP connection succeeds, sends handshake commands:
@@ -330,7 +307,7 @@ private:
   /// 4. Clear all pending requests with error via pipeline.clear_all()
   /// 5. If reconnection enabled:
   ///    - If immediate_attempts not exhausted: set state = RECONNECTING immediately
-  ///    - Otherwise: stay in FAILED, worker_loop will sleep then reconnect
+  ///    - Otherwise: stay in FAILED, control_loop will sleep then reconnect
   /// 6. If reconnection disabled: set state = CLOSED
   ///
   /// Thread-safety: MUST be called from connection strand only
@@ -385,11 +362,17 @@ private:
   // Cancellation
   cancel_source cancel_;
 
-  // Worker loop notification
-  notify_event wakeup_;
+  // Loop notifications (counting wakeups, thread-safe notify)
+  notify_event write_wakeup_{};
+  notify_event read_wakeup_{};
+  notify_event control_wakeup_{};
 
-  // Worker loop lifecycle
-  std::optional<iocoro::awaitable<void>> worker_awaitable_{};  // For close() to co_await
+  // IO in-flight guards (strand-only mutation)
+  bool read_in_flight_{false};
+  bool write_in_flight_{false};
+
+  // Actor lifecycle
+  std::optional<iocoro::awaitable<void>> actor_awaitable_{};  // For close() to co_await
 
   // Reconnection state
   int reconnect_count_{0};  // Number of reconnection attempts (reset on success)

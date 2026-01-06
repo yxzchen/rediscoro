@@ -27,7 +27,7 @@ namespace rediscoro::detail {
 ///
 /// Why this matters:
 /// - Enforces "Pipeline never resumes coroutines" invariant at type level
-/// - Makes it impossible to accidentally inline user code in worker_loop
+/// - Makes it impossible to accidentally inline user code on the connection strand
 /// - Clear separation: pipeline = scheduling, pending_response = continuation
 ///
 /// Responsibility boundary (CRITICAL):

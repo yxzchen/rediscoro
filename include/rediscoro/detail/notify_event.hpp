@@ -21,7 +21,7 @@ namespace rediscoro::detail {
 /// - If counter > 0 when wait() is called, returns immediately
 /// - If counter == 0, suspends and waits for next notify()
 ///
-/// Why counting: Prevents signal loss in worker_loop
+/// Why counting: Prevents signal loss in connection IO loops
 /// - enqueue() + enqueue() + notify() + notify() = 2 wakeups guaranteed
 /// - Without counting, the second notify() could be lost
 ///

@@ -11,18 +11,18 @@ inline connection::connection(iocoro::io_executor ex, config cfg)
   , socket_(executor_.get_io_executor()) {
 }
 
-inline auto connection::run_worker() -> void {
+inline auto connection::run_actor() -> void {
   // TODO: Implementation
-  // - Spawn worker_loop on the connection's strand
+  // - Spawn actor_loop on the connection's strand
   // - Use use_awaitable completion token
-  // - Save the awaitable in worker_awaitable_ for close() to use
+  // - Save the awaitable in actor_awaitable_ for close() to use
 }
 
 inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // TODO: Implementation
   //
   // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
-  // data races with worker_loop.
+  // data races with the background loops.
   //
   // 1. Handle CLOSED state - support retry (can do before strand switch)
   //    if (state_ == CLOSED) {
@@ -31,7 +31,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //      state_ = INIT;
   //      last_error_.reset();
   //      reconnect_count_ = 0;
-  //      worker_awaitable_.reset();  // Previous worker has exited
+  //      actor_awaitable_.reset();  // Previous actor has exited
   //    }
   //
   // 2. Check if already connected (idempotency)
@@ -42,9 +42,9 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //      co_return make_error_code(error::already_in_progress);
   //    }
   //
-  // 4. Start worker_loop if not already started
-  //    if (!worker_awaitable_.has_value()) {
-  //      run_worker();  // Spawns worker_loop, sets worker_awaitable_
+  // 4. Start background actor if not already started
+  //    if (!actor_awaitable_.has_value()) {
+  //      run_actor();  // Spawns actor_loop, sets actor_awaitable_
   //    }
   //
   // 5. Switch to connection's strand
@@ -70,13 +70,13 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //      co_return std::error_code{};  // Success
   //    }
   //
-  // 10. Handle failure - CRITICAL: Clean up all resources and wait for worker exit
-  //     // - Set cancel flag to signal worker_loop to exit
+  // 10. Handle failure - CRITICAL: Clean up all resources and wait for actor exit
+  //     // - Set cancel flag to signal loops to exit
   //     // - Close socket (if still open)
   //     // - Clear all pending requests (pipeline.clear_all)
-  //     // - Notify worker to wake up and exit (wakeup_.notify)
-  //     // - Wait for worker_loop to complete (co_await *worker_awaitable_)
-  //     // - Clear worker_awaitable_ to allow restart on retry
+  //     // - Notify loops to wake up and exit (write_wakeup_/read_wakeup_/control_wakeup_)
+  //     // - Wait for actor_loop to complete (co_await *actor_awaitable_)
+  //     // - Clear actor_awaitable_ to allow restart on retry
   //     // - Transition to CLOSED
   //     // - Return error (use operation_aborted if cancelled, otherwise last_error_)
   //
@@ -93,8 +93,8 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   //    if (state_ == CLOSED) co_return;
   //
   // 2. Check if worker is running
-  //    if (!worker_awaitable_.has_value()) {
-  //      // Worker never started or already cleaned up
+  //    if (!actor_awaitable_.has_value()) {
+  //      // Actor never started or already cleaned up
   //      // Just transition to CLOSED
   //      state_ = CLOSED;
   //      co_return;
@@ -103,16 +103,18 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   // 3. Request cancellation
   //    cancel_.request_cancel();
   //
-  // 4. Notify worker to wake up and exit
-  //    wakeup_.notify();
+  // 4. Notify loops to wake up and exit
+  //    write_wakeup_.notify();
+  //    read_wakeup_.notify();
+  //    control_wakeup_.notify();
   //
-  // 5. Wait for worker_loop to complete
-  //    co_await *worker_awaitable_;
+  // 5. Wait for actor_loop to complete
+  //    co_await *actor_awaitable_;
   //
   // 6. Verify post-condition
   //    REDISCORO_ASSERT(state_ == CLOSED);
   //
-  // IMPORTANT: This method waits for worker_loop to completely exit before returning.
+  // IMPORTANT: This method waits for all background loops to completely exit before returning.
   // After this method returns, it's safe to destroy the connection object.
   co_return;
 }
@@ -148,57 +150,56 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
   // 2. Add request to pipeline
   //    pipeline_.push(std::move(req), sink);
   //
-  // 3. Notify worker loop to process the request
-  //    wakeup_.notify();
+  // 3. Notify write loop to flush ASAP
+  //    write_wakeup_.notify();
 }
 
-inline auto connection::worker_loop() -> iocoro::awaitable<void> {
+inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // TODO: Implementation
   //
-  // Design philosophy: This loop is a pure "runtime request processor".
-  // It does NOT handle initial connection/handshake - that's connect()'s job.
+  // Design philosophy:
+  // - This is a top-level "connection actor" that owns lifetime and shutdown coordination.
+  // - It spawns three strand-bound coroutines:
+  //   * write_loop(): flush pending writes ASAP
+  //   * read_loop(): drain pending reads continuously
+  //   * control_loop(): centralized state transitions + reconnection
   //
-  // Main loop structure:
-  // while (!cancel_.is_cancelled() && state_ != CLOSED) {
-  //   co_await wakeup_.wait();
+  // Shutdown/joining requirement (CRITICAL):
+  // - close() must be able to deterministically wait for all loops to exit before returning.
+  // - actor_loop is the single awaitable that close() waits on (actor_awaitable_).
   //
-  //   if (cancel_.is_cancelled()) break;
-  //
-  //   // State dispatch
-  //   if (state_ == OPEN) {
-  //     // Normal operation: drain all pending work
-  //     while (pipeline_.has_pending_write() || pipeline_.has_pending_read()) {
-  //       if (pipeline_.has_pending_write()) {
-  //         co_await do_write();
-  //         if (state_ == FAILED) break;  // Error during write
-  //       }
-  //       if (pipeline_.has_pending_read()) {
-  //         co_await do_read();
-  //         if (state_ == FAILED) break;  // Error during read
-  //       }
-  //     }
-  //   }
-  //   else if (state_ == FAILED) {
-  //     // Runtime error - attempt reconnection or close
-  //     // NOTE: This is ONLY for runtime errors after reaching OPEN
-  //     // Initial connection failure is handled by connect() directly
-  //     if (cfg_.reconnection.enabled) {
-  //       co_await do_reconnect();  // Attempts reconnection, may transition to OPEN or CLOSED
-  //     } else {
-  //       break;  // Exit, will transition to CLOSED in cleanup
-  //     }
-  //   }
-  //   // INIT/CONNECTING/RECONNECTING: do nothing, connect() owns the socket
-  // }
-  //
-  // Cleanup:
-  // - transition_to_closed()
-  //
-  // KEY INSIGHT: By not handling initial connection here, we eliminate:
-  // - Handshake/request interleaving logic
-  // - CONNECTING state special cases
-  // - Pipeline phase distinction (handshake vs normal)
-  // - Worker/connect coordination complexity
+  // Implementation sketch:
+  // - co_spawn(executor_.strand().any_executor(), write_loop(), detached);
+  // - co_spawn(executor_.strand().any_executor(), read_loop(), detached);
+  // - co_spawn(executor_.strand().any_executor(), control_loop(), detached);
+  // - Wait for all three loops to exit (via explicit join mechanism; e.g. strand-only counter
+  //   + notify_event, or iocoro::when_all if available).
+  // - transition_to_closed() at the end.
+  co_return;
+}
+
+inline auto connection::write_loop() -> iocoro::awaitable<void> {
+  // TODO: Implementation
+  // - co_await write_wakeup_.wait() when no work / not OPEN
+  // - while (state_ == OPEN && pipeline_.has_pending_write()) { drain write }
+  // - on progress: notify read_wakeup_ if new pending reads become available
+  // - on error: handle_error(ec) and notify control_wakeup_
+  co_return;
+}
+
+inline auto connection::read_loop() -> iocoro::awaitable<void> {
+  // TODO: Implementation
+  // - if (state_ != OPEN || !pipeline_.has_pending_read()) { co_await read_wakeup_.wait(); continue; }
+  // - async_read_some + parser + pipeline_.on_message/on_error
+  // - on error: handle_error(ec) and notify control_wakeup_
+  co_return;
+}
+
+inline auto connection::control_loop() -> iocoro::awaitable<void> {
+  // TODO: Implementation
+  // - Centralize state transitions: FAILED -> (sleep) -> RECONNECTING -> OPEN, cancel -> CLOSED
+  // - On entering OPEN: notify read_wakeup_ and write_wakeup_
+  // - On close(): ensure socket close + pipeline_.clear_all + notify loops to exit
   co_return;
 }
 

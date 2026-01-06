@@ -13,10 +13,15 @@ namespace rediscoro::detail {
 /// - Provide stable executor reference
 ///
 /// Critical constraints (MUST be enforced):
-/// 1. NO nested co_spawn within connection
-///    - worker_loop is the ONLY coroutine that accesses socket
-///    - do_read/do_write/etc are subroutines, not independent coroutines
-///    - Violating this breaks "single ownership of socket" invariant
+/// 1. All connection internals run on ONE strand
+///    - Multiple coroutines are allowed (read_loop / write_loop / control_loop)
+///    - They MUST all be spawned/bound onto this SAME strand executor
+///    - All state_, pipeline_, and socket_ *lifecycle* mutations are serialized by the strand
+///
+///    Note: socket IO is full-duplex:
+///    - One async_read_some and one async_write_some may be in-flight concurrently
+///    - But you MUST NOT start two concurrent reads or two concurrent writes
+///      (enforced by per-direction in-flight flags inside connection)
 ///
 /// 2. NO direct executor usage in connection internals
 ///    - All async operations use the strand executor
@@ -32,15 +37,19 @@ namespace rediscoro::detail {
 /// - Breaking strand guarantee = data race
 ///
 /// Forbidden patterns:
-///   // WRONG: spawning sub-coroutine
-///   co_spawn(executor_.get(), async_operation(), detached);
+///   // WRONG: spawning onto non-strand executor (breaks serialization)
+///   co_spawn(io_executor, async_operation(), detached);
 ///
 ///   // WRONG: bypassing strand
 ///   co_await socket_.async_read_some(buffer, use_awaitable);
 ///
-/// Correct pattern:
-///   // OK: direct await in worker_loop
-///   co_await do_read();  // subroutine call, not spawn
+/// Correct patterns:
+///   // OK: spawn coroutines onto the same strand
+///   co_spawn(executor_.strand().any_executor(), read_loop(), detached);
+///   co_spawn(executor_.strand().any_executor(), write_loop(), detached);
+///
+///   // OK: direct await inside any strand-bound coroutine
+///   co_await socket_.async_read_some(buf, iocoro::bind_executor(executor_.strand().any_executor(), use_awaitable));
 class connection_executor {
 public:
   explicit connection_executor(iocoro::io_executor ex)

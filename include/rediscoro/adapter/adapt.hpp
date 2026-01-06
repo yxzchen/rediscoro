@@ -22,7 +22,7 @@ namespace rediscoro::adapter {
 ///
 /// The adapter layer MUST NOT execute user-provided code during adaptation.
 /// This ensures that pending_response::deliver() does not inline user logic
-/// into the worker_loop strand.
+/// into the connection strand.
 ///
 /// Forbidden:
 /// - Calling user-defined constructors (except trivial/standard types)
@@ -35,7 +35,7 @@ namespace rediscoro::adapter {
 /// - Aggregate types with standard/trivial members
 ///
 /// Why this matters:
-/// - adapt<T>() is called from worker_loop (connection strand)
+/// - adapt<T>() is called from connection IO loops (connection strand)
 /// - If T's constructor has side effects (logging, locks, IO), it runs inline
 /// - This breaks "no user code in completions" invariant
 ///
@@ -48,7 +48,7 @@ namespace rediscoro::adapter {
 ///   struct MyType {
 ///     MyType(std::string s) { log_to_file(s); }  // BAD: side effect in ctor
 ///   };
-///   adapt<MyType>(msg)  // DANGER: log_to_file runs in worker_loop
+///   adapt<MyType>(msg)  // DANGER: log_to_file runs on the connection strand
 ///
 /// Future: Could add concept to restrict T to "safe" types.
 

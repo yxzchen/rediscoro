@@ -42,13 +42,13 @@ namespace rediscoro::detail {
 ///
 /// INIT:
 /// - Socket not connected
-/// - enqueue(): ACCEPTED (queued for when connection opens)
-/// - start(): transitions to CONNECTING
+/// - enqueue(): REJECTED immediately with not_connected
+/// - connect(): transitions to CONNECTING
 /// - stop(): transitions to CLOSED immediately
 ///
 /// CONNECTING:
 /// - TCP connection in progress
-/// - enqueue(): ACCEPTED (queued)
+/// - enqueue(): REJECTED immediately with not_connected
 /// - stop(): transitions to CLOSING
 /// - On success: transitions to OPEN
 /// - On error: transitions to FAILED
@@ -58,13 +58,13 @@ namespace rediscoro::detail {
 /// - enqueue(): ACCEPTED (normal operation)
 /// - stop(): transitions to CLOSING
 /// - On IO error: transitions to FAILED
-/// - worker_loop processes read/write normally
+/// - read_loop / write_loop process IO concurrently (full-duplex) on the same strand
 ///
 /// FAILED:
 /// - Error occurred (IO error, timeout, handshake failure, etc.)
 /// - enqueue(): REJECTED immediately with connection_lost
 /// - All pending requests at time of error are failed via pipeline.clear_all()
-/// - worker_loop IMMEDIATELY stops IO (no drain, no further reads/writes)
+/// - IO loops IMMEDIATELY stop normal IO (no drain, no further reads/writes)
 /// - Socket closed
 ///
 /// FAILED has two sub-phases:
@@ -96,8 +96,8 @@ namespace rediscoro::detail {
 /// CLOSING:
 /// - Graceful shutdown in progress
 /// - enqueue(): REJECTED immediately with connection_closed
-/// - worker_loop flushes pending writes
-/// - waits for pending reads to complete (with timeout)
+/// - write_loop flushes pending writes
+/// - read_loop drains pending reads (optional, may be bounded by timeout)
 /// - Then transitions to CLOSED
 ///
 /// CLOSED:
@@ -112,7 +112,7 @@ namespace rediscoro::detail {
 /// 2. FAILED and CLOSING reject new work immediately
 /// 3. CLOSED is terminal (no transitions out)
 /// 4. FAILED can transition to OPEN (via RECONNECTING)
-/// 5. worker_loop runs until CLOSED
+/// 5. control_loop runs until CLOSED and owns state transitions
 /// 6. Only one state transition per handle_error() call
 ///
 /// Reconnection semantics:
