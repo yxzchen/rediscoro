@@ -55,11 +55,22 @@ public:
   ///   * Transitions to CLOSED state
   ///   * Returns error details
   ///
+  /// Retry support:
+  /// - If state is CLOSED (from previous connection failure), this method will:
+  ///   * Reset state to INIT
+  ///   * Clear last_error
+  ///   * Restart worker_loop
+  ///   * Retry the connection
+  /// - This allows retrying connection without creating a new connection object
+  ///
   /// IMPORTANT: This method does NOT trigger automatic reconnection.
   /// Automatic reconnection only applies to connection failures AFTER reaching OPEN state.
   ///
   /// Thread-safety: Can be called from any executor
-  /// Idempotency: Can be called multiple times (subsequent calls return cached result)
+  /// Idempotency:
+  /// - If already OPEN, returns success immediately
+  /// - If CLOSED, resets and retries connection
+  /// - If CONNECTING, returns error (concurrent call not allowed)
   auto connect() -> iocoro::awaitable<std::error_code>;
 
   /// Request graceful shutdown.
@@ -254,6 +265,7 @@ private:
 
   // State machine
   connection_state state_{connection_state::INIT};
+
   std::optional<std::error_code> last_error_{};
 
   // Request/response pipeline
@@ -269,7 +281,6 @@ private:
   notify_event wakeup_;
 
   // Worker loop lifecycle
-  std::once_flag worker_start_flag_;  // Ensures run_worker() is called exactly once
   std::optional<iocoro::awaitable<void>> worker_awaitable_{};  // For close() to co_await
 
   // Reconnection state

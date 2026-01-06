@@ -21,26 +21,42 @@ inline auto connection::run_worker() -> void {
 inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // TODO: Implementation
   //
-  // 1. Start worker_loop if not already started
-  //    std::call_once(worker_start_flag_, [this] { run_worker(); });
+  // 1. Handle CLOSED state - support retry
+  //    if (state_ == CLOSED) {
+  //      // Previous connection failed and was cleaned up
+  //      // Reset state to allow retry
+  //      state_ = INIT;
+  //      last_error_.reset();
+  //      reconnect_count_ = 0;
+  //      worker_awaitable_.reset();  // Previous worker has exited
+  //    }
   //
   // 2. Check if already connected (idempotency)
   //    if (state_ == OPEN) co_return std::error_code{};
-  //    if (state_ == CLOSED) co_return last_error_;
   //
-  // 3. Switch to connection's strand
+  // 3. Check if currently connecting (concurrent call not supported)
+  //    if (state_ == CONNECTING) {
+  //      co_return make_error_code(error::connection_error);
+  //    }
+  //
+  // 4. Start worker_loop if not already started
+  //    if (!worker_awaitable_.has_value()) {
+  //      run_worker();  // Spawns worker_loop, sets worker_awaitable_
+  //    }
+  //
+  // 5. Switch to connection's strand
   //    co_await switch_to(executor_.strand());
   //
-  // 4. Execute initial connection
+  // 6. Execute initial connection
   //    state_ = CONNECTING;
   //    co_await do_connect();
   //
-  // 5. Check result
+  // 7. Check result
   //    if (state_ == OPEN) {
   //      co_return std::error_code{};  // Success
   //    }
   //
-  // 6. Handle failure - CRITICAL: Clean up all resources and wait for worker exit
+  // 8. Handle failure - CRITICAL: Clean up all resources and wait for worker exit
   //    // - Set cancel flag to signal worker_loop to exit
   //    // - Close socket
   //    // - Clear all pending requests
@@ -50,7 +66,8 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //    // - Return error
   //
   // IMPORTANT: On failure, this method waits for all background coroutines to exit
-  // before returning, ensuring clean resource cleanup.
+  // before returning, ensuring clean resource cleanup. This allows retry by calling
+  // connect() again.
   co_return std::error_code{};
 }
 
