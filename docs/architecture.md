@@ -11,6 +11,7 @@ This document describes the connection management architecture for rediscoro, a 
 3. **Single ownership**: Socket is owned by exactly one coroutine (worker_loop)
 4. **Actor model**: Connection is a long-running coroutine actor
 5. **No callbacks**: All communication via message passing and awaitable results
+6. **No replay / no retry promise**: This design does NOT guarantee semantic equivalence across connection failures and provides NO automatic retry or request replay.
 
 ## Module Structure
 
@@ -203,6 +204,10 @@ awaitable<void> connection::worker_loop() {
 - Resume MUST happen on the awaiting coroutine's executor
 - Lock-free check via atomic counter
 - Mutex only for coroutine handle protection
+- **Atomicity boundary (MUST):** wait() MUST perform "consume-or-register" as one atomic decision:
+  - either consume one count and return without suspending, OR
+  - register waiter (handle + executor) and suspend
+  Count checking, waiter registration, and suspend decision MUST NOT be separated.
 
 **Why counting:**
 ```cpp
@@ -460,6 +465,10 @@ These are not "best practices" - they are system-level invariants that, if broke
 - IO errors -> `FAILED` state
 - Parse errors -> passed to pending_response
 - Timeout -> `FAILED` state (with retry logic in do_connect)
+
+**FAILED behavior (MUST):**
+- Once `state` becomes `FAILED`, the worker loop MUST NOT perform any further normal socket IO (`do_read()` / `do_write()`).
+- After FAILED: only in-memory cleanup + error delivery is allowed, then optional reconnection attempts (TCP connect + handshake) via `do_reconnect()`.
 
 ### Request Errors
 - Redis errors (simple_error, bulk_error) -> `response_error`

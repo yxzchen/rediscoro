@@ -47,6 +47,20 @@ namespace rediscoro::detail {
 ///   3. Register coroutine_handle
 ///   4. Actually suspend
 ///
+/// MUST-NOT-VIOLATE Implementation Rule (locks in the atomicity boundary):
+/// - wait() MUST "consume-or-register" as one atomic decision:
+///   - either it consumes one count and returns without suspending, OR
+///   - it registers the waiter (handle + executor) and suspends
+/// - The count check, waiter registration, and suspend decision MUST NOT be separated.
+///
+/// Why this is mandatory:
+/// A common-but-wrong pattern is:
+///   if (count_ > 0) { --count_; return; }
+///   register_waiter();
+///   suspend();
+/// which introduces a window where notify() increments count_ but the waiter is not
+/// registered yet, causing a lost signal and a deadlock.
+///
 /// WRONG implementation (has race):
 ///   if (count_ == 0) {           // Check
 ///     awaiting_ = handle;        // Register
@@ -80,7 +94,7 @@ public:
   auto operator=(notify_event&&) -> notify_event& = delete;
 
   /// Wait for notification.
-  /// Can only be called once.
+  /// Can be called multiple times (each call consumes one count).
   auto wait() -> iocoro::awaitable<void>;
 
   /// Signal the waiting coroutine.

@@ -6,7 +6,7 @@
 namespace rediscoro::detail {
 
 template <typename T>
-auto pending_response<T>::deliver(resp3::message msg) -> void {
+auto pending_response<T>::do_deliver(resp3::message msg) -> void {
   // Prevent double-delivery (pipeline bug)
   REDISCORO_ASSERT(!result_.has_value() && "deliver() called twice - pipeline bug!");
   if (result_.has_value()) {
@@ -26,7 +26,7 @@ auto pending_response<T>::deliver(resp3::message msg) -> void {
 }
 
 template <typename T>
-auto pending_response<T>::deliver_error(resp3::error err) -> void {
+auto pending_response<T>::do_deliver_error(resp3::error err) -> void {
   // Prevent double-delivery (pipeline bug)
   REDISCORO_ASSERT(!result_.has_value() && "deliver_error() called twice - pipeline bug!");
   if (result_.has_value()) {

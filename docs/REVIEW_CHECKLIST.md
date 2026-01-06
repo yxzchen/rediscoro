@@ -65,17 +65,19 @@ Use this checklist when reviewing connection-related code or implementing new fe
 - [ ] INIT → CONNECTING only (via start())
 - [ ] CONNECTING → OPEN or FAILED only
 - [ ] OPEN → CLOSING (via stop()) or FAILED (via error)
+- [ ] FAILED → RECONNECTING (immediate) OR FAILED (sleep/backoff) OR CLOSED (if reconnection disabled / cancelled)
+- [ ] RECONNECTING → OPEN (success) OR FAILED (failure)
 - [ ] CLOSING → CLOSED only
-- [ ] FAILED → CLOSED only
 - [ ] CLOSED is terminal (no transitions out)
 
 ### Operation Semantics
 - [ ] enqueue() in INIT/CONNECTING/OPEN: ACCEPT
-- [ ] enqueue() in FAILED: REJECT with connection_error
+- [ ] enqueue() in FAILED (backoff window): REJECT with connection_error
+- [ ] enqueue() in RECONNECTING: ACCEPT (queue for after reconnect)
 - [ ] enqueue() in CLOSING/CLOSED: REJECT with connection_closed
 - [ ] stop() in INIT: immediate CLOSED
 - [ ] stop() in CONNECTING/OPEN: transition to CLOSING
-- [ ] stop() in FAILED/CLOSING/CLOSED: no-op
+- [ ] stop() in FAILED/RECONNECTING/CLOSING/CLOSED: request cancel + wait for CLOSED
 
 ---
 
@@ -95,6 +97,7 @@ Use this checklist when reviewing connection-related code or implementing new fe
 - [ ] After wakeup, loop until no work remains
 - [ ] Check: has_pending_write() || has_pending_read()
 - [ ] Only suspend when work queue is empty
+- [ ] Once state becomes FAILED, do NOT perform any further do_read/do_write (only cleanup + reconnection path)
 
 ---
 

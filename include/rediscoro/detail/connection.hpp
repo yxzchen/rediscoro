@@ -96,17 +96,20 @@ private:
   /// 3. Only then wait for next wakeup
   ///
   /// Drain strategy (FAILED state):
-  /// - IMMEDIATELY stop all IO operations
-  /// - Do NOT attempt do_read() or do_write()
-  /// - Clear all pending requests with error via pipeline.clear_all()
-  /// - Transition directly to CLOSED
-  /// - Rationale: Once FAILED, socket is in unknown state, further IO is unsafe
+  /// - IMMEDIATELY stop all normal socket IO (do_read/do_write)
+  /// - Do NOT attempt do_read() or do_write() after state_ becomes FAILED
+  /// - Close socket and clear all in-flight requests with error via pipeline.clear_all()
+  /// - If reconnection is enabled:
+  ///   - Remain in FAILED during backoff sleep (no socket IO)
+  ///   - Transition to RECONNECTING and attempt TCP connect + handshake (do_reconnect)
+  /// - If reconnection is disabled: transition to CLOSED
+  /// - Rationale: Once FAILED, the socket is in unknown state; further reads/writes are unsafe.
   ///
   /// State transition on error:
   /// - Any do_read/do_write error → call handle_error(ec)
   /// - handle_error() sets state = FAILED
-  /// - Next loop iteration sees FAILED → exits immediately
-  /// - No "partial drain" in FAILED state
+  /// - Worker loop MUST NOT continue do_read/do_write in the same drain pass after FAILED
+  /// - Next drain pass sees FAILED → cleanup + optional reconnection path only
   ///
   /// Work availability check (when state == OPEN):
   /// - has_pending_write() || has_pending_read() || cancel_requested()
@@ -150,7 +153,7 @@ private:
   /// Handle connection error and initiate reconnection.
   ///
   /// Behavior:
-  /// 1. Check if already in error state (防止重复触发)
+  /// 1. Guard: if already in error-handling state, return
   /// 2. Set state = FAILED
   /// 3. Close socket
   /// 4. Clear all pending requests with error via pipeline.clear_all()

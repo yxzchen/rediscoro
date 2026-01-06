@@ -45,17 +45,17 @@ class pending_response : public response_sink {
 public:
   pending_response() = default;
 
-  /// Implement response_sink::deliver()
+  /// Implement response_sink delivery hook.
   /// MUST be called from connection strand.
   /// MUST be called at most once.
   /// Second call is a pipeline bug (will assert in debug, ignore in release).
-  auto deliver(resp3::message msg) -> void override;
+  auto do_deliver(resp3::message msg) -> void override;
 
-  /// Implement response_sink::deliver_error()
+  /// Implement response_sink error delivery hook.
   /// MUST be called from connection strand.
   /// MUST be called at most once.
   /// Second call is a pipeline bug (will assert in debug, ignore in release).
-  auto deliver_error(resp3::error err) -> void override;
+  auto do_deliver_error(resp3::error err) -> void override;
 
   /// Check if delivery is complete.
   [[nodiscard]] auto is_complete() const noexcept -> bool override {

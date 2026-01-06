@@ -47,9 +47,26 @@ public:
   explicit executor_guard(iocoro::any_executor ex)
     : strand_(iocoro::make_strand(ex)) {}
 
-  /// Get the strand executor.
-  [[nodiscard]] auto get() const noexcept -> iocoro::any_executor {
-    return strand_;
+  /// Strand executor façade.
+  ///
+  /// Design goal: reduce accidental misuse inside connection internals.
+  /// - This is NOT implicitly convertible to iocoro::any_executor.
+  /// - If you really need the raw executor, you must call .any_executor() explicitly.
+  class strand_facade {
+  public:
+    explicit strand_facade(iocoro::any_executor ex) : ex_(std::move(ex)) {}
+
+    [[nodiscard]] auto any_executor() const noexcept -> iocoro::any_executor {
+      return ex_;
+    }
+
+  private:
+    iocoro::any_executor ex_;
+  };
+
+  /// Get the strand executor façade.
+  [[nodiscard]] auto strand() const noexcept -> strand_facade {
+    return strand_facade{strand_};
   }
 
   /// Get the underlying io_executor (for socket construction).
