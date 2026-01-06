@@ -1,12 +1,16 @@
 #pragma once
 
 #include <rediscoro/detail/connection.hpp>
+#include <rediscoro/resp3/builder.hpp>
+
 #include <iocoro/bind_executor.hpp>
 #include <iocoro/co_spawn.hpp>
 #include <iocoro/this_coro.hpp>
+#include <iocoro/when_all.hpp>
 
 #include <cstddef>
 #include <span>
+#include <system_error>
 
 namespace rediscoro::detail {
 
@@ -155,14 +159,16 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Minimal actor (step-2):
   // - Own write_loop lifetime so close() can use actor_awaitable_ as the shutdown barrier.
-  // - Future: spawn read_loop/control_loop as use_awaitable and join them here.
+  // - Step-3: own read_loop lifetime as well (joined with write_loop).
   //
   // Hard constraint (IMPORTANT):
   // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
 
   auto ex = executor_.strand().any_executor();
   auto writer = iocoro::co_spawn(ex, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
-  co_await std::move(writer);
+  auto reader = iocoro::co_spawn(ex, iocoro::bind_executor(ex, read_loop()), iocoro::use_awaitable);
+
+  (void)co_await iocoro::when_all(std::move(writer), std::move(reader));
 
   // CRITICAL: Only transition_to_closed() is allowed to write state_ = CLOSED.
   transition_to_closed();
@@ -183,10 +189,15 @@ inline auto connection::write_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::read_loop() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  // - if (state_ != OPEN || !pipeline_.has_pending_read()) { co_await read_wakeup_.wait(); continue; }
-  // - async_read_some + parser + pipeline_.on_message/on_error
-  // - on error: handle_error(ec) and notify control_wakeup_
+  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+    if (state_ != connection_state::OPEN || !pipeline_.has_pending_read()) {
+      co_await read_wakeup_.wait();
+      continue;
+    }
+
+    co_await do_read();
+  }
+
   co_return;
 }
 
@@ -252,10 +263,75 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::do_read() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  // - async_read_some into buffer
-  // - Feed data to parser
-  // - Parse messages and dispatch to pipeline
+  if (state_ != connection_state::OPEN) {
+    co_return;
+  }
+
+  struct in_flight_guard {
+    bool& flag;
+    explicit in_flight_guard(bool& f) : flag(f) {
+      REDISCORO_ASSERT(!flag, "concurrent read detected");
+      flag = true;
+    }
+    ~in_flight_guard() { flag = false; }
+  };
+
+  in_flight_guard guard{read_in_flight_};
+
+  while (!cancel_.is_cancelled() && state_ == connection_state::OPEN && pipeline_.has_pending_read()) {
+    auto writable = parser_.prepare();
+    auto buf = std::span<std::byte>{
+      reinterpret_cast<std::byte*>(writable.data()),
+      writable.size()
+    };
+
+    auto r = co_await socket_.async_read_some(buf);
+    if (!r.has_value()) {
+      handle_error(r.error());
+      co_return;
+    }
+
+    if (*r == 0) {
+      // Peer closed.
+      handle_error(std::make_error_code(std::errc::connection_reset));
+      co_return;
+    }
+
+    parser_.commit(*r);
+
+    for (;;) {
+      auto parsed = parser_.parse_one();
+      if (!parsed.has_value()) {
+        if (parsed.error() == resp3::error::needs_more) {
+          break;
+        }
+
+        // Deliver parser error into the pipeline, then treat it as a fatal connection error.
+        if (pipeline_.has_pending_read()) {
+          pipeline_.on_error(parsed.error());
+        }
+        handle_error(resp3::make_error_code(parsed.error()));
+        co_return;
+      }
+
+      if (!pipeline_.has_pending_read()) {
+        // Unsolicited message (e.g. PUSH) is not supported yet; treat as protocol error.
+        handle_error(std::make_error_code(std::errc::protocol_error));
+        co_return;
+      }
+
+      auto msg = resp3::build_message(parser_.tree(), *parsed);
+      pipeline_.on_message(std::move(msg));
+
+      // Critical for zero-copy parser: reclaim before parsing the next message.
+      parser_.reclaim();
+
+      if (!pipeline_.has_pending_read()) {
+        break;
+      }
+    }
+  }
+
   co_return;
 }
 
@@ -289,6 +365,9 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
     }
 
     pipeline_.on_write_done(*r);
+    if (pipeline_.has_pending_read()) {
+      read_wakeup_.notify();
+    }
   }
 
   co_return;
