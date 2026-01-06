@@ -512,6 +512,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
     // Unsolicited server messages during handshake are treated as unsupported feature for now.
     if (handshake_ec == error::unsolicited_message) {
       last_error_ = error::handshake_failed;
+    } else if (handshake_ec == error::connection_reset) {
+      // Preserve the semantic error: peer closed/reset during handshake.
+      last_error_ = error::connection_reset;
     } else {
       last_error_ = error::connect_failed;
     }
