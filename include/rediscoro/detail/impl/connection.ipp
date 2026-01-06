@@ -468,7 +468,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
             if (pipeline_.has_pending_read()) {
               pipeline_.on_error(parsed.error());
             }
-            co_return resp3::make_error_code(parsed.error());
+            co_return parsed.error();
           }
 
           if (!pipeline_.has_pending_read()) {
@@ -601,7 +601,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       if (pipeline_.has_pending_read()) {
         pipeline_.on_error(parsed.error());
       }
-      handle_error(resp3::make_error_code(parsed.error()));
+      handle_error(parsed.error());
       co_return;
     }
 
