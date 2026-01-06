@@ -113,7 +113,7 @@ namespace rediscoro::detail {
 /// 3. CLOSED is terminal (no transitions out)
 /// 4. FAILED can transition to OPEN (via RECONNECTING)
 /// 5. worker_loop runs until CLOSED
-/// 6. Only one state transition per handle_error() call (防止重复触发)
+/// 6. Only one state transition per handle_error() call
 ///
 /// Reconnection semantics:
 /// - Automatic reconnection is SUPPORTED
@@ -149,8 +149,8 @@ namespace rediscoro::detail {
 /// - Decide when to give up (call stop() or destroy client)
 /// - Implement application-level retry for failed requests (if needed)
 /// - Handle partial failures in multi-command transactions
-enum class connection_state : std::uint8_t {
-  INIT,
+enum class connection_state{
+  INIT = 1,
   CONNECTING,
   OPEN,
   FAILED,       // Error occurred, may sleep before reconnect

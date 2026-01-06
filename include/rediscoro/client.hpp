@@ -62,16 +62,6 @@ public:
   template <typename T>
   auto exec_dynamic(request req) -> iocoro::awaitable<dynamic_response<T>>;
 
-  /// Execute a pipeline of commands with compile-time typed responses.
-  ///
-  /// Example:
-  ///   auto [r1, r2] = co_await client.pipeline(
-  ///     request{"GET", "key1"},
-  ///     request{"SET", "key2", "value"}
-  ///   ).execute<std::string, ignore_t>();
-  // template <typename... Ts>
-  // auto pipeline(...) -> pipeline_builder<Ts...>;
-
   /// Check if client is connected.
   [[nodiscard]] auto is_connected() const noexcept -> bool;
 

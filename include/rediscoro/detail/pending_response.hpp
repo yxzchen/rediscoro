@@ -17,7 +17,7 @@ namespace rediscoro::detail {
 ///
 /// Implements response_sink to receive responses from pipeline.
 ///
-/// Thread-safety model (SIMPLIFIED from original review):
+/// Thread-safety model:
 /// - deliver() and deliver_error() are called ONLY from connection strand
 /// - wait() is called from user's coroutine context (any executor)
 /// - No cross-executor synchronization needed for deliver

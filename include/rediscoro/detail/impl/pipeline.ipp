@@ -34,14 +34,14 @@ inline auto pipeline::on_write_done(std::size_t n) -> void {
 
 inline auto pipeline::on_message(resp3::message msg) -> void {
   // TODO: Implementation
-  // - Pop front from awaiting_read_
+  // - Get front from awaiting_read_
   // - Adapt message to expected type
   // - Set value/error on pending_response
 }
 
 inline auto pipeline::on_error(resp3::error err) -> void {
   // TODO: Implementation
-  // - Pop front from awaiting_read_
+  // - Get front from awaiting_read_
   // - Set error on pending_response
 }
 
