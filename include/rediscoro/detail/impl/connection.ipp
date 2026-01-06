@@ -267,6 +267,8 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
   // State intent: FAILED -> (sleep) -> RECONNECTING -> OPEN, or exit early on close/cancel.
   while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
     // Backoff sleep happens in FAILED.
+    // Note: caller enters do_reconnect() from FAILED, but we keep the assignment explicit
+    // for robustness if future callers change.
     state_ = connection_state::FAILED;
     const auto delay = calculate_reconnect_delay();
 
@@ -318,10 +320,26 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // This prevents accidental carry-over between retries or reconnect attempts.
   parser_.reset();
 
-  // Resolve (note: iocoro resolver does not support cancellation; we check cancel after it returns).
+  // Resolve:
+  // - iocoro resolver always runs getaddrinfo on a background thread_pool and resumes on this
+  //   coroutine's executor (our strand).
+  // - It does NOT support cancellation; timeout/close will only stop waiting (the resolve may
+  //   still complete in the background and be ignored).
   iocoro::ip::tcp::resolver resolver{};
-  auto res = co_await resolver.async_resolve(cfg_.host, std::to_string(cfg_.port));
-  if (!res.has_value() || res->empty()) {
+  auto res = co_await iocoro::with_timeout_detached(
+    socket_.get_executor(),
+    resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)),
+    cfg_.resolve_timeout
+  );
+  if (!res.has_value()) {
+    if (res.error() == iocoro::make_error_code(iocoro::error::timed_out)) {
+      last_error_ = make_error_code(::rediscoro::error::timeout);
+    } else {
+      last_error_ = make_error_code(::rediscoro::error::resolve_failed);
+    }
+    co_return;
+  }
+  if (res->empty()) {
     last_error_ = make_error_code(::rediscoro::error::resolve_failed);
     co_return;
   }
@@ -477,6 +495,14 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   }
 
   // Validate all handshake replies: any error => handshake_failed.
+  //
+  // Defensive: handshake_ec == {} implies slot should be complete (loop condition). Keep this
+  // check to avoid future hangs if the handshake loop logic changes.
+  if (!slot->is_complete()) {
+    pipeline_.clear_all(::rediscoro::error::connection_closed);
+    last_error_ = make_error_code(::rediscoro::error::handshake_failed);
+    co_return;
+  }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i].has_value()) {

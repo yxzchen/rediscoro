@@ -55,6 +55,13 @@ struct config {
   int port = 6379;
 
   // Timeouts
+  /// DNS/host resolution timeout (getaddrinfo on a background thread).
+  ///
+  /// Notes:
+  /// - iocoro resolver does NOT support cancellation; a timed-out resolve may still finish
+  ///   in the background (result will be ignored).
+  /// - close()/cancel can wake connect() promptly, but cannot stop the underlying getaddrinfo.
+  std::chrono::milliseconds resolve_timeout{5000};
   std::chrono::milliseconds connect_timeout{5000};
   std::chrono::milliseconds request_timeout{5000};
 
