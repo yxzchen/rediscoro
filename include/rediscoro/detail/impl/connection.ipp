@@ -2,6 +2,8 @@
 
 #include <rediscoro/detail/connection.hpp>
 #include <iocoro/bind_executor.hpp>
+#include <iocoro/co_spawn.hpp>
+#include <iocoro/this_coro.hpp>
 
 namespace rediscoro::detail {
 
@@ -23,6 +25,12 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //
   // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
   // data races with the background loops.
+  //
+  // Single-await rule for actor_awaitable_ (CRITICAL):
+  // - iocoro::co_spawn(use_awaitable) supports only one awaiter.
+  // - We enforce: ONLY close() awaits actor_awaitable_.
+  // - connect() MUST NOT co_await actor_awaitable_ directly.
+  // - On connect failure, connect() should co_await close() to perform cleanup and join.
   //
   // 1. Handle CLOSED state - support retry (can do before strand switch)
   //    if (state_ == CLOSED) {
@@ -70,15 +78,10 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   //      co_return std::error_code{};  // Success
   //    }
   //
-  // 10. Handle failure - CRITICAL: Clean up all resources and wait for actor exit
-  //     // - Set cancel flag to signal loops to exit
-  //     // - Close socket (if still open)
-  //     // - Clear all pending requests (pipeline.clear_all)
-  //     // - Notify loops to wake up and exit (write_wakeup_/read_wakeup_/control_wakeup_)
-  //     // - Wait for actor_loop to complete (co_await *actor_awaitable_)
-  //     // - Clear actor_awaitable_ to allow restart on retry
-  //     // - Transition to CLOSED
-  //     // - Return error (use operation_aborted if cancelled, otherwise last_error_)
+  // 10. Handle failure - CRITICAL: Cleanup must be unified via close()
+  //     // - Determine return error (operation_aborted if cancelled, otherwise last_error_)
+  //     // - co_await close();  // performs: cancel + clear pipeline + close socket + join actor
+  //     // - After close() completes, connect() may clear actor_awaitable_ to allow retry
   //
   // IMPORTANT: On failure, this method waits for all background coroutines to exit
   // before returning, ensuring clean resource cleanup. This allows retry by calling
@@ -110,6 +113,9 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   //
   // 5. Wait for actor_loop to complete
   //    co_await *actor_awaitable_;
+  //
+  // 5.1. Clear actor_awaitable_ after join (allow restart on retry)
+  //      actor_awaitable_.reset();
   //
   // 6. Verify post-condition
   //    REDISCORO_ASSERT(state_ == CLOSED);
@@ -288,14 +294,30 @@ template <typename... Ts>
 auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>> {
   REDISCORO_ASSERT(req.reply_count() == sizeof...(Ts));
   auto slot = std::make_shared<pending_response<Ts...>>();
-  enqueue_impl(std::move(req), slot.get());
+
+  // Thread-safety: enqueue() may be called from any executor/thread.
+  // All state_ / pipeline_ mutation must happen on the connection strand.
+  executor_.strand().any_executor().post(
+    [self = shared_from_this(), req = std::move(req), slot]() mutable {
+      self->enqueue_impl(std::move(req), slot.get());
+    }
+  );
+
   return slot;
 }
 
 template <typename T>
 auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic_response<T>> {
   auto slot = std::make_shared<pending_dynamic_response<T>>(req.reply_count());
-  enqueue_impl(std::move(req), slot.get());
+
+  // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
+  // All state_ / pipeline_ mutation must happen on the connection strand.
+  executor_.strand().any_executor().post(
+    [self = shared_from_this(), req = std::move(req), slot]() mutable {
+      self->enqueue_impl(std::move(req), slot.get());
+    }
+  );
+
   return slot;
 }
 

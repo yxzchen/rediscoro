@@ -16,8 +16,10 @@
 
 #include <memory>
 #include <optional>
+#include <chrono>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace rediscoro::detail {
@@ -153,6 +155,10 @@ public:
   /// - Wait for background actor to reach CLOSED state (co_await actor_awaitable_)
   /// - If called during RECONNECTING, interrupts reconnection
   ///
+  /// Phase-1 implementation note (determinism-first):
+  /// - close() performs immediate cancellation + pipeline clear + socket close + CLOSED.
+  /// - Graceful flushing (CLOSING state) may be added later as a separate milestone.
+  ///
   /// Concurrent call handling:
   /// - close() + connect(): close() wins, connect() detects cancel_ and returns operation_aborted
   /// - close() + close(): Idempotent, second call is no-op if already closed
@@ -251,6 +257,11 @@ private:
   /// - At most ONE in-flight async_read_some at any time (read_in_flight_)
   /// - At most ONE in-flight async_write_some at any time (write_in_flight_)
   /// - Error handling is centralized: any IO error funnels into handle_error(ec) on strand
+  ///
+  /// Write-loop gate (CRITICAL):
+  /// - write_loop MUST NOT touch the socket unless state_ == OPEN.
+  /// - If state_ != OPEN, write_loop waits on write_wakeup_ and retries.
+  /// - control_loop is responsible for notify(write_wakeup_) when transitioning to OPEN.
   auto actor_loop() -> iocoro::awaitable<void>;
 
   /// Write loop (full-duplex direction: write).
