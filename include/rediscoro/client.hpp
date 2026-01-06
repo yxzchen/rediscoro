@@ -5,8 +5,8 @@
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
 
-#include <iocoro/any_executor.hpp>
 #include <iocoro/awaitable.hpp>
+#include <iocoro/io_executor.hpp>
 
 #include <memory>
 
@@ -36,7 +36,7 @@ namespace rediscoro {
 class client {
 public:
   /// Construct a client with the given executor and configuration.
-  explicit client(iocoro::any_executor ex, config cfg);
+  explicit client(iocoro::io_executor ex, config cfg);
 
   /// Connect to Redis server.
   /// Performs TCP connection, authentication, and database selection.

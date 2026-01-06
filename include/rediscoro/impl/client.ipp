@@ -4,7 +4,7 @@
 
 namespace rediscoro {
 
-inline client::client(iocoro::any_executor ex, config cfg)
+inline client::client(iocoro::io_executor ex, config cfg)
   : conn_(std::make_shared<detail::connection>(ex, std::move(cfg))) {
 }
 

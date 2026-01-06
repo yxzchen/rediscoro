@@ -82,7 +82,7 @@ namespace rediscoro::detail {
 ///
 /// Transitions out of FAILED:
 /// - If reconnection enabled: → RECONNECTING (after optional sleep)
-/// - If reconnection disabled: → CLOSED
+/// - If reconnection disabled: → CLOSED (for deterministic cleanup)
 /// - If user cancels: → CLOSED
 ///
 /// RECONNECTING:

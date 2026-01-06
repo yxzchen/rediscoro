@@ -11,10 +11,13 @@
 #include <rediscoro/resp3/parser.hpp>
 
 #include <iocoro/awaitable.hpp>
+#include <iocoro/io_executor.hpp>
 #include <iocoro/ip/tcp.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace rediscoro::detail {
@@ -38,7 +41,7 @@ namespace rediscoro::detail {
 /// - All other methods run on the connection's strand
 class connection : public std::enable_shared_from_this<connection> {
 public:
-  explicit connection(iocoro::any_executor ex, config cfg);
+  explicit connection(iocoro::io_executor ex, config cfg);
 
   /// Start the connection worker loop.
   /// Must be called exactly once.
@@ -83,6 +86,15 @@ public:
   /// Get current connection state (for diagnostics).
   [[nodiscard]] auto state() const noexcept -> connection_state {
     return state_;
+  }
+
+  /// Last connection error observed (if any).
+  ///
+  /// This is set when the connection transitions through FAILED due to an IO/handshake error.
+  /// When automatic reconnection is disabled, the connection will still transition to CLOSED
+  /// for deterministic cleanup, but the last_error remains available for diagnostics.
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<std::error_code> {
+    return last_error_;
   }
 
 private:
@@ -208,6 +220,7 @@ private:
 
   // State machine
   connection_state state_{connection_state::INIT};
+  std::optional<std::error_code> last_error_{};
 
   // Request/response pipeline
   pipeline pipeline_;

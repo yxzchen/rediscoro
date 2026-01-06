@@ -118,6 +118,16 @@ Use this checklist when reviewing connection-related code or implementing new fe
 
 ---
 
+## Executor Constraints (Construction)
+
+### ✅ IO Executor Required
+- [ ] `client` is constructed with `iocoro::io_executor`
+- [ ] `connection` is constructed with `iocoro::io_executor`
+
+**Why:** Socket IO requires an event loop; other executors cannot drive network operations.
+
+---
+
 ## Forbidden Patterns
 
 ### ❌ NEVER Do This

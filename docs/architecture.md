@@ -12,6 +12,7 @@ This document describes the connection management architecture for rediscoro, a 
 4. **Actor model**: Connection is a long-running coroutine actor
 5. **No callbacks**: All communication via message passing and awaitable results
 6. **No replay / no retry promise**: This design does NOT guarantee semantic equivalence across connection failures and provides NO automatic retry or request replay.
+7. **IO executor only**: `client` / `connection` are constructed with `iocoro::io_executor` (the only executor that can drive socket IO).
 
 ## Module Structure
 
@@ -505,6 +506,10 @@ auto [r1, r2, r3] = co_await client.pipeline(
 - All pending in-flight requests at the moment of error fail immediately (no replay)
 - If reconnection is enabled, connection keeps trying to reconnect indefinitely until success or user cancel
 - New requests during `RECONNECTING` are queued; during `FAILED` (backoff sleep window) are rejected
+
+**When reconnection is disabled:**
+- The connection still transitions to `CLOSED` after failure to guarantee deterministic cleanup and make `stop()` semantics uniform.
+- The failure reason is preserved for diagnostics (see connection's last_error concept).
 
 **State semantics during reconnection:**
 - `FAILED`: either a very short transient between attempts, or the deliberate backoff sleep window; enqueue() rejects
