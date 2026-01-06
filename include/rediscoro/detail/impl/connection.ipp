@@ -14,173 +14,146 @@ inline connection::connection(iocoro::io_executor ex, config cfg)
 }
 
 inline auto connection::run_actor() -> void {
-  // TODO: Implementation
-  // - Spawn actor_loop on the connection's strand
-  // - Use use_awaitable completion token
-  // - Save the awaitable in actor_awaitable_ for close() to use
+  REDISCORO_ASSERT(!actor_awaitable_.has_value() && "run_actor() called while actor is running");
+
+  auto ex = executor_.strand().any_executor();
+  actor_awaitable_.emplace(
+    iocoro::co_spawn(ex, iocoro::bind_executor(ex, actor_loop()), iocoro::use_awaitable)
+  );
 }
 
 inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
-  // TODO: Implementation
-  //
   // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
   // data races with the background loops.
-  //
+  co_await iocoro::this_coro::switch_to(executor_.strand().any_executor());
+
   // Single-await rule for actor_awaitable_ (CRITICAL):
   // - iocoro::co_spawn(use_awaitable) supports only one awaiter.
   // - We enforce: ONLY close() awaits actor_awaitable_.
   // - connect() MUST NOT co_await actor_awaitable_ directly.
   // - On connect failure, connect() should co_await close() to perform cleanup and join.
-  //
-  // 1. Handle CLOSED state - support retry (can do before strand switch)
-  //    if (state_ == CLOSED) {
-  //      // Previous connection failed and was cleaned up
-  //      // Reset state to allow retry
-  //      state_ = INIT;
-  //      last_error_.reset();
-  //      reconnect_count_ = 0;
-  //      actor_awaitable_.reset();  // Previous actor has exited
-  //    }
-  //
-  // 2. Check if already connected (idempotency)
-  //    if (state_ == OPEN) co_return std::error_code{};
-  //
-  // 3. Check if currently connecting (concurrent call not supported)
-  //    if (state_ == CONNECTING) {
-  //      co_return make_error_code(error::already_in_progress);
-  //    }
-  //
-  // 4. Start background actor if not already started
-  //    if (!actor_awaitable_.has_value()) {
-  //      run_actor();  // Spawns actor_loop, sets actor_awaitable_
-  //    }
-  //
-  // 5. Switch to connection's strand
-  //    co_await switch_to(executor_.strand());
-  //
-  // 6. Check cancellation (handle connect() + close() race)
-  //    if (cancel_.is_cancelled()) {
-  //      co_return make_error_code(error::operation_aborted);
-  //    }
-  //
-  // 7. Execute initial connection
-  //    state_ = CONNECTING;
-  //    co_await do_connect();
-  //
-  // 8. Check cancellation again (do_connect may take time)
-  //    if (cancel_.is_cancelled()) {
-  //      // close() was called during connection
-  //      // Fall through to cleanup (step 10)
-  //    }
-  //
-  // 9. Check result
-  //    if (state_ == OPEN) {
-  //      co_return std::error_code{};  // Success
-  //    }
-  //
-  // 10. Handle failure - CRITICAL: Cleanup must be unified via close()
-  //     // - Determine return error (operation_aborted if cancelled, otherwise last_error_)
-  //     // - co_await close();  // performs: cancel + clear pipeline + close socket + join actor
-  //     // - After close() completes, connect() may clear actor_awaitable_ to allow retry
-  //
-  // IMPORTANT: On failure, this method waits for all background coroutines to exit
-  // before returning, ensuring clean resource cleanup. This allows retry by calling
-  // connect() again.
-  co_return std::error_code{};
+
+  if (state_ == connection_state::OPEN) {
+    co_return std::error_code{};
+  }
+
+  if (state_ == connection_state::CONNECTING) {
+    co_return make_error_code(::rediscoro::error::already_in_progress);
+  }
+
+  if (state_ == connection_state::CLOSED) {
+    // Retry support: reset lifecycle state.
+    state_ = connection_state::INIT;
+    last_error_.reset();
+    reconnect_count_ = 0;
+    cancel_.reset();
+  }
+
+  if (cancel_.is_cancelled()) {
+    co_return make_error_code(::rediscoro::error::operation_aborted);
+  }
+
+  if (!actor_awaitable_.has_value()) {
+    run_actor();
+  }
+
+  state_ = connection_state::CONNECTING;
+  last_error_.reset();
+
+  // Not implemented yet: do_connect() currently does nothing.
+  // We still call it to keep the control flow stable.
+  co_await do_connect();
+
+  if (cancel_.is_cancelled()) {
+    // close() won; unify cleanup via close().
+    co_await close();
+    co_return make_error_code(::rediscoro::error::operation_aborted);
+  }
+
+  if (state_ == connection_state::OPEN) {
+    co_return std::error_code{};
+  }
+
+  // Deterministic failure for phase-1 implementation.
+  // Later milestones will set last_error_ precisely from resolver/connect/handshake.
+  auto ec = make_error_code(::rediscoro::error::connect_failed);
+  last_error_ = ec;
+  co_await close();
+  co_return ec;
 }
 
 inline auto connection::close() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  //
-  // 1. Check if already closed (idempotency)
-  //    if (state_ == CLOSED) co_return;
-  //
-  // 2. Check if worker is running
-  //    if (!actor_awaitable_.has_value()) {
-  //      // Actor never started or already cleaned up
-  //      // Just transition to CLOSED
-  //      state_ = CLOSED;
-  //      co_return;
-  //    }
-  //
-  // 3. Request cancellation
-  //    cancel_.request_cancel();
-  //
-  // 4. Notify loops to wake up and exit
-  //    write_wakeup_.notify();
-  //    read_wakeup_.notify();
-  //    control_wakeup_.notify();
-  //
-  // 5. Wait for actor_loop to complete
-  //    co_await *actor_awaitable_;
-  //
-  // 5.1. Clear actor_awaitable_ after join (allow restart on retry)
-  //      actor_awaitable_.reset();
-  //
-  // 6. Verify post-condition
-  //    REDISCORO_ASSERT(state_ == CLOSED);
-  //
-  // IMPORTANT: This method waits for all background loops to completely exit before returning.
-  // After this method returns, it's safe to destroy the connection object.
+  co_await iocoro::this_coro::switch_to(executor_.strand().any_executor());
+
+  if (state_ == connection_state::CLOSED) {
+    co_return;
+  }
+
+  // Phase-1: determinism-first shutdown.
+  cancel_.request_cancel();
+  state_ = connection_state::CLOSED;
+
+  // Fail all pending work deterministically.
+  pipeline_.clear_all(::rediscoro::error::connection_closed);
+
+  // Close socket immediately.
+  if (socket_.is_open()) {
+    socket_.close();
+  }
+
+  // Wake loops / actor.
+  write_wakeup_.notify();
+  read_wakeup_.notify();
+  control_wakeup_.notify();
+
+  if (actor_awaitable_.has_value()) {
+    // Critical: actor_awaitable_ can only be awaited once.
+    co_await *actor_awaitable_;
+    actor_awaitable_.reset();
+  }
+
+  REDISCORO_ASSERT(state_ == connection_state::CLOSED);
   co_return;
 }
 
 inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
-  // TODO: Implementation
-  //
-  // 1. Check current state and reject early if not ready
-  //    switch (state_) {
-  //      case INIT:
-  //      case CONNECTING:
-  //        // Connection not established yet
-  //        sink->deliver_error(make_error_code(error::not_connected));
-  //        return;
-  //
-  //      case FAILED:
-  //        // Connection lost due to runtime error (may be reconnecting in background)
-  //        sink->deliver_error(make_error_code(error::connection_lost));
-  //        return;
-  //
-  //      case CLOSING:
-  //      case CLOSED:
-  //        // Connection shut down
-  //        sink->deliver_error(make_error_code(error::connection_closed));
-  //        return;
-  //
-  //      case OPEN:
-  //      case RECONNECTING:
-  //        // Accept request
-  //        break;
-  //    }
-  //
-  // 2. Add request to pipeline
-  //    pipeline_.push(std::move(req), sink);
-  //
-  // 3. Notify write loop to flush ASAP
-  //    write_wakeup_.notify();
+  REDISCORO_ASSERT(sink != nullptr);
+
+  // State gating: reject early if not ready.
+  switch (state_) {
+    case connection_state::INIT:
+    case connection_state::CONNECTING: {
+      sink->deliver_error(::rediscoro::error::not_connected);
+      return;
+    }
+    case connection_state::FAILED: {
+      sink->deliver_error(::rediscoro::error::connection_lost);
+      return;
+    }
+    case connection_state::CLOSING:
+    case connection_state::CLOSED: {
+      sink->deliver_error(::rediscoro::error::connection_closed);
+      return;
+    }
+    case connection_state::OPEN:
+    case connection_state::RECONNECTING: {
+      break;
+    }
+  }
+
+  pipeline_.push(std::move(req), sink);
+  write_wakeup_.notify();
 }
 
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
-  // TODO: Implementation
-  //
-  // Design philosophy:
-  // - This is a top-level "connection actor" that owns lifetime and shutdown coordination.
-  // - It spawns three strand-bound coroutines:
-  //   * write_loop(): flush pending writes ASAP
-  //   * read_loop(): drain pending reads continuously
-  //   * control_loop(): centralized state transitions + reconnection
-  //
-  // Shutdown/joining requirement (CRITICAL):
-  // - close() must be able to deterministically wait for all loops to exit before returning.
-  // - actor_loop is the single awaitable that close() waits on (actor_awaitable_).
-  //
-  // Implementation sketch:
-  // - co_spawn(executor_.strand().any_executor(), write_loop(), detached);
-  // - co_spawn(executor_.strand().any_executor(), read_loop(), detached);
-  // - co_spawn(executor_.strand().any_executor(), control_loop(), detached);
-  // - Wait for all three loops to exit (via explicit join mechanism; e.g. strand-only counter
-  //   + notify_event, or iocoro::when_all if available).
-  // - transition_to_closed() at the end.
+  // Phase-1 minimal actor:
+  // - No sub-loops yet.
+  // - Exists so close() has a single join point (actor_awaitable_).
+  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+    co_await control_wakeup_.wait();
+  }
+
+  transition_to_closed();
   co_return;
 }
 
@@ -284,10 +257,14 @@ inline auto connection::handle_error(std::error_code ec) -> void {
 }
 
 inline auto connection::transition_to_closed() -> void {
-  // TODO: Implementation
-  // - Close socket
-  // - Clear pipeline
-  // - Set state to CLOSED
+  // Deterministic cleanup (idempotent).
+  state_ = connection_state::CLOSED;
+
+  pipeline_.clear_all(::rediscoro::error::connection_closed);
+
+  if (socket_.is_open()) {
+    socket_.close();
+  }
 }
 
 template <typename... Ts>
