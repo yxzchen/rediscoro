@@ -30,15 +30,21 @@ inline auto client::state() const noexcept -> detail::connection_state {
 }
 
 template <typename T, typename... Args>
-auto client::execute(Args&&... args) -> iocoro::awaitable<response_slot<T>> {
-  // TODO: Implementation
-  // - Create a request from args
-  // - Enqueue request to connection
-  // - Await pending_response
-  // - Return result
-
+auto client::exec(Args&&... args) -> iocoro::awaitable<response<T>> {
   request req{std::forward<Args>(args)...};
   auto pending = conn_->template enqueue<T>(std::move(req));
+  co_return co_await pending->wait();
+}
+
+template <typename... Ts>
+auto client::exec(request req) -> iocoro::awaitable<response<Ts...>> {
+  auto pending = conn_->template enqueue<Ts...>(std::move(req));
+  co_return co_await pending->wait();
+}
+
+template <typename T>
+auto client::exec_dynamic(request req) -> iocoro::awaitable<dynamic_response<T>> {
+  auto pending = conn_->template enqueue_dynamic<T>(std::move(req));
   co_return co_await pending->wait();
 }
 

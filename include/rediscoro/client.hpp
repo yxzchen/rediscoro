@@ -31,7 +31,7 @@ namespace rediscoro {
 /// Usage:
 ///   client c{ctx.get_executor(), cfg};
 ///   co_await c.connect();
-///   auto result = co_await c.execute<std::string>("GET", "key");
+///   auto resp = co_await c.exec<std::string>("GET", "key");
 ///   co_await c.close();
 class client {
 public:
@@ -46,15 +46,21 @@ public:
   /// Waits for pending requests to complete.
   auto close() -> iocoro::awaitable<void>;
 
-  /// Execute a single command and wait for response.
+  /// Execute a request and wait for response(s) (fixed-size, heterogenous).
   ///
-  /// Example:
-  ///   auto resp = co_await client.execute<std::string>("GET", "mykey");
-  ///   if (resp) {
-  ///     std::cout << *resp << std::endl;
-  ///   }
+  /// For a single command, use Ts... of size 1:
+  ///   auto r = co_await client.exec<std::string>("GET", "key");
+  ///   auto& slot = r.template get<0>();
+  template <typename... Ts>
+  auto exec(request req) -> iocoro::awaitable<response<Ts...>>;
+
+  /// Convenience: build a single-command request from args and return response<T>.
   template <typename T, typename... Args>
-  auto execute(Args&&... args) -> iocoro::awaitable<response_slot<T>>;
+  auto exec(Args&&... args) -> iocoro::awaitable<response<T>>;
+
+  /// Execute a request and wait for response(s) (dynamic-size, homogeneous).
+  template <typename T>
+  auto exec_dynamic(request req) -> iocoro::awaitable<dynamic_response<T>>;
 
   /// Execute a pipeline of commands with compile-time typed responses.
   ///

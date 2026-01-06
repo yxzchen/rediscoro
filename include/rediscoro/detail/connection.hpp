@@ -58,17 +58,23 @@ public:
   /// - If worker_awaitable_ not available (destructor case), best-effort
   auto stop() -> iocoro::awaitable<void>;
 
-  /// Enqueue a request for execution.
+  /// Enqueue a request for execution (fixed-size, heterogenous replies).
   /// Can be called from any executor.
-  /// Returns a pending_response that will be completed when response arrives.
+  /// Returns a pending_response that will be completed when all replies arrive.
   ///
   /// Behavior by state:
   /// - INIT, CONNECTING, OPEN, RECONNECTING: Request accepted and queued
-  /// - FAILED: Returns pending_response that immediately fails with connection_error
-  ///   (Note: FAILED is usually 瞬态 during immediate reconnect, or sleep period during backoff)
-  /// - CLOSING, CLOSED: Returns pending_response that immediately fails with connection_closed
+  /// - FAILED: Request is rejected immediately (client_error: connection_error)
+  /// - CLOSING, CLOSED: Request is rejected immediately (client_error: connection_closed)
+  template <typename... Ts>
+  auto enqueue(request req) -> std::shared_ptr<pending_response<Ts...>>;
+
+  /// Enqueue a pipeline request (homogeneous reply type).
+  ///
+  /// Contract:
+  /// - Expected reply count is req.reply_count() at enqueue time.
   template <typename T>
-  auto enqueue(request req) -> std::shared_ptr<pending_response<T>>;
+  auto enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic_response<T>>;
 
   /// Internal enqueue implementation (type-erased).
   /// MUST be called from connection strand.

@@ -89,14 +89,17 @@ inline auto connection::transition_to_closed() -> void {
   // - Set state to CLOSED
 }
 
-template <typename T>
-auto connection::enqueue(request req) -> std::shared_ptr<pending_response<T>> {
-  // Structural constraint:
-  // pending_response<T> completes from exactly one delivered reply.
-  // Multi-command requests require a multi-reply sink (not implemented yet).
-  REDISCORO_ASSERT(req.reply_count() == 1 && "multi-command request requires a multi-reply sink (not supported yet)");
+template <typename... Ts>
+auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>> {
+  REDISCORO_ASSERT(req.reply_count() == sizeof...(Ts));
+  auto slot = std::make_shared<pending_response<Ts...>>();
+  enqueue_impl(std::move(req), slot.get());
+  return slot;
+}
 
-  auto slot = std::make_shared<pending_response<T>>();
+template <typename T>
+auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic_response<T>> {
+  auto slot = std::make_shared<pending_dynamic_response<T>>(req.reply_count());
   enqueue_impl(std::move(req), slot.get());
   return slot;
 }

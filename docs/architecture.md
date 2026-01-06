@@ -43,7 +43,9 @@ client
 **Key Methods:**
 - `connect()` - Connect to Redis server
 - `close()` - Graceful shutdown
-- `execute<T>(...)` - Execute single command
+- `exec<T>(...)` - Execute single command (returns `response<T>` size 1)
+- `exec<Ts...>(request)` - Execute fixed-size pipeline (returns `response<Ts...>`)
+- `exec_dynamic<T>(request)` - Execute runtime-size pipeline (returns `dynamic_response<T>`)
 
 **NOT Responsible For:**
 - IO operations
@@ -173,19 +175,18 @@ awaitable<void> connection::worker_loop() {
 ### 6. pending_response\<T\>
 
 **Responsibilities:**
-- Store response value or error
-- Provide awaitable interface
-- Single-shot notification
+- Aggregate one or more replies into `response<Ts...>` or `dynamic_response<T>`
+- Provide awaitable interface (`wait()`)
+- Notify exactly once when the aggregate is complete
 
 **Constraints:**
-- Can only be awaited once
-- Can only be set once
-- Thread-safe (for cross-executor usage)
+- deliver() is strand-only and may be called multiple times until completion
+- wait() resumes on the awaiting coroutine's executor via notify_event
 
 **Key Methods:**
-- `set_value(T)` - Set successful response
-- `set_error(error)` - Set error response
-- `wait()` - Await completion
+- `deliver(resp3::message)` - Consume one reply
+- `deliver_error(resp3::error)` - Consume one reply as error
+- `wait()` - Await completion, returning `response<...>` / `dynamic_response<T>`
 
 ### 7. notify_event
 
@@ -241,13 +242,14 @@ class response_sink {
 ```
 
 **Why This Matters:**
-- Pipeline operates on `response_sink*`, not `pending_response<T>*`
+- Pipeline operates on `response_sink*`, not coroutine-aware types
 - Type system prevents pipeline from accessing coroutine internals
 - Impossible to accidentally inline user code
 
 **Implementation:**
-- `pending_response<T>` implements `response_sink`
-- `deliver()` adapts message to `T` and notifies
+- `pending_response<Ts...>` implements `response_sink` for fixed-size pipelines
+- `pending_dynamic_response<T>` implements `response_sink` for runtime-sized pipelines
+- `deliver()` aggregates replies into `response<Ts...>` / `dynamic_response<T>` and notifies
 - Called ONLY from connection strand (simplified thread-safety)
 
 ### 8. executor_guard
@@ -267,7 +269,7 @@ class response_sink {
 ### Request Path
 
 ```
-client.execute<T>(...)
+client.exec<T>(...)
   |
   v
 request created
@@ -276,7 +278,7 @@ request created
 connection.enqueue<T>(request)
   |
   v
-pending_response<T> created
+pending_response<T> created  (N=1 fixed-size response)
   |
   v
 pipeline.push(request, pending_response)
@@ -315,7 +317,7 @@ pipeline.on_message(msg)
 adapter::adapt<T>(msg)
   |
   v
-pending_response.set_value(T) or set_error(error)
+pending_response aggregates reply into response<T> slot (or error)
   |
   v
 notify_event.notify()
@@ -324,7 +326,7 @@ notify_event.notify()
 client coroutine resumes
   |
   v
-return response_slot<T>
+return response<T> (size 1)
 ```
 
 ## Thread Safety Model
@@ -421,7 +423,7 @@ These are not "best practices" - they are system-level invariants that, if broke
 - Breaks isolation between connection and user logic
 
 ### 4. Pipeline Type Isolation
-**Invariant:** Pipeline never knows about coroutines or pending_response<T>
+**Invariant:** Pipeline never knows about coroutines or pending_response types
 
 **Enforcement:**
 - Pipeline operates ONLY on response_sink* (abstract)
@@ -488,7 +490,7 @@ auto [r1, r2, r3] = co_await client.pipeline(
   request{"GET", "key1"},
   request{"SET", "key2", "value"},
   request{"INCR", "counter"}
-).execute<std::string, ignore_t, int64_t>();
+).exec<std::string, ignore_t, int64_t>();
 ```
 
 ### Pub/Sub Support

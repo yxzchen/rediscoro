@@ -2,18 +2,18 @@
 
 #include <rediscoro/assert.hpp>
 #include <rediscoro/detail/notify_event.hpp>
+#include <rediscoro/detail/response_builder.hpp>
 #include <rediscoro/detail/response_sink.hpp>
 #include <rediscoro/response.hpp>
 
 #include <iocoro/awaitable.hpp>
 
-#include <memory>
 #include <optional>
-#include <variant>
+#include <utility>
 
 namespace rediscoro::detail {
 
-/// Typed pending response that awaits a single response value.
+/// Pending response for a fixed-size pipeline (heterogeneous slots).
 ///
 /// Implements response_sink to receive responses from pipeline.
 ///
@@ -31,46 +31,63 @@ namespace rediscoro::detail {
 ///
 /// Responsibilities:
 /// - Implement response_sink interface
-/// - Adapt RESP3 message to type T
-/// - Store result (value or error)
+/// - Aggregate N replies into response<Ts...>
 /// - Provide awaitable interface via wait()
 /// - Resume waiting coroutine on its original executor
 ///
 /// Constraints:
-/// - deliver() / deliver_error() can only be called once
-/// - wait() can only be called once
+/// - deliver() / deliver_error() can be called multiple times until expected replies are consumed
 /// - deliver() MUST be called from connection strand
-template <typename T>
-class pending_response : public response_sink {
+template <typename... Ts>
+class pending_response final : public response_sink {
 public:
   pending_response() = default;
 
-  /// Implement response_sink delivery hook.
-  /// MUST be called from connection strand.
-  /// MUST be called at most once.
-  /// Second call is a pipeline bug (will assert in debug, ignore in release).
-  auto do_deliver(resp3::message msg) -> void override;
-
-  /// Implement response_sink error delivery hook.
-  /// MUST be called from connection strand.
-  /// MUST be called at most once.
-  /// Second call is a pipeline bug (will assert in debug, ignore in release).
-  auto do_deliver_error(resp3::error err) -> void override;
-
-  /// Check if delivery is complete.
-  [[nodiscard]] auto is_complete() const noexcept -> bool override {
-    return event_.is_ready();
+  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override {
+    return sizeof...(Ts);
   }
 
-  /// Wait for the response to complete.
-  /// Returns the value or error.
-  /// Can be called from any executor.
-  auto wait() -> iocoro::awaitable<response_slot<T>>;
+  [[nodiscard]] auto is_complete() const noexcept -> bool override {
+    return result_.has_value();
+  }
+
+  auto wait() -> iocoro::awaitable<response<Ts...>>;
+
+protected:
+  auto do_deliver(resp3::message msg) -> void override;
+  auto do_deliver_error(resp3::error err) -> void override;
 
 private:
   notify_event event_{};
-  // No mutex needed! deliver() is single-threaded (strand-only)
-  std::optional<response_slot<T>> result_{};
+  response_builder<Ts...> builder_{};
+  std::optional<response<Ts...>> result_{};
+};
+
+/// Pending response for a dynamic-size pipeline (homogeneous slots).
+template <typename T>
+class pending_dynamic_response final : public response_sink {
+public:
+  explicit pending_dynamic_response(std::size_t expected_count)
+    : builder_(expected_count) {}
+
+  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override {
+    return builder_.expected_count();
+  }
+
+  [[nodiscard]] auto is_complete() const noexcept -> bool override {
+    return result_.has_value();
+  }
+
+  auto wait() -> iocoro::awaitable<dynamic_response<T>>;
+
+protected:
+  auto do_deliver(resp3::message msg) -> void override;
+  auto do_deliver_error(resp3::error err) -> void override;
+
+private:
+  notify_event event_{};
+  dynamic_response_builder<T> builder_;
+  std::optional<dynamic_response<T>> result_{};
 };
 
 }  // namespace rediscoro::detail

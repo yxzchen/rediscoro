@@ -1,54 +1,75 @@
 #pragma once
 
 #include <rediscoro/detail/pending_response.hpp>
-#include <rediscoro/adapter/adapt.hpp>
 
 namespace rediscoro::detail {
 
-template <typename T>
-auto pending_response<T>::do_deliver(resp3::message msg) -> void {
-  // Prevent double-delivery (pipeline bug)
-  REDISCORO_ASSERT(!result_.has_value() && "deliver() called twice - pipeline bug!");
+template <typename... Ts>
+auto pending_response<Ts...>::do_deliver(resp3::message msg) -> void {
+  REDISCORO_ASSERT(!result_.has_value());
   if (result_.has_value()) {
-    return;  // Defensive: ignore in release builds
+    return;
   }
 
-  // Adapt message to type T
-  auto adapted = adapter::adapt<T>(msg);
-  if (adapted) {
-    result_ = response_slot<T>{std::move(*adapted)};
-  } else {
-    result_ = response_slot<T>{unexpected(response_error{std::move(adapted.error())})};
+  builder_.accept(std::move(msg));
+  if (builder_.done()) {
+    result_ = builder_.take_results();
+    event_.notify();
   }
-
-  // Notify waiting coroutine (on its executor)
-  event_.notify();
 }
 
-template <typename T>
-auto pending_response<T>::do_deliver_error(resp3::error err) -> void {
-  // Prevent double-delivery (pipeline bug)
-  REDISCORO_ASSERT(!result_.has_value() && "deliver_error() called twice - pipeline bug!");
+template <typename... Ts>
+auto pending_response<Ts...>::do_deliver_error(resp3::error err) -> void {
+  REDISCORO_ASSERT(!result_.has_value());
   if (result_.has_value()) {
-    return;  // Defensive: ignore in release builds
+    return;
   }
 
-  // Store error
-  result_ = response_slot<T>{unexpected(response_error{err})};
-
-  // Notify waiting coroutine (on its executor)
-  event_.notify();
+  builder_.accept(err);
+  if (builder_.done()) {
+    result_ = builder_.take_results();
+    event_.notify();
+  }
 }
 
-template <typename T>
-auto pending_response<T>::wait() -> iocoro::awaitable<response_slot<T>> {
-  // TODO: Implementation
-  // - Wait on event
-  // - Return result
-
+template <typename... Ts>
+auto pending_response<Ts...>::wait() -> iocoro::awaitable<response<Ts...>> {
   co_await event_.wait();
+  REDISCORO_ASSERT(result_.has_value());
+  co_return std::move(*result_);
+}
 
-  // Result must be set at this point
+template <typename T>
+auto pending_dynamic_response<T>::do_deliver(resp3::message msg) -> void {
+  REDISCORO_ASSERT(!result_.has_value());
+  if (result_.has_value()) {
+    return;
+  }
+
+  builder_.accept(std::move(msg));
+  if (builder_.done()) {
+    result_ = builder_.take_results();
+    event_.notify();
+  }
+}
+
+template <typename T>
+auto pending_dynamic_response<T>::do_deliver_error(resp3::error err) -> void {
+  REDISCORO_ASSERT(!result_.has_value());
+  if (result_.has_value()) {
+    return;
+  }
+
+  builder_.accept(err);
+  if (builder_.done()) {
+    result_ = builder_.take_results();
+    event_.notify();
+  }
+}
+
+template <typename T>
+auto pending_dynamic_response<T>::wait() -> iocoro::awaitable<dynamic_response<T>> {
+  co_await event_.wait();
   REDISCORO_ASSERT(result_.has_value());
   co_return std::move(*result_);
 }
