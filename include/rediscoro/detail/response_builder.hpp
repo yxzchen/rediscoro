@@ -34,7 +34,13 @@ public:
 
   void accept(resp3::error e) {
     REDISCORO_ASSERT(next_index_ < static_size);
-    err_dispatch_table()[next_index_](this, e);
+    resp3_err_dispatch_table()[next_index_](this, e);
+    next_index_ += 1;
+  }
+
+  void accept(rediscoro::error e) {
+    REDISCORO_ASSERT(next_index_ < static_size);
+    client_err_dispatch_table()[next_index_](this, e);
     next_index_ += 1;
   }
 
@@ -90,7 +96,8 @@ private:
   }
 
   using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
-  using err_dispatch_fn = void(*)(response_builder*, resp3::error);
+  using resp3_err_dispatch_fn = void(*)(response_builder*, resp3::error);
+  using client_err_dispatch_fn = void(*)(response_builder*, rediscoro::error);
 
   template <std::size_t I>
   static void msg_dispatch(response_builder* self, resp3::message msg) {
@@ -98,8 +105,13 @@ private:
   }
 
   template <std::size_t I>
-  static void err_dispatch(response_builder* self, resp3::error e) {
+  static void resp3_err_dispatch(response_builder* self, resp3::error e) {
     self->set_resp3_error<I>(e);
+  }
+
+  template <std::size_t I>
+  static void client_err_dispatch(response_builder* self, rediscoro::error e) {
+    self->set_error<I>(e);
   }
 
   template <std::size_t... Is>
@@ -108,8 +120,14 @@ private:
   }
 
   template <std::size_t... Is>
-  static constexpr auto make_err_table(std::index_sequence<Is...>) -> std::array<err_dispatch_fn, static_size> {
-    return {&err_dispatch<Is>...};
+  static constexpr auto make_resp3_err_table(std::index_sequence<Is...>) -> std::array<resp3_err_dispatch_fn, static_size> {
+    return {&resp3_err_dispatch<Is>...};
+  }
+
+  template <std::size_t... Is>
+  static constexpr auto make_client_err_table(std::index_sequence<Is...>)
+    -> std::array<client_err_dispatch_fn, static_size> {
+    return {&client_err_dispatch<Is>...};
   }
 
   static auto msg_dispatch_table() -> const std::array<msg_dispatch_fn, static_size>& {
@@ -117,8 +135,13 @@ private:
     return table;
   }
 
-  static auto err_dispatch_table() -> const std::array<err_dispatch_fn, static_size>& {
-    static constexpr auto table = make_err_table(std::index_sequence_for<Ts...>{});
+  static auto resp3_err_dispatch_table() -> const std::array<resp3_err_dispatch_fn, static_size>& {
+    static constexpr auto table = make_resp3_err_table(std::index_sequence_for<Ts...>{});
+    return table;
+  }
+
+  static auto client_err_dispatch_table() -> const std::array<client_err_dispatch_fn, static_size>& {
+    static constexpr auto table = make_client_err_table(std::index_sequence_for<Ts...>{});
     return table;
   }
 
@@ -162,6 +185,11 @@ public:
   }
 
   void accept(resp3::error e) {
+    REDISCORO_ASSERT(results_.size() < expected_);
+    results_.push_back(unexpected(response_error{e}));
+  }
+
+  void accept(rediscoro::error e) {
     REDISCORO_ASSERT(results_.size() < expected_);
     results_.push_back(unexpected(response_error{e}));
   }
