@@ -207,8 +207,8 @@ namespace rediscoro::detail {
 /// What happens on connection failure:
 /// 1. All pending requests at time of error are failed immediately
 /// 2. Connection automatically enters reconnection loop (if enabled)
-/// 3. New requests during RECONNECTING are queued
-/// 4. Reconnection succeeds → queued requests are processed
+/// 3. New requests during FAILED / RECONNECTING are rejected immediately
+/// 4. Reconnection succeeds → connection becomes OPEN and accepts new requests
 /// 5. Reconnection fails → retry indefinitely (infinite loop)
 /// 6. User cancel → all queued requests fail, connection CLOSED
 ///
