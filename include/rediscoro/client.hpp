@@ -40,7 +40,11 @@ public:
 
   /// Connect to Redis server.
   /// Performs TCP connection, authentication, and database selection.
-  auto connect() -> iocoro::awaitable<void>;
+  ///
+  /// Returns:
+  /// - std::error_code{} (empty) on success
+  /// - error_code with error details on failure
+  auto connect() -> iocoro::awaitable<std::error_code>;
 
   /// Close the connection gracefully.
   /// Waits for pending requests to complete.

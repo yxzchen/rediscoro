@@ -14,7 +14,7 @@ inline connection::connection(iocoro::io_executor ex, config cfg)
 inline auto connection::start() -> iocoro::awaitable<void> {
   // TODO: Implementation
   // - Spawn worker_loop on the strand
-  // - co_spawn(executor_.get(), worker_loop(), detached)
+  // - co_spawn(executor_.get(), worker_loop(), use_awaitable)
   co_return;
 }
 

@@ -8,7 +8,7 @@ inline client::client(iocoro::io_executor ex, config cfg)
   : conn_(std::make_shared<detail::connection>(ex, std::move(cfg))) {
 }
 
-inline auto client::connect() -> iocoro::awaitable<void> {
+inline auto client::connect() -> iocoro::awaitable<std::error_code> {
   // TODO: Implementation
   // - Start connection
   co_return co_await conn_->start();
