@@ -69,7 +69,7 @@ struct value_result {
 
 }  // namespace
 
-auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
+inline auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   if (tree_ready_) {
     return unexpected(error::resp3_tree_not_consumed);
   }
@@ -510,7 +510,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   }
 }
 
-auto parser::reclaim() -> void {
+inline auto parser::reclaim() -> void {
   // After the user has consumed the raw tree, it is now safe to reclaim memory.
   tree_.reset();
   stack_.clear();

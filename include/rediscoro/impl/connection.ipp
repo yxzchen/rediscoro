@@ -751,7 +751,7 @@ inline auto connection::transition_to_closed() -> void {
 }
 
 template <typename... Ts>
-auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>> {
+inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>> {
   REDISCORO_ASSERT(req.reply_count() == sizeof...(Ts));
   auto slot = std::make_shared<pending_response<Ts...>>();
 
@@ -768,7 +768,7 @@ auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>
 }
 
 template <typename T>
-auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic_response<T>> {
+inline auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic_response<T>> {
   auto slot = std::make_shared<pending_dynamic_response<T>>(req.reply_count());
 
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.

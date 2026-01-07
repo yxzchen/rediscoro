@@ -33,27 +33,27 @@ namespace {
 
 // -------------------- ASSERT --------------------
 
-void assert_fail(char const* expr, char const* file, int line, char const* func) noexcept {
+inline void assert_fail(char const* expr, char const* file, int line, char const* func) noexcept {
   fail("ASSERT", expr, nullptr, file, line, func);
 }
 
-void assert_fail(char const* expr, char const* msg, char const* file, int line,
-                 char const* func) noexcept {
+inline void assert_fail(char const* expr, char const* msg, char const* file, int line,
+                        char const* func) noexcept {
   fail("ASSERT", expr, msg, file, line, func);
 }
 
 // -------------------- ENSURE --------------------
 
-void ensure_fail(char const* expr, char const* file, int line, char const* func) noexcept {
+inline void ensure_fail(char const* expr, char const* file, int line, char const* func) noexcept {
   fail("ENSURE", expr, nullptr, file, line, func);
 }
 
-void ensure_fail(char const* expr, char const* msg, char const* file, int line,
-                 char const* func) noexcept {
+inline void ensure_fail(char const* expr, char const* msg, char const* file, int line,
+                        char const* func) noexcept {
   fail("ENSURE", expr, msg, file, line, func);
 }
 
-void unreachable_fail(char const* file, int line, char const* func) noexcept {
+inline void unreachable_fail(char const* file, int line, char const* func) noexcept {
   fail("UNREACHABLE", nullptr, nullptr, file, line, func);
 }
 
