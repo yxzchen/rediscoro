@@ -429,10 +429,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
         // Write all pending handshake bytes.
         while (pipeline_.has_pending_write()) {
           auto view = pipeline_.next_write_buffer();
-          auto buf = std::span<std::byte const>{
-            reinterpret_cast<std::byte const*>(view.data()),
-            view.size()
-          };
+          auto buf = std::as_bytes(std::span{view.data(), view.size()});
           auto w = co_await socket_.async_write_some(buf, tok);
           if (!w.has_value()) {
             co_return w.error();
@@ -637,10 +634,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
 
   while (!cancel_.is_cancelled() && state_ == connection_state::OPEN && pipeline_.has_pending_write()) {
     auto view = pipeline_.next_write_buffer();
-    auto buf = std::span<std::byte const>{
-      reinterpret_cast<std::byte const*>(view.data()),
-      view.size()
-    };
+    auto buf = std::as_bytes(std::span{view.data(), view.size()});
 
     auto r = co_await socket_.async_write_some(buf);
     if (!r.has_value()) {
