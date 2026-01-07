@@ -14,7 +14,7 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
   iocoro::io_context ctx;
 
   rediscoro::config cfg{};
-  cfg.host = "10.0.0.1";
+  cfg.host = "apple.com";
   cfg.port = 80;
   cfg.resolve_timeout = 1000ms;
   cfg.connect_timeout = 1000ms;
@@ -165,5 +165,94 @@ TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
   iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
   ctx.run();
 
+  ASSERT_TRUE(ok) << diag;
+}
+
+TEST(client_local, ping_set_get_roundtrip) {
+  iocoro::io_context ctx;
+
+  bool skipped = false;
+  std::string skip_reason{};
+  bool ok = false;
+  std::string diag{};
+
+  auto task = [&]() -> iocoro::awaitable<void> {
+    rediscoro::config cfg{};
+    cfg.host = "127.0.0.1";
+    cfg.port = 6379;
+    cfg.resolve_timeout = 500ms;
+    cfg.connect_timeout = 500ms;
+    cfg.reconnection.enabled = false;
+
+    rediscoro::client c{ctx.get_executor(), cfg};
+    auto ec = co_await c.connect();
+    if (ec) {
+      skipped = true;
+      skip_reason = "redis not available at 127.0.0.1:6379 (" + ec.message() + ")";
+      co_return;
+    }
+
+    {
+      auto resp = co_await c.exec<std::string>("PING");
+      auto& slot = resp.template get<0>();
+      if (!slot) {
+        diag = "PING failed: " + slot.error().to_string();
+        co_return;
+      }
+      if (*slot != "PONG") {
+        diag = "expected PONG, got: " + *slot;
+        co_return;
+      }
+    }
+
+    const std::string key = "rediscoro:test:ping_set_get_roundtrip";
+    const std::string value = "42";
+
+    {
+      auto resp = co_await c.exec<std::int64_t>("DEL", key);
+      auto& slot = resp.template get<0>();
+      if (!slot) {
+        diag = "DEL failed: " + slot.error().to_string();
+        co_return;
+      }
+    }
+
+    {
+      auto resp = co_await c.exec<std::string>("SET", key, value);
+      auto& slot = resp.template get<0>();
+      if (!slot) {
+        diag = "SET failed: " + slot.error().to_string();
+        co_return;
+      }
+      if (*slot != "OK") {
+        diag = "expected OK from SET, got: " + *slot;
+        co_return;
+      }
+    }
+
+    {
+      auto resp = co_await c.exec<std::string>("GET", key);
+      auto& slot = resp.template get<0>();
+      if (!slot) {
+        diag = "GET failed: " + slot.error().to_string();
+        co_return;
+      }
+      if (*slot != value) {
+        diag = "expected GET value " + value + ", got: " + *slot;
+        co_return;
+      }
+    }
+
+    co_await c.close();
+    ok = true;
+    co_return;
+  };
+
+  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+  ctx.run();
+
+  if (skipped) {
+    GTEST_SKIP() << skip_reason;
+  }
   ASSERT_TRUE(ok) << diag;
 }

@@ -47,6 +47,20 @@ public:
   [[nodiscard]] error as_client_error() const { return std::get<error>(v_); }
   [[nodiscard]] const adapter::error& as_adapter_error() const { return std::get<adapter::error>(v_); }
 
+  [[nodiscard]] auto to_string() const -> std::string {
+    return std::visit([](const auto& e) -> std::string {
+      using E = std::decay_t<decltype(e)>;
+      if constexpr (std::is_same_v<E, redis_error>) {
+        return e.message;
+      } else if constexpr (std::is_same_v<E, error>) {
+        return make_error_code(e).message();
+      } else {
+        static_assert(std::is_same_v<E, adapter::error>);
+        return e.to_string();
+      }
+    }, v_);
+  }
+
   [[nodiscard]] const variant_type& raw() const noexcept { return v_; }
 
 private:
