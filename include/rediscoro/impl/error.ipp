@@ -40,6 +40,8 @@ class error_category_impl : public std::error_category {
         return "connection lost";
       case error::resp3_needs_more:
         return "RESP3 needs more data";
+      case error::resp3_tree_not_consumed:
+        return "RESP3 tree not consumed";
       case error::resp3_invalid_type_byte:
         return "RESP3 invalid type byte";
       case error::resp3_invalid_null:
@@ -58,8 +60,6 @@ class error_category_impl : public std::error_category {
         return "RESP3 invalid map pairs";
       case error::resp3_invalid_state:
         return "RESP3 invalid state";
-      case error::resp3_tree_not_consumed:
-        return "RESP3 tree not consumed";
       case error::resp3_parser_failed:
         return "RESP3 parser failed";
       default:

@@ -82,6 +82,9 @@ enum class error {
   /// internally by libraries, rarely used directly by applications.
   resp3_needs_more = 100,
 
+  /// Attempted to parse but tree was not consumed (reclaim not called).
+  resp3_tree_not_consumed,
+
   /// RESP3 type byte is invalid (first byte is not a valid RESP3 type marker).
   resp3_invalid_type_byte,
 
@@ -109,9 +112,6 @@ enum class error {
   /// Parser internal state is invalid (should not happen, indicates a bug).
   resp3_invalid_state,
 
-  /// Attempted to parse but tree was not consumed (reclaim not called).
-  resp3_tree_not_consumed,
-
   /// Parser is in failed state (prior protocol error occurred).
   resp3_parser_failed,
 };
@@ -122,7 +122,7 @@ auto make_error_code(error e) -> std::error_code;
 ///
 /// Currently only resp3_needs_more is an internal error.
 constexpr bool is_internal_error(error e) noexcept {
-  return e == error::resp3_needs_more;
+  return e == error::resp3_needs_more || e == error::resp3_tree_not_consumed;
 }
 
 }  // namespace rediscoro
