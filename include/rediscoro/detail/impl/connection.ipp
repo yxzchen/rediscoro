@@ -530,13 +530,13 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   // Defensive: handshake_ec == {} implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
-    pipeline_.clear_all(error::connection_closed);
+    pipeline_.clear_all(error::handshake_failed);
     co_return error::handshake_failed;
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i].has_value()) {
-      pipeline_.clear_all(error::connection_closed);
+      pipeline_.clear_all(error::handshake_failed);
       co_return error::handshake_failed;
     }
   }
