@@ -81,6 +81,7 @@ namespace rediscoro::detail {
 class connection : public std::enable_shared_from_this<connection> {
 public:
   explicit connection(iocoro::io_executor ex, config cfg);
+  ~connection() noexcept;
 
   /// Perform initial connection to Redis server.
   ///

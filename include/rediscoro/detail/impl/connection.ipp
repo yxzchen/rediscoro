@@ -28,6 +28,35 @@ inline connection::connection(iocoro::io_executor ex, config cfg)
   , socket_(executor_.get_io_executor()) {
 }
 
+inline connection::~connection() noexcept {
+  // Best-effort synchronous cleanup.
+  //
+  // Lifetime model (CRITICAL):
+  // - actor_loop() captures shared_from_this() to keep *this alive until the actor completes.
+  // - Therefore, ~connection() should only run when the actor is no longer running.
+  //
+  // This destructor does not co_await (cannot); it only closes resources and notifies waiters.
+  REDISCORO_ASSERT(!actor_awaitable_.has_value(), "connection destroyed while actor is still running");
+
+  cancel_.request_cancel();
+
+  // Do not force CLOSED here (only transition_to_closed() may write CLOSED).
+  // We only ensure resources are released.
+  if (state_ != connection_state::CLOSED) {
+    state_ = connection_state::CLOSING;
+  }
+
+  pipeline_.clear_all(error::connection_closed);
+
+  if (socket_.is_open()) {
+    socket_.close();
+  }
+
+  write_wakeup_.notify();
+  read_wakeup_.notify();
+  control_wakeup_.notify();
+}
+
 inline auto connection::run_actor() -> void {
   REDISCORO_ASSERT(!actor_awaitable_.has_value() && "run_actor() called while actor is running");
 
@@ -166,6 +195,12 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Hard constraint (IMPORTANT):
   // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
+  //
+  // Lifetime (CRITICAL):
+  // - This coroutine (and its sub-loops) uses `this` across suspension points.
+  // - Keep the connection alive until the actor completes.
+  auto self = shared_from_this();
+  (void)self;
 
   auto ex = executor_.strand().executor();
   auto writer = iocoro::co_spawn(ex, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
