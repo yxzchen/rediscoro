@@ -32,9 +32,7 @@ public:
     next_index_ += 1;
   }
 
-  using error_variant = rediscoro::error;
-
-  void accept(error_variant err) {
+  void accept(rediscoro::error err) {
     REDISCORO_ASSERT(next_index_ < static_size);
     err_dispatch_table()[next_index_](this, std::move(err));
     next_index_ += 1;
@@ -86,13 +84,8 @@ private:
     set_slot<I>(std::move(*r));
   }
 
-  template <std::size_t I>
-  void set_error_variant(error_variant err) {
-    set_error<I>(std::move(err));
-  }
-
   using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
-  using err_dispatch_fn = void(*)(response_builder*, error_variant);
+  using err_dispatch_fn = void(*)(response_builder*, rediscoro::error);
 
   template <std::size_t I>
   static void msg_dispatch(response_builder* self, resp3::message msg) {
@@ -100,8 +93,8 @@ private:
   }
 
   template <std::size_t I>
-  static void err_dispatch(response_builder* self, error_variant err) {
-    self->set_error_variant<I>(std::move(err));
+  static void err_dispatch(response_builder* self, rediscoro::error err) {
+    self->set_error<I>(std::move(err));
   }
 
   template <std::size_t... Is>
@@ -163,9 +156,7 @@ public:
     results_.push_back(std::move(*r));
   }
 
-  using error_variant = rediscoro::error;
-
-  void accept(error_variant err) {
+  void accept(rediscoro::error err) {
     REDISCORO_ASSERT(results_.size() < expected_);
     results_.push_back(unexpected(response_error{std::move(err)}));
   }
