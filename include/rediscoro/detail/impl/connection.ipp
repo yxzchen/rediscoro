@@ -233,7 +233,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
 
       const auto next = pipeline_.next_deadline();
       if (next != pipeline::time_point::max()) {
-        iocoro::steady_timer timer{socket_.get_executor()};
+        iocoro::steady_timer timer{executor_.get_io_executor()};
         timer.expires_at(next);
 
         auto timer_wait = timer.async_wait(iocoro::use_awaitable);
@@ -283,7 +283,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     const auto delay = calculate_reconnect_delay();
 
     if (delay.count() > 0) {
-      iocoro::steady_timer timer{socket_.get_executor()};
+      iocoro::steady_timer timer{executor_.get_io_executor()};
       timer.expires_after(delay);
 
       // Wait either for the timer or for an external control signal (close/notify).
@@ -341,7 +341,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   //   still complete in the background and be ignored).
   iocoro::ip::tcp::resolver resolver{};
   auto res = co_await iocoro::with_timeout_detached(
-    socket_.get_executor(),
+    executor_.get_io_executor(),
     resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)),
     cfg_.resolve_timeout
   );
@@ -412,7 +412,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
   auto handshake_ec = co_await iocoro::with_timeout(
-    socket_.get_executor(),
+    executor_.get_io_executor(),
     [&](iocoro::cancellation_token tok) -> iocoro::awaitable<std::error_code> {
       while (!cancel_.is_cancelled() && !slot->is_complete()) {
         // Write all pending handshake bytes.
