@@ -143,17 +143,17 @@ inline constexpr bool is_std_array_v = is_std_array<remove_cvref_t<T>>::value;
 }  // namespace detail
 
 template <typename T>
-auto adapt(const resp3::message& msg) -> rediscoro::expected<T, error>;
+auto adapt(const resp3::message& msg) -> expected<T, error>;
 
 namespace detail {
 
 template <typename T>
-auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, error> {
+auto adapt_scalar(const resp3::message& msg) -> expected<T, error> {
   using U = remove_cvref_t<T>;
 
   if constexpr (string_like<U>) {
     if (msg.is<resp3::null>()) {
-      return rediscoro::unexpected(make_unexpected_null(resp3::type3::bulk_string));
+      return unexpected(make_unexpected_null(resp3::type3::bulk_string));
     }
     if (msg.is<resp3::simple_string>()) {
       if constexpr (std::is_same_v<U, std::string_view>) {
@@ -176,36 +176,36 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, error> {
         return msg.as<resp3::verbatim_string>().data;
       }
     }
-    return rediscoro::unexpected(make_type_mismatch(
+    return unexpected(make_type_mismatch(
       msg.get_type(),
       {resp3::type3::simple_string, resp3::type3::bulk_string, resp3::type3::verbatim_string}));
   } else if constexpr (integral_like<U>) {
     if (msg.is<resp3::null>()) {
-      return rediscoro::unexpected(make_unexpected_null(resp3::type3::integer));
+      return unexpected(make_unexpected_null(resp3::type3::integer));
     }
     if (!msg.is<resp3::integer>()) {
-      return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::integer}));
+      return unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::integer}));
     }
     const auto v = msg.as<resp3::integer>().value;
     if (v < static_cast<std::int64_t>((std::numeric_limits<U>::min)()) ||
         v > static_cast<std::int64_t>((std::numeric_limits<U>::max)())) {
-      return rediscoro::unexpected(make_value_out_of_range(resp3::type3::integer));
+      return unexpected(make_value_out_of_range(resp3::type3::integer));
     }
     return static_cast<U>(v);
   } else if constexpr (bool_like<U>) {
     if (msg.is<resp3::null>()) {
-      return rediscoro::unexpected(make_unexpected_null(resp3::type3::boolean));
+      return unexpected(make_unexpected_null(resp3::type3::boolean));
     }
     if (!msg.is<resp3::boolean>()) {
-      return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::boolean}));
+      return unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::boolean}));
     }
     return msg.as<resp3::boolean>().value;
   } else if constexpr (double_like<U>) {
     if (msg.is<resp3::null>()) {
-      return rediscoro::unexpected(make_unexpected_null(resp3::type3::double_type));
+      return unexpected(make_unexpected_null(resp3::type3::double_type));
     }
     if (!msg.is<resp3::double_type>()) {
-      return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::double_type}));
+      return unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::double_type}));
     }
     return static_cast<U>(msg.as<resp3::double_type>().value);
   } else {
@@ -214,20 +214,20 @@ auto adapt_scalar(const resp3::message& msg) -> rediscoro::expected<T, error> {
 }
 
 template <typename T>
-auto adapt_optional(const resp3::message& msg) -> rediscoro::expected<T, error> {
+auto adapt_optional(const resp3::message& msg) -> expected<T, error> {
   using V = optional_value_type_t<T>;
   if (msg.is<resp3::null>()) {
     return T{std::nullopt};
   }
   auto inner = adapt<V>(msg);
   if (!inner) {
-    return rediscoro::unexpected(std::move(inner.error()));
+    return unexpected(std::move(inner.error()));
   }
   return T{std::move(*inner)};
 }
 
 template <typename T>
-auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, error> {
+auto adapt_sequence(const resp3::message& msg) -> expected<T, error> {
   using U = remove_cvref_t<T>;
   using V = typename U::value_type;
 
@@ -242,7 +242,7 @@ auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, error> 
   } else if (msg.is<resp3::push>()) {
     elems = &msg.as<resp3::push>().elements;
   } else {
-    return rediscoro::unexpected(make_type_mismatch(
+    return unexpected(make_type_mismatch(
       msg.get_type(), {resp3::type3::array, resp3::type3::set, resp3::type3::push}));
   }
 
@@ -252,7 +252,7 @@ auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, error> 
     if (!r) {
       auto e = std::move(r.error());
       e.prepend_path(path_index{i});
-      return rediscoro::unexpected(std::move(e));
+      return unexpected(std::move(e));
     }
     out.push_back(std::move(*r));
   }
@@ -260,7 +260,7 @@ auto adapt_sequence(const resp3::message& msg) -> rediscoro::expected<T, error> 
 }
 
 template <typename T>
-auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, error> {
+auto adapt_map(const resp3::message& msg) -> expected<T, error> {
   using U = remove_cvref_t<T>;
   using K = typename U::key_type;
   using V = typename U::mapped_type;
@@ -271,7 +271,7 @@ auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, error> {
     "ignore_t is only allowed as the top-level adaptation target");
 
   if (!msg.is<resp3::map>()) {
-    return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::map}));
+    return unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::map}));
   }
 
   U out{};
@@ -283,14 +283,14 @@ auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, error> {
       auto e = std::move(rk.error());
       e.prepend_path(path_field{"key"});
       e.prepend_path(path_index{i});
-      return rediscoro::unexpected(std::move(e));
+      return unexpected(std::move(e));
     }
     auto rv = adapt<V>(vm);
     if (!rv) {
       auto e = std::move(rv.error());
       e.prepend_path(path_field{"value"});
       e.prepend_path(path_index{i});
-      return rediscoro::unexpected(std::move(e));
+      return unexpected(std::move(e));
     }
     out.emplace(std::move(*rk), std::move(*rv));
   }
@@ -298,22 +298,22 @@ auto adapt_map(const resp3::message& msg) -> rediscoro::expected<T, error> {
 }
 
 template <typename T>
-auto adapt_ignore(const resp3::message&) -> rediscoro::expected<T, error> {
+auto adapt_ignore(const resp3::message&) -> expected<T, error> {
   return T{};
 }
 
 template <typename T>
-auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, error> {
+auto adapt_std_array(const resp3::message& msg) -> expected<T, error> {
   using U = remove_cvref_t<T>;
   using V = typename U::value_type;
   constexpr std::size_t N = std::tuple_size_v<U>;
 
   if (!msg.is<resp3::array>()) {
-    return rediscoro::unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::array}));
+    return unexpected(make_type_mismatch(msg.get_type(), {resp3::type3::array}));
   }
   const auto& elems = msg.as<resp3::array>().elements;
   if (elems.size() != N) {
-    return rediscoro::unexpected(make_size_mismatch(msg.get_type(), N, elems.size()));
+    return unexpected(make_size_mismatch(msg.get_type(), N, elems.size()));
   }
 
   U out{};
@@ -322,7 +322,7 @@ auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, error>
     if (!r) {
       auto e = std::move(r.error());
       e.prepend_path(path_index{i});
-      return rediscoro::unexpected(std::move(e));
+      return unexpected(std::move(e));
     }
     out[i] = std::move(*r);
   }
@@ -332,7 +332,7 @@ auto adapt_std_array(const resp3::message& msg) -> rediscoro::expected<T, error>
 }  // namespace detail
 
 template <typename T>
-auto adapt(const resp3::message& msg) -> rediscoro::expected<T, error> {
+auto adapt(const resp3::message& msg) -> expected<T, error> {
   using U = detail::remove_cvref_t<T>;
 
   if constexpr (std::is_same_v<U, ignore_t>) {
