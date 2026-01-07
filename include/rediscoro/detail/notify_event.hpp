@@ -1,7 +1,7 @@
 #pragma once
 
-#include <iocoro/awaitable.hpp>
 #include <iocoro/any_executor.hpp>
+#include <iocoro/awaitable.hpp>
 #include <iocoro/io_executor.hpp>
 
 #include <atomic>
@@ -84,7 +84,7 @@ namespace rediscoro::detail {
 /// This ensures: check + register + suspend decision is atomic
 /// Therefore: notify() either sees count or sees awaiting coroutine
 class notify_event {
-public:
+ public:
   notify_event() = default;
   ~notify_event() = default;
 
@@ -96,19 +96,61 @@ public:
 
   /// Wait for notification.
   /// Can be called multiple times (each call consumes one count).
-  auto wait() -> iocoro::awaitable<void>;
+  auto wait() -> iocoro::awaitable<void> { co_await awaiter{this}; }
 
   /// Signal the waiting coroutine.
   /// Can be called from any thread.
-  auto notify() -> void;
+  void notify() {
+    std::optional<std::coroutine_handle<>> to_resume{};
+    iocoro::any_executor ex{};
+
+    {
+      std::lock_guard lk{mutex_};
+      if (awaiting_) {
+        to_resume = *awaiting_;
+        ex = executor_;
+        awaiting_.reset();
+      } else {
+        count_.fetch_add(1, std::memory_order_acq_rel);
+        return;
+      }
+    }
+
+    // Post resumption to the captured executor; never resume inline.
+    ex.post([h = *to_resume]() mutable { h.resume(); });
+  }
 
   /// Check if there are pending notifications (for optimization).
   [[nodiscard]] auto is_ready() const noexcept -> bool {
     return count_.load(std::memory_order_acquire) > 0;
   }
 
-private:
-  struct awaiter;
+ private:
+  struct awaiter {
+    notify_event* self;
+
+    auto await_ready() const noexcept -> bool { return false; }
+
+    auto await_suspend(std::coroutine_handle<> h) -> bool {
+      std::lock_guard lk{self->mutex_};
+
+      // If there is already a pending notification, consume it and do not suspend.
+      auto cnt = self->count_.load(std::memory_order_acquire);
+      if (cnt > 0) {
+        self->count_.fetch_sub(1, std::memory_order_acq_rel);
+        return false;  // resume immediately
+      }
+
+      // Otherwise, register waiter atomically with the decision to suspend.
+      self->awaiting_ = h;
+      self->executor_ = iocoro::this_coro::get_executor();
+      return true;  // suspend
+    }
+
+    auto await_resume() const noexcept -> void {
+      // Nothing to return
+    }
+  };
 
   // Notification count (atomic for lock-free check)
   std::atomic<std::size_t> count_{0};
@@ -120,5 +162,3 @@ private:
 };
 
 }  // namespace rediscoro::detail
-
-#include <rediscoro/impl/notify_event.ipp>
