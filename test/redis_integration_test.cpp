@@ -15,7 +15,7 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
   auto guard = iocoro::make_work_guard(ctx);
 
   rediscoro::config cfg{};
-  cfg.host = "apple.com";
+  cfg.host = "baidu.com";
   cfg.port = 80;
   cfg.resolve_timeout = 1000ms;
   cfg.connect_timeout = 1000ms;
