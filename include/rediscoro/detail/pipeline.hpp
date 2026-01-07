@@ -1,147 +1,119 @@
 #pragma once
 
-#include <iocoro/awaitable.hpp>
-#include <iocoro/detail/executor_guard.hpp>
-#include <iocoro/error.hpp>
-#include <iocoro/io_executor.hpp>
-#include <iocoro/steady_timer.hpp>
-#include <rediscoro/adapter/any_adapter.hpp>
-#include <rediscoro/assert.hpp>
-#include <rediscoro/ignore.hpp>
+#include <rediscoro/detail/response_sink.hpp>
+#include <rediscoro/error.hpp>
 #include <rediscoro/request.hpp>
-#include <rediscoro/resp3/node.hpp>
+#include <rediscoro/resp3/message.hpp>
 
 #include <chrono>
-#include <coroutine>
 #include <cstddef>
 #include <deque>
-#include <functional>
-#include <memory>
-#include <system_error>
+#include <span>
+#include <string>
+#include <string_view>
 
 namespace rediscoro::detail {
 
-using write_fn_t = std::function<iocoro::awaitable<void>(request const&)>;
-using error_fn_t = std::function<void(std::error_code)>;
-
-/// Configuration for `detail::pipeline`.
-struct pipeline_config {
-  iocoro::io_executor ex;
-  write_fn_t write_fn;
-  error_fn_t error_fn;
-  std::chrono::milliseconds request_timeout{};
-  std::size_t max_inflight = 0;  // 0 = unlimited
-};
-
-/// A request scheduler / pipeline with FIFO multiplexing.
+/// Request-response pipeline scheduler.
 ///
 /// Responsibilities:
-/// - Write requests in-order to the socket.
-/// - Maintain FIFO inflight queue (responses are FIFO in Redis/RESP).
-/// - Dispatch incoming RESP messages to inflight_.front().
-/// - Resume awaiting coroutines on completion.
-/// - Fan out connection-level errors to all pending requests.
+/// - Maintain FIFO ordering of requests
+/// - Track pending writes and reads
+/// - Dispatch RESP3 messages to response_sink
 ///
-/// Non-goals (for now):
-/// - Cancellation tokens
-/// - Pub/Sub push handling
-class pipeline : public std::enable_shared_from_this<pipeline> {
- public:
-  explicit pipeline(pipeline_config const& cfg);
-  ~pipeline();
+/// NOT responsible for:
+/// - IO operations
+/// - Executor management
+/// - Resuming coroutines (response_sink handles this)
+/// - Knowing about coroutine types (works only with abstract interface)
+///
+/// Type-level guarantee:
+/// - pipeline operates ONLY on response_sink* (abstract interface)
+/// - pipeline CANNOT access pending_response<T> or coroutine handles
+/// - This prevents accidental inline resumption of user code
+///
+/// Thread safety:
+/// - All methods MUST be called from the connection's strand
+/// - No internal synchronization (relies on strand serialization)
+class pipeline {
+public:
+  pipeline() = default;
 
-  pipeline(pipeline const&) = delete;
-  auto operator=(pipeline const&) -> pipeline& = delete;
-  pipeline(pipeline&&) = delete;
-  auto operator=(pipeline&&) -> pipeline& = delete;
+  using clock = std::chrono::steady_clock;
+  using time_point = clock::time_point;
 
-  [[nodiscard]] auto stopped() const noexcept -> bool { return stopped_; }
+  /// Enqueue a request for sending.
+  /// Associates request with a response_sink for delivery.
+  ///
+  /// Reply-count contract (IMPORTANT):
+  /// - A request may represent a pipeline of multiple commands (request.reply_count() > 1).
+  /// - pipeline MUST NOT deliver more than sink->expected_replies() replies into a sink.
+  /// - For a fixed-size sink (pending_response<Ts...>), req.reply_count() MUST equal sizeof...(Ts)
+  ///   (enforced at connection::enqueue<Ts...> boundary).
+  auto push(request req, response_sink* sink) -> void;
 
-  /// Execute a request and dispatch responses into `adapter`.
-  /// This is the non-template entrypoint used by `connection::execute_any()`.
-  auto execute_any(request const& req, adapter::any_adapter adapter) -> iocoro::awaitable<void>;
+  /// Enqueue a request with a timeout deadline.
+  ///
+  /// deadline == time_point::max() means "no timeout".
+  auto push(request req, response_sink* sink, time_point deadline) -> void;
 
-  /// Called by `connection` for each parsed RESP message (single-threaded: io_context thread).
-  void on_msg(resp3::msg_view const& msg);
+  /// Check if there are pending writes.
+  [[nodiscard]] bool has_pending_write() const noexcept;
 
-  void stop(std::error_code ec = iocoro::error::operation_aborted);
+  /// Check if there are pending reads (responses to receive).
+  [[nodiscard]] bool has_pending_read() const noexcept;
 
- private:
-  struct op_state {
-    request const* req = nullptr;
-    adapter::any_adapter adapter{};
-    std::size_t remaining = 0;
+  /// Get the next buffer to write.
+  /// Precondition: has_pending_write() == true
+  [[nodiscard]] auto next_write_buffer() -> std::string_view;
 
-    std::chrono::milliseconds timeout{};
-    std::shared_ptr<iocoro::steady_timer> timer{};
+  /// Mark N bytes as written.
+  /// When a request is fully written, it moves to the awaiting queue.
+  auto on_write_done(std::size_t n) -> void;
 
-    std::error_code ec{};
-    bool done = false;
+  /// Dispatch a received RESP3 message to the next pending response.
+  /// Precondition: has_pending_read() == true
+  auto on_message(resp3::message msg) -> void;
 
-    std::coroutine_handle<> waiter{};
-    iocoro::io_executor ex{};
+  /// Dispatch a RESP3 parse error to the next pending response.
+  /// Precondition: has_pending_read() == true
+  auto on_error(error err) -> void;
 
-    void finish(std::error_code e = {}) {
-      if (done) {
-        return;
-      }
-      done = true;
-      if (!ec) {
-        ec = e;
-      }
-      if (timer) {
-        timer->cancel();
-        timer.reset();
-      }
-      if (waiter) {
-        auto h = waiter;
-        waiter = {};
-        ex.post([h, ex = ex]() mutable {
-          iocoro::detail::executor_guard g{ex};
-          h.resume();
-        });
-      }
-    }
+  /// Clear all pending requests (on connection close/error).
+  auto clear_all(rediscoro::error err) -> void;
+
+  /// Earliest deadline among all pending requests.
+  /// Returns time_point::max() if there is no deadline.
+  [[nodiscard]] auto next_deadline() const noexcept -> time_point;
+
+  /// True if the earliest pending request has reached its deadline.
+  [[nodiscard]] bool has_expired() const noexcept;
+
+  /// Get the number of pending requests (for diagnostics).
+  [[nodiscard]] std::size_t pending_count() const noexcept {
+    return pending_write_.size() + awaiting_read_.size();
+  }
+
+private:
+  struct pending_item {
+    request req;
+    response_sink* sink;  // Abstract interface, no knowledge of coroutines
+    std::size_t written{0};  // bytes written so far
+    time_point deadline{time_point::max()};
   };
 
-  struct op_awaiter {
-    // IMPORTANT: Explicit constructor to avoid GCC/ASan use-after-free issues observed with
-    // aggregate initialization of awaiters containing shared_ptr members.
-    // See iocoro's own comments in `iocoro/detail/spawn.hpp`.
-    explicit op_awaiter(std::shared_ptr<op_state> op_) : op(std::move(op_)) {}
-
-    std::shared_ptr<op_state> op{};
-
-    auto await_ready() const noexcept -> bool { return !op || op->done; }
-    auto await_suspend(std::coroutine_handle<> h) noexcept -> bool {
-      op->waiter = h;
-      return true;
-    }
-    void await_resume() const noexcept {}
+  struct awaiting_item {
+    response_sink* sink;  // Abstract interface
+    time_point deadline{time_point::max()};
   };
 
-  void notify_pump();
-  void pump();
-  void start_write_one(std::shared_ptr<op_state> const& op);
-  void set_timeout(std::shared_ptr<op_state> const& op);
-  void on_timeout(std::shared_ptr<op_state> const& op);
+  // Requests waiting to be written to socket
+  std::deque<pending_item> pending_write_{};
 
-  void stop_impl(std::error_code ec, bool call_error_fn);
-  void finish_all(std::error_code ec);
-
- private:
-  iocoro::io_executor ex_;
-  write_fn_t write_fn_;
-  error_fn_t error_fn_;
-  std::chrono::milliseconds request_timeout_{};
-  std::size_t max_inflight_ = 0;  // 0 = unlimited
-
-  bool stopped_ = false;
-  bool writing_ = false;
-  bool pump_scheduled_ = false;
-
-  std::deque<std::shared_ptr<op_state>> pending_{};
-  std::deque<std::shared_ptr<op_state>> inflight_{};
+  // Response sinks waiting for responses (one per sent request)
+  std::deque<awaiting_item> awaiting_read_{};
 };
 
 }  // namespace rediscoro::detail
+
+#include <rediscoro/impl/pipeline.ipp>

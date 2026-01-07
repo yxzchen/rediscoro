@@ -25,6 +25,7 @@ enum class log_level {
   info,
   warning,
   error,
+  off,
 };
 
 constexpr auto to_string(log_level level) noexcept -> char const* {
@@ -37,6 +38,8 @@ constexpr auto to_string(log_level level) noexcept -> char const* {
       return "warning";
     case log_level::error:
       return "error";
+    case log_level::off:
+      return "off";
     default:
       return "unknown";
   }
@@ -100,12 +103,14 @@ class logger {
   }
 
  private:
-  logger() : log_fn_(default_log_function()), min_level_(log_level::info) {}
+  // Default: disable all logs unless user explicitly enables them.
+  logger() : log_fn_(default_log_function()), min_level_(log_level::off) {}
 
   static auto default_log_function() -> log_function {
     return [](log_context const& ctx) {
       auto time = std::chrono::system_clock::to_time_t(ctx.timestamp);
-      auto tm = *std::localtime(&time);
+      std::tm tm{};
+      localtime_r(&time, &tm);
       auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         ctx.timestamp.time_since_epoch()) % 1000;
 
@@ -140,14 +145,14 @@ inline void set_log_level(log_level level) { logger::instance().set_log_level(le
 
 }  // namespace rediscoro
 
-#define REDIS_LOG_DEBUG(fmt, ...) \
+#define REDISCORO_LOG_DEBUG(fmt, ...) \
   ::rediscoro::get_logger().log(::rediscoro::log_level::debug, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
 
-#define REDIS_LOG_INFO(fmt, ...) \
+#define REDISCORO_LOG_INFO(fmt, ...) \
   ::rediscoro::get_logger().log(::rediscoro::log_level::info, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
 
-#define REDIS_LOG_WARNING(fmt, ...) \
+#define REDISCORO_LOG_WARNING(fmt, ...) \
   ::rediscoro::get_logger().log(::rediscoro::log_level::warning, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
 
-#define REDIS_LOG_ERROR(fmt, ...) \
+#define REDISCORO_LOG_ERROR(fmt, ...) \
   ::rediscoro::get_logger().log(::rediscoro::log_level::error, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)

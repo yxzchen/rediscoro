@@ -1,85 +1,107 @@
-#include <iocoro/io_context.hpp>
-#include <iocoro/when_all.hpp>
-#include <rediscoro/config.hpp>
-#include <rediscoro/connection.hpp>
-#include <rediscoro/request.hpp>
-#include <rediscoro/response.hpp>
-
-#include <rediscoro/impl.hpp>
-
 #include <gtest/gtest.h>
 
-#include "async_test_util.hpp"
+#include <rediscoro/detail/pipeline.hpp>
+#include <rediscoro/detail/response_sink.hpp>
+#include <rediscoro/error.hpp>
+#include <rediscoro/request.hpp>
+#include <rediscoro/resp3/message.hpp>
 
-using namespace iocoro;
-using namespace rediscoro;
+#include <cstddef>
 
-class PipelineTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    cfg.host = "127.0.0.1";
-    cfg.port = 6379;
-    cfg.connect_timeout = std::chrono::milliseconds{1000};
-    cfg.request_timeout = std::chrono::milliseconds{1000};
-    // Exercise handshake steps against local Redis.
-    cfg.database = 1;
-    cfg.client_name = std::string{"rediscoro-test"};
+namespace {
 
-    // cfg.host = "153.3.238.127";
-    // cfg.port = 80;
-    // cfg.connect_timeout = std::chrono::milliseconds{1000};
-    // cfg.request_timeout = std::chrono::milliseconds{1000};
+class counting_sink final : public rediscoro::detail::response_sink {
+public:
+  explicit counting_sink(std::size_t n) : expected_(n) {}
+
+  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override {
+    return expected_;
   }
 
-  config cfg;
+  [[nodiscard]] auto is_complete() const noexcept -> bool override {
+    return (msgs_ + errs_) == expected_;
+  }
+
+  [[nodiscard]] auto msg_count() const noexcept -> std::size_t { return msgs_; }
+  [[nodiscard]] auto err_count() const noexcept -> std::size_t { return errs_; }
+
+protected:
+  auto do_deliver(rediscoro::resp3::message) -> void override { msgs_ += 1; }
+  auto do_deliver_error(rediscoro::error) -> void override { errs_ += 1; }
+
+private:
+  std::size_t expected_{0};
+  std::size_t msgs_{0};
+  std::size_t errs_{0};
 };
 
-TEST_F(PipelineTest, ExecutePing) {
-  io_context ctx;
+}  // namespace
 
-  test_util::run_async(ctx, [&]() -> awaitable<void> {
-    connection conn{ctx, cfg};
-    co_await conn.run();
+TEST(pipeline_test, partial_write_and_next_write_buffer) {
+  rediscoro::detail::pipeline p;
+  counting_sink sink{1};
 
-    request req;
-    req.push("PING");
+  rediscoro::request req{"PING"};
+  const auto wire = req.wire();
+  ASSERT_FALSE(wire.empty());
 
-    response0<std::string> resp;
-    co_await conn.execute(req, resp);
+  p.push(req, &sink);
+  ASSERT_TRUE(p.has_pending_write());
 
-    EXPECT_TRUE(resp.has_value());
-    EXPECT_EQ(resp.value(), "PONG");
-  });
+  auto b1 = p.next_write_buffer();
+  EXPECT_EQ(b1.size(), wire.size());
+
+  p.on_write_done(1);
+  auto b2 = p.next_write_buffer();
+  EXPECT_EQ(b2.size(), wire.size() - 1);
+
+  p.on_write_done(wire.size() - 1);
+  EXPECT_FALSE(p.has_pending_write());
+  EXPECT_TRUE(p.has_pending_read());
 }
 
-TEST_F(PipelineTest, TwoConcurrentExecutesAreSerialized) {
-  io_context ctx;
+TEST(pipeline_test, multi_reply_dispatch_completes_sink) {
+  rediscoro::detail::pipeline p;
 
-  test_util::run_async(ctx, [&]() -> awaitable<void> {
-    connection conn{ctx, cfg};
-    response0<std::string> pong;
-    response0<std::string> echo;
+  rediscoro::request req;
+  req.push("PING");
+  req.push("PING");
+  ASSERT_EQ(req.reply_count(), 2u);
 
-    auto t1 = [&]() -> awaitable<void> {
-      request req;
-      req.push("PING");
-      co_await conn.execute(req, pong);
-    };
+  counting_sink sink{2};
+  p.push(req, &sink);
 
-    auto t2 = [&]() -> awaitable<void> {
-      request req;
-      req.push("ECHO", "hello");
-      co_await conn.execute(req, echo);
-    };
+  // Pretend socket wrote everything.
+  const auto wire = req.wire();
+  p.on_write_done(wire.size());
+  ASSERT_TRUE(p.has_pending_read());
 
-    co_await conn.run();
-    // Start both "concurrently" from the caller's perspective; pipeline serializes them.
-    co_await when_all(t1(), t2());
+  p.on_message(rediscoro::resp3::message{rediscoro::resp3::simple_string{"OK"}});
+  EXPECT_EQ(sink.msg_count(), 1u);
+  EXPECT_FALSE(sink.is_complete());
 
-    EXPECT_TRUE(pong.has_value());
-    EXPECT_EQ(pong.value(), "PONG");
-
-    EXPECT_TRUE(echo.has_value());
-    EXPECT_EQ(echo.value(), "hello");
-  });
+  p.on_message(rediscoro::resp3::message{rediscoro::resp3::simple_string{"OK"}});
+  EXPECT_EQ(sink.msg_count(), 2u);
+  EXPECT_TRUE(sink.is_complete());
+  EXPECT_FALSE(p.has_pending_read());
 }
+
+TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
+  rediscoro::detail::pipeline p;
+
+  rediscoro::request req;
+  req.push("PING");
+  req.push("PING");
+  counting_sink sink{2};
+
+  p.push(req, &sink);
+
+  // Before any write/read, clear_all should deliver 2 errors.
+  p.clear_all(rediscoro::error::connection_closed);
+  EXPECT_TRUE(sink.is_complete());
+  EXPECT_EQ(sink.err_count(), 2u);
+  EXPECT_FALSE(p.has_pending_write());
+  EXPECT_FALSE(p.has_pending_read());
+}
+
+

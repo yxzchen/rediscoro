@@ -1,220 +1,106 @@
+#pragma once
+
 #include <rediscoro/detail/pipeline.hpp>
-
-#include <iocoro/co_spawn.hpp>
-#include <iocoro/error.hpp>
-#include <rediscoro/resp3/type.hpp>
-
-#include <cerrno>
-#include <system_error>
 
 namespace rediscoro::detail {
 
-pipeline::pipeline(pipeline_config const& cfg)
-    : ex_{cfg.ex},
-      write_fn_{std::move(cfg.write_fn)},
-      error_fn_{std::move(cfg.error_fn)},
-      request_timeout_{cfg.request_timeout},
-      max_inflight_{cfg.max_inflight} {}
+inline auto pipeline::push(request req, response_sink* sink) -> void {
+  push(std::move(req), sink, time_point::max());
+}
 
-pipeline::~pipeline() { stop_impl(iocoro::error::operation_aborted, false); }
+inline auto pipeline::push(request req, response_sink* sink, time_point deadline) -> void {
+  REDISCORO_ASSERT(sink != nullptr);
+  REDISCORO_ASSERT(req.reply_count() == sink->expected_replies());
 
-auto pipeline::execute_any(request const& req, adapter::any_adapter adapter)
-  -> iocoro::awaitable<void> {
-  if (stopped_) {
-    throw std::system_error(iocoro::error::operation_aborted);
-  }
+  pending_write_.push_back(pending_item{std::move(req), sink, 0, deadline});
+}
 
-  auto op = std::make_shared<op_state>();
-  op->req = &req;
-  op->adapter = std::move(adapter);
-  op->remaining = req.expected_responses();
-  op->timeout = request_timeout_;
-  op->ex = ex_;
+inline bool pipeline::has_pending_write() const noexcept {
+  return !pending_write_.empty();
+}
 
-  pending_.push_back(op);
-  notify_pump();
+inline bool pipeline::has_pending_read() const noexcept {
+  return !awaiting_read_.empty();
+}
 
-  co_await op_awaiter{op};
+inline auto pipeline::next_write_buffer() -> std::string_view {
+  REDISCORO_ASSERT(!pending_write_.empty());
+  auto& front = pending_write_.front();
+  const auto& wire = front.req.wire();
+  REDISCORO_ASSERT(front.written <= wire.size());
+  return std::string_view{wire}.substr(front.written);
+}
 
-  if (op->ec) {
-    throw std::system_error(op->ec);
+inline auto pipeline::on_write_done(std::size_t n) -> void {
+  REDISCORO_ASSERT(!pending_write_.empty());
+  auto& front = pending_write_.front();
+  const auto& wire = front.req.wire();
+  REDISCORO_ASSERT(front.written <= wire.size());
+  REDISCORO_ASSERT(n <= (wire.size() - front.written));
+
+  front.written += n;
+
+  if (front.written == wire.size()) {
+    // Entire request written: move to awaiting read queue.
+    awaiting_read_.push_back(awaiting_item{front.sink, front.deadline});
+    pending_write_.pop_front();
   }
 }
 
-void pipeline::on_msg(resp3::msg_view const& msg) {
-  if (stopped_ || msg.empty()) {
-    return;
-  }
+inline auto pipeline::on_message(resp3::message msg) -> void {
+  REDISCORO_ASSERT(!awaiting_read_.empty());
+  auto* sink = awaiting_read_.front().sink;
+  REDISCORO_ASSERT(sink != nullptr);
 
-  // Future: push/attribute messages must not be dispatched to inflight FIFO.
-  auto const t = msg.front().data_type;
-  if (t == resp3::type3::push || t == resp3::type3::attribute) {
-    return;
-  }
-
-  if (inflight_.empty()) {
-    // Unsolicited message (unsupported for now).
-    return;
-  }
-
-  auto op = inflight_.front();
-
-  // Adapter throws => response pollution risk => treat as connection error.
-  try {
-    op->adapter.on_msg(msg);
-  } catch (...) {
-    stop_impl(std::make_error_code(std::errc::io_error), true);
-    return;
-  }
-
-  if (op->remaining > 0) {
-    --op->remaining;
-  }
-
-  if (op->remaining == 0) {
-    inflight_.pop_front();
-    op->finish();
-    notify_pump();
+  sink->deliver(std::move(msg));
+  if (sink->is_complete()) {
+    awaiting_read_.pop_front();
   }
 }
 
-void pipeline::notify_pump() {
-  if (stopped_ || pump_scheduled_) {
-    return;
-  }
-  pump_scheduled_ = true;
+inline auto pipeline::on_error(error err) -> void {
+  REDISCORO_ASSERT(!awaiting_read_.empty());
+  auto* sink = awaiting_read_.front().sink;
+  REDISCORO_ASSERT(sink != nullptr);
 
-  auto self = shared_from_this();
-  ex_.post([self, ex = ex_]() mutable {
-    iocoro::detail::executor_guard g{ex};
-    self->pump_scheduled_ = false;
-    self->pump();
-  });
-}
-
-void pipeline::pump() {
-  if (stopped_) {
-    return;
-  }
-
-  // Only one outstanding write at a time (preserve strict write ordering).
-  if (writing_) {
-    return;
-  }
-
-  // Respect max_inflight_ (0 = unlimited).
-  if (pending_.empty()) {
-    return;
-  }
-  if (max_inflight_ != 0 && inflight_.size() >= max_inflight_) {
-    return;
-  }
-
-  // Move one op to inflight and start its write. This ensures responses will have a FIFO target
-  // even if they arrive immediately after the coroutine yields.
-  auto op = std::move(pending_.front());
-  pending_.pop_front();
-
-  inflight_.push_back(op);
-  set_timeout(op);
-
-  writing_ = true;
-  start_write_one(op);
-}
-
-void pipeline::start_write_one(std::shared_ptr<op_state> const& op) {
-  auto self = shared_from_this();
-  iocoro::co_spawn(
-    ex_,
-    [self, op]() -> iocoro::awaitable<void> {
-      co_await self->write_fn_(*op->req);
-
-      self->writing_ = false;
-      self->notify_pump();
-    },
-    [self](iocoro::expected<void, std::exception_ptr> r) {
-      if (r) {
-        return;
-      }
-      try {
-        std::rethrow_exception(r.error());
-      } catch (std::system_error const& e) {
-        self->stop_impl(e.code(), true);
-      } catch (...) {
-        self->stop_impl(std::make_error_code(std::errc::io_error), true);
-      }
-    });
-}
-
-void pipeline::set_timeout(std::shared_ptr<op_state> const& op) {
-  if (op->timeout.count() <= 0) {
-    return;
-  }
-
-  // Create timer with shared ownership for lifetime management
-  op->timer = std::make_shared<iocoro::steady_timer>(ex_);
-  op->timer->expires_after(op->timeout);
-
-  // Spawn a detached coroutine to wait for the timer
-  auto self = shared_from_this();
-  auto timer = op->timer;  // Capture shared_ptr by value
-
-  iocoro::co_spawn(
-    ex_,
-    [timer, self, op]() -> iocoro::awaitable<void> {
-      auto ec = co_await timer->async_wait(iocoro::use_awaitable);
-      if (!ec) {
-        self->on_timeout(op);
-      }
-      // Timer is automatically destroyed after callback completes
-    },
-    [](iocoro::expected<void, std::exception_ptr>) {
-      // Completion handler - we don't care about the result
-    }
-  );
-}
-
-void pipeline::on_timeout(std::shared_ptr<op_state> const& op) {
-  if (stopped_ || !op || op->done) {
-    return;
-  }
-
-  // Timeout while inflight is response-pollution risk => treat as connection error.
-  stop_impl(iocoro::error::timed_out, true);
-}
-
-void pipeline::stop(std::error_code ec) { stop_impl(ec, false); }
-
-void pipeline::stop_impl(std::error_code ec, bool call_error_fn) {
-  if (stopped_) {
-    return;
-  }
-  stopped_ = true;
-  writing_ = false;
-
-  finish_all(ec);
-
-  if (call_error_fn && error_fn_) {
-    try {
-      error_fn_(ec);
-    } catch (...) {
-      // best-effort
-    }
+  sink->deliver_error(err);
+  if (sink->is_complete()) {
+    awaiting_read_.pop_front();
   }
 }
 
-void pipeline::finish_all(std::error_code ec) {
-  // Complete inflight first.
-  while (!inflight_.empty()) {
-    auto op = std::move(inflight_.front());
-    inflight_.pop_front();
-    op->finish(ec);
+inline auto pipeline::clear_all(rediscoro::error err) -> void {
+  // Pending writes: none of the replies will arrive; fail all expected replies.
+  for (auto& p : pending_write_) {
+    REDISCORO_ASSERT(p.sink != nullptr);
+    p.sink->fail_all(err);
   }
-  while (!pending_.empty()) {
-    auto op = std::move(pending_.front());
-    pending_.pop_front();
-    op->finish(ec);
+  pending_write_.clear();
+
+  // Awaiting reads: fail all remaining replies.
+  for (auto const& a : awaiting_read_) {
+    REDISCORO_ASSERT(a.sink != nullptr);
+    a.sink->fail_all(err);
   }
+  awaiting_read_.clear();
+}
+
+inline auto pipeline::next_deadline() const noexcept -> time_point {
+  time_point a = time_point::max();
+  time_point b = time_point::max();
+  if (!pending_write_.empty()) {
+    a = pending_write_.front().deadline;
+  }
+  if (!awaiting_read_.empty()) {
+    b = awaiting_read_.front().deadline;
+  }
+  return std::min(a, b);
+}
+
+inline bool pipeline::has_expired() const noexcept {
+  auto now = clock::now();
+  const auto d = next_deadline();
+  return d != time_point::max() && d <= now;
 }
 
 }  // namespace rediscoro::detail

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(rediscoro VERSION 1.0.0 LANGUAGES CXX)
+project(rediscoro VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

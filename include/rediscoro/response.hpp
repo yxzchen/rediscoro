@@ -1,31 +1,153 @@
 #pragma once
 
-#include <rediscoro/adapter/result.hpp>
-#include <rediscoro/resp3/node.hpp>
+#include <rediscoro/adapter/error.hpp>
+#include <rediscoro/assert.hpp>
+#include <rediscoro/error.hpp>
+#include <rediscoro/expected.hpp>
 
+#include <cstddef>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace rediscoro {
 
-template <class... Ts>
-using response = std::tuple<adapter::result<Ts>...>;
+namespace detail {
+template <typename... Ts>
+class response_builder;
 
-template <class T>
-using response0 = adapter::result<T>;
+template <typename T>
+class dynamic_response_builder;
+}
 
-/// A "generic" response that preserves message boundaries:
-/// one owning `resp3::message` per received reply.
-using generic_response = adapter::result<std::vector<resp3::msg>>;
+struct redis_error {
+  std::string message;
+};
 
-/// A runtime-sized response: one `adapter::result<T>` per received reply message.
-///
-/// Intended for pipelining when the number of replies is only known at runtime, but the
-/// per-reply type is uniform (`T`).
-///
-/// - Starts empty
-/// - On each incoming reply message, a new element is appended and parsed into
-/// - After `connection::execute(req, resp)`, `resp.size()` should equal `req.expected_responses()`
-template <class T>
-using dynamic_response = std::vector<adapter::result<T>>;
+/// Wrapper around the internal response error variant.
+/// Provides user-friendly inspection APIs without exposing std::variant in the surface.
+class response_error {
+public:
+  using variant_type = std::variant<redis_error, error, adapter::error>;
+
+  response_error(redis_error e) : v_(std::move(e)) {}
+  response_error(error e) : v_(e) {
+    REDISCORO_ASSERT(!is_internal_error(e), "Internal error should not be exposed to user");
+  }
+  response_error(adapter::error e) : v_(std::move(e)) {}
+
+  [[nodiscard]] bool is_redis_error() const noexcept { return std::holds_alternative<redis_error>(v_); }
+  [[nodiscard]] bool is_client_error() const noexcept { return std::holds_alternative<error>(v_); }
+  [[nodiscard]] bool is_adapter_error() const noexcept { return std::holds_alternative<adapter::error>(v_); }
+
+  [[nodiscard]] const redis_error& as_redis_error() const { return std::get<redis_error>(v_); }
+  [[nodiscard]] error as_client_error() const { return std::get<error>(v_); }
+  [[nodiscard]] const adapter::error& as_adapter_error() const { return std::get<adapter::error>(v_); }
+
+  [[nodiscard]] auto to_string() const -> std::string {
+    return std::visit([](const auto& e) -> std::string {
+      using E = std::decay_t<decltype(e)>;
+      if constexpr (std::is_same_v<E, redis_error>) {
+        return e.message;
+      } else if constexpr (std::is_same_v<E, error>) {
+        return make_error_code(e).message();
+      } else {
+        static_assert(std::is_same_v<E, adapter::error>);
+        return e.to_string();
+      }
+    }, v_);
+  }
+
+  [[nodiscard]] const variant_type& raw() const noexcept { return v_; }
+
+private:
+  variant_type v_;
+};
+
+template <typename T>
+using response_slot = expected<T, response_error>;
+
+/// Typed response for a pipeline (compile-time sized, heterogenous slots).
+template <typename... Ts>
+class response {
+public:
+  static constexpr std::size_t static_size = sizeof...(Ts);
+
+  response() = delete;
+
+  [[nodiscard]] static constexpr std::size_t size() noexcept { return static_size; }
+  [[nodiscard]] static constexpr bool empty() noexcept { return static_size == 0; }
+
+  template <std::size_t I>
+  [[nodiscard]] auto get() -> response_slot<std::tuple_element_t<I, std::tuple<Ts...>>>& {
+    return std::get<I>(results_);
+  }
+
+  template <std::size_t I>
+  [[nodiscard]] auto get() const -> const response_slot<std::tuple_element_t<I, std::tuple<Ts...>>>& {
+    return std::get<I>(results_);
+  }
+
+  /// Convenience: unpack as tuple of references for structured bindings.
+  [[nodiscard]] auto unpack() -> std::tuple<response_slot<Ts>&...> {
+    return unpack_impl(std::index_sequence_for<Ts...>{});
+  }
+
+  [[nodiscard]] auto unpack() const -> std::tuple<const response_slot<Ts>&...> {
+    return unpack_impl(std::index_sequence_for<Ts...>{});
+  }
+
+private:
+  std::tuple<response_slot<Ts>...> results_{};
+
+  template <std::size_t... Is>
+  [[nodiscard]] auto unpack_impl(std::index_sequence<Is...>) -> std::tuple<response_slot<Ts>&...> {
+    return std::tie(get<Is>()...);
+  }
+
+  template <std::size_t... Is>
+  [[nodiscard]] auto unpack_impl(std::index_sequence<Is...>) const -> std::tuple<const response_slot<Ts>&...> {
+    return std::tie(get<Is>()...);
+  }
+
+  template <typename...>
+  friend class detail::response_builder;
+
+  explicit response(std::tuple<response_slot<Ts>...>&& results)
+    : results_(std::move(results)) {}
+};
+
+/// Runtime-sized response where all slots have the same value type T.
+template <typename T>
+class dynamic_response {
+public:
+  dynamic_response() = default;
+
+  [[nodiscard]] std::size_t size() const noexcept { return results_.size(); }
+  [[nodiscard]] bool empty() const noexcept { return results_.empty(); }
+
+  [[nodiscard]] const response_slot<T>& operator[](std::size_t i) const { return results_[i]; }
+  [[nodiscard]] response_slot<T>& operator[](std::size_t i) { return results_[i]; }
+
+  [[nodiscard]] const response_slot<T>& at(std::size_t i) const { return results_.at(i); }
+  [[nodiscard]] response_slot<T>& at(std::size_t i) { return results_.at(i); }
+
+  [[nodiscard]] auto begin() const noexcept { return results_.begin(); }
+  [[nodiscard]] auto end() const noexcept { return results_.end(); }
+
+private:
+  std::vector<response_slot<T>> results_{};
+
+  template <typename>
+  friend class detail::dynamic_response_builder;
+
+  explicit dynamic_response(std::vector<response_slot<T>>&& results)
+    : results_(std::move(results)) {}
+};
 
 }  // namespace rediscoro
+
+

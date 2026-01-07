@@ -1,98 +1,142 @@
 #pragma once
 
-#include <rediscoro/resp3/serializer.hpp>
+#include <rediscoro/assert.hpp>
 #include <rediscoro/resp3/type.hpp>
 
-#include <algorithm>
-#include <concepts>
+#include <charconv>
+#include <cstddef>
+#include <initializer_list>
+#include <span>
 #include <string>
-#include <tuple>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace rediscoro {
 
-namespace detail {
-auto is_subscribe(std::string_view cmd) -> bool;
-}  // namespace detail
-
-template <class Range>
-concept range = requires(Range& r) {
-  std::begin(r);
-  std::end(r);
-};
-
+/// A Redis request builder: describes what to send, and can serialize to RESP3 wire bytes.
+///
+/// - Input: command name + arguments (string / argv)
+/// - Output: RESP3-encoded command (array of bulk strings)
 class request {
- public:
-  [[nodiscard]] auto expected_responses() const noexcept -> std::size_t { return expected_responses_; };
+public:
+  request() = default;
 
-  [[nodiscard]] auto payload() const noexcept -> std::string_view { return payload_; }
+  /// Construct a request containing exactly one command.
+  explicit request(std::string_view cmd) { push(cmd); }
+
+  /// Construct a request containing exactly one command.
+  request(std::initializer_list<std::string_view> argv) { push(argv); }
+
+  /// Construct a request containing exactly one command.
+  explicit request(std::span<const std::string_view> argv) { push(argv); }
+
+  template <typename... Args>
+    requires (sizeof...(Args) > 0)
+  request(std::string_view cmd, Args&&... args) {
+    push(cmd, std::forward<Args>(args)...);
+  }
+
+  [[nodiscard]] std::size_t reply_count() const noexcept { return command_count_; }
+  [[nodiscard]] std::size_t command_count() const noexcept { return command_count_; }
+
+  [[nodiscard]] bool empty() const noexcept { return command_count_ == 0; }
+
+  /// The full RESP3 wire bytes for all queued commands (pipeline).
+  [[nodiscard]] auto wire() const noexcept -> const std::string& { return wire_; }
 
   void clear() {
-    payload_.clear();
-    expected_responses_ = 0;
+    wire_.clear();
+    command_count_ = 0;
   }
 
-  void reserve(std::size_t new_cap = 0) { payload_.reserve(new_cap); }
-
-  template <class... Ts>
-  void push(std::string_view cmd, Ts const&... args) {
-    auto constexpr pack_size = sizeof...(Ts);
-    resp3::add_header(payload_, resp3::type3::array, 1 + pack_size);
-    resp3::add_bulk(payload_, cmd);
-    resp3::add_bulk(payload_, std::tie(std::forward<Ts const&>(args)...));
-
-    check_cmd(cmd);
+  /// Append one complete command (argv form).
+  void push(std::initializer_list<std::string_view> argv) {
+    append_command_header(argv.size());
+    for (auto sv : argv) {
+      append_bulk_string(sv);
+    }
+    command_count_ += 1;
   }
 
-  template <std::forward_iterator Iterator>
-  void push_range(std::string_view cmd, std::string_view key, Iterator begin, Iterator end) {
-    using value_type = typename std::iterator_traits<Iterator>::value_type;
-
-    if (begin == end) return;
-
-    auto constexpr size = resp3::bulk_counter<value_type>::size;
-    auto const distance = std::distance(begin, end);
-    resp3::add_header(payload_, resp3::type3::array, 2 + size * distance);
-    resp3::add_bulk(payload_, cmd);
-    resp3::add_bulk(payload_, key);
-
-    for (; begin != end; ++begin) resp3::add_bulk(payload_, *begin);
-
-    check_cmd(cmd);
+  /// Append one complete command (argv form).
+  void push(std::span<const std::string_view> argv) {
+    append_command_header(argv.size());
+    for (auto sv : argv) {
+      append_bulk_string(sv);
+    }
+    command_count_ += 1;
   }
 
-  template <std::forward_iterator Iterator>
-  void push_range(std::string_view cmd, Iterator begin, Iterator end) {
-    using value_type = typename std::iterator_traits<Iterator>::value_type;
-
-    if (begin == end) return;
-
-    auto constexpr size = resp3::bulk_counter<value_type>::size;
-    auto const distance = std::distance(begin, end);
-    resp3::add_header(payload_, resp3::type3::array, 1 + size * distance);
-    resp3::add_bulk(payload_, cmd);
-
-    for (; begin != end; ++begin) resp3::add_bulk(payload_, *begin);
-
-    check_cmd(cmd);
+  /// Append one complete command (command + variadic args).
+  template <typename... Args>
+  void push(std::string_view cmd, Args&&... args) {
+    constexpr std::size_t n = 1 + sizeof...(Args);
+    append_command_header(n);
+    append_arg(cmd);
+    (append_arg(std::forward<Args>(args)), ...);
+    command_count_ += 1;
   }
 
-  template <range Range>
-  void push_range(std::string_view cmd, std::string_view key, Range const& range) {
-    push_range(cmd, key, std::begin(range), std::end(range));
+  /// Append one complete command (single-token).
+  void push(std::string_view cmd) {
+    append_command_header(1);
+    append_bulk_string(cmd);
+    command_count_ += 1;
   }
 
-  template <range Range>
-  void push_range(std::string_view cmd, Range const& range) {
-    push_range(cmd, std::cbegin(range), std::cend(range));
+private:
+  std::string wire_{};
+  std::size_t command_count_{0};
+
+  void append_unsigned(std::size_t v) {
+    char buf[32]{};
+    auto* first = buf;
+    auto* last = buf + sizeof(buf);
+    auto res = std::to_chars(first, last, v);
+    REDISCORO_ASSERT(res.ec == std::errc{});
+    wire_.append(first, res.ptr);
   }
 
- private:
-  void check_cmd(std::string_view cmd) {
-    if (!detail::is_subscribe(cmd)) ++expected_responses_;
+  void append_command_header(std::size_t argc) {
+    wire_.push_back(resp3::type_to_code(resp3::type3::array));
+    append_unsigned(argc);
+    wire_.append("\r\n");
   }
 
-  std::string payload_;
-  std::size_t expected_responses_ = 0;
+  void append_bulk_string(std::string_view sv) {
+    wire_.push_back(resp3::type_to_code(resp3::type3::bulk_string));
+    append_unsigned(sv.size());
+    wire_.append("\r\n");
+    wire_.append(sv.data(), sv.size());
+    wire_.append("\r\n");
+  }
+
+  void append_arg(std::string_view sv) {
+    append_bulk_string(sv);
+  }
+
+  void append_arg(const char* s) {
+    if (s == nullptr) {
+      append_bulk_string(std::string_view{});
+    } else {
+      append_bulk_string(std::string_view{s});
+    }
+  }
+
+  void append_arg(const std::string& s) {
+    append_bulk_string(std::string_view{s});
+  }
+
+  template <typename T>
+    requires (std::is_integral_v<std::remove_cvref_t<T>> && !std::is_same_v<std::remove_cvref_t<T>, bool>)
+  void append_arg(T v) {
+    const auto tmp = std::to_string(v);
+    append_bulk_string(std::string_view{tmp});
+  }
 };
 
 }  // namespace rediscoro
+
+

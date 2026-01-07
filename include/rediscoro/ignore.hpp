@@ -1,9 +1,8 @@
 #pragma once
 
-#include <tuple>
-
 namespace rediscoro {
 
-using ignore_t = std::decay_t<decltype(std::ignore)>;
+struct ignore_t {};
+inline constexpr ignore_t ignore{};
 
 }  // namespace rediscoro

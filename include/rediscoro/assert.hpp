@@ -69,3 +69,5 @@ namespace rediscoro::detail {
 // -------------------- UNREACHABLE --------------------
 
 #define REDISCORO_UNREACHABLE() ::rediscoro::detail::unreachable_fail(__FILE__, __LINE__, __func__)
+
+#include <rediscoro/impl/assert.ipp>
