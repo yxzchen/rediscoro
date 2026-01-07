@@ -442,11 +442,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
 
         // Read until we can parse at least one value or hit timeout/cancel.
         auto writable = parser_.prepare();
-        auto rbuf = std::span<std::byte>{
-          reinterpret_cast<std::byte*>(writable.data()),
-          writable.size()
-        };
-        auto r = co_await socket_.async_read_some(rbuf, tok);
+        auto r = co_await socket_.async_read_some(writable, tok);
         if (!r.has_value()) {
           co_return r.error();
         }
@@ -576,12 +572,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   // Socket-driven read: perform one read operation (may parse multiple messages from the buffer).
   // This allows detecting peer close even when no pending_read exists.
   auto writable = parser_.prepare();
-  auto buf = std::span<std::byte>{
-    reinterpret_cast<std::byte*>(writable.data()),
-    writable.size()
-  };
-
-  auto r = co_await socket_.async_read_some(buf);
+  auto r = co_await socket_.async_read_some(writable);
   if (!r.has_value()) {
     // Socket IO error - treat as connection lost
     handle_error(error::connection_lost);

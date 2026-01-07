@@ -6,6 +6,7 @@
 #include <rediscoro/expected.hpp>
 
 #include <span>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -46,7 +47,9 @@ public:
   parser() = default;
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
-  auto prepare(std::size_t min_size = 4096) -> std::span<char> { return buf_.prepare(min_size); }
+  auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
+    return std::as_writable_bytes(buf_.prepare(min_size));
+  }
   auto commit(std::size_t n) -> void { buf_.commit(n); }
 
   /// Parse exactly one RESP3 value into the internal raw_tree.
