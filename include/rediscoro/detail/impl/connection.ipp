@@ -85,12 +85,6 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
     co_return connect_ec;
   }
 
-  if (cancel_.is_cancelled()) {
-    // close() won; unify cleanup via close().
-    co_await close();
-    co_return error::operation_aborted;
-  }
-
   // Successful do_connect() implies OPEN.
   REDISCORO_ASSERT(state_ == connection_state::OPEN);
 
@@ -328,24 +322,15 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
       continue;
     }
 
-    if (state_ == connection_state::OPEN) {
-      reconnect_count_ = 0;
-      last_error_.reset();  // Clear error on successful reconnect
-      read_wakeup_.notify();
-      write_wakeup_.notify();
-      control_wakeup_.notify();
-      co_return;
-    }
+    // Successful do_connect() implies OPEN.
+    REDISCORO_ASSERT(state_ == connection_state::OPEN);
 
-    if (cancel_.is_cancelled() || state_ == connection_state::CLOSING) {
-      co_return;
-    }
-
-    // Defensive: do_connect() succeeded, but we didn't transition to OPEN.
-    // Treat as connect_failed to avoid stalling in RECONNECTING.
-    state_ = connection_state::FAILED;
-    last_error_ = error::connect_failed;
-    reconnect_count_ += 1;
+    reconnect_count_ = 0;
+    last_error_.reset();  // Clear error on successful reconnect
+    read_wakeup_.notify();
+    write_wakeup_.notify();
+    control_wakeup_.notify();
+    co_return;
   }
 }
 
