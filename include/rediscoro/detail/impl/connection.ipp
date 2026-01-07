@@ -709,6 +709,7 @@ inline auto connection::handle_error(error ec) -> void {
     return;
   }
 
+  REDISCORO_ASSERT(state_ == connection_state::OPEN, "handle_error must not be used for CONNECTING/INIT errors");
   if (state_ != connection_state::OPEN) {
     // Non-OPEN state errors are not recorded in last_error_ (handled elsewhere).
     control_wakeup_.notify();
