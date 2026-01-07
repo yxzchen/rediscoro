@@ -311,9 +311,9 @@ private:
   /// not as special handshake methods.
   ///
   /// Returns:
-  /// - std::nullopt: connection succeeded, state_ = OPEN
-  /// - error: connection failed with specific error code
-  auto do_connect() -> iocoro::awaitable<std::optional<error>>;
+  /// - std::error_code{}: connection succeeded, state_ = OPEN
+  /// - non-empty error_code: connection failed with specific error code
+  auto do_connect() -> iocoro::awaitable<std::error_code>;
 
   /// Read and parse RESP3 messages from socket.
   ///

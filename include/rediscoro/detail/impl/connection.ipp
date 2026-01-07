@@ -75,7 +75,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   state_ = connection_state::CONNECTING;
 
   // Attempt connection. do_connect() returns error on failure.
-  auto connect_error = co_await do_connect();
+  auto connect_ec = co_await do_connect();
 
   if (cancel_.is_cancelled()) {
     // close() won; unify cleanup via close().
@@ -94,7 +94,10 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
   // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
   // Note: connect_error is NOT stored in last_error_ (user gets it directly from connect()).
-  auto ec = connect_error.value_or(error::connect_failed);
+  auto ec = connect_ec;
+  if (!ec) {
+    ec = error::connect_failed;
+  }
   co_await close();
   co_return ec;
 }
@@ -311,7 +314,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
 
     // Attempt reconnect.
     state_ = connection_state::RECONNECTING;
-    auto reconnect_error = co_await do_connect();
+    auto reconnect_ec = co_await do_connect();
 
     if (state_ == connection_state::OPEN) {
       reconnect_count_ = 0;
@@ -329,12 +332,18 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     // Failed attempt: transition back to FAILED and schedule next delay.
     // Store the reconnection error for diagnostics (user cannot obtain it directly).
     state_ = connection_state::FAILED;
-    last_error_ = reconnect_error;
+    if (!reconnect_ec) {
+      last_error_ = error::connect_failed;
+    } else if (reconnect_ec.category() == rediscoro::detail::category()) {
+      last_error_ = static_cast<error>(reconnect_ec.value());
+    } else {
+      last_error_ = error::connect_failed;
+    }
     reconnect_count_ += 1;
   }
 }
 
-inline auto connection::do_connect() -> iocoro::awaitable<std::optional<error>> {
+inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   if (cancel_.is_cancelled()) {
     co_return error::operation_aborted;
   }
@@ -552,7 +561,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::optional<error>> 
 
   // Defensive: ensure parser buffer/state is clean when handing over to runtime loops.
   parser_.reset();
-  co_return std::nullopt;
+  co_return std::error_code{};
 }
 
 inline auto connection::do_read() -> iocoro::awaitable<void> {
