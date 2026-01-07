@@ -12,10 +12,9 @@ using namespace std::chrono_literals;
 
 TEST(client_external, connect_to_http_server_reports_protocol_error) {
   iocoro::io_context ctx;
-  auto guard = iocoro::make_work_guard(ctx);
 
   rediscoro::config cfg{};
-  cfg.host = "baidu.com";
+  cfg.host = "10.0.0.1";
   cfg.port = 80;
   cfg.resolve_timeout = 1000ms;
   cfg.connect_timeout = 1000ms;
@@ -32,7 +31,6 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
     auto ec = co_await c.connect();
     if (!ec) {
       diag = "unexpected success connecting to apple.com:80 as redis";
-      guard.reset();
       co_return;
     }
 
@@ -41,7 +39,6 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
         ec == rediscoro::error::connect_failed || ec == rediscoro::error::connect_timeout) {
       skipped = true;
       skip_reason = "network not available to reach apple.com:80 (connect failed: " + ec.message() + ")";
-      guard.reset();
       co_return;
     }
 
@@ -50,11 +47,9 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
     if (std::string_view{ec.category().name()} != "rediscoro") {
       diag = "expected rediscoro error category, got: " + std::string{ec.category().name()} +
              " / " + ec.message();
-      guard.reset();
       co_return;
     }
     ok = true;
-    guard.reset();
     co_return;
   };
 
@@ -69,7 +64,6 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
 
 TEST(client_external, exec_without_connect_is_rejected) {
   iocoro::io_context ctx;
-  auto guard = iocoro::make_work_guard(ctx);
 
   bool ok = false;
   std::string diag{};
@@ -84,22 +78,18 @@ TEST(client_external, exec_without_connect_is_rejected) {
     auto resp = co_await c.exec<std::string>("PING");
     if (resp.get<0>().has_value()) {
       diag = "expected not_connected error, got value";
-      guard.reset();
       co_return;
     }
     if (!resp.get<0>().error().is_client_error()) {
       diag = "expected client error, got different error category";
-      guard.reset();
       co_return;
     }
     if (resp.get<0>().error().as_client_error() != rediscoro::error::not_connected) {
       diag = "expected not_connected";
-      guard.reset();
       co_return;
     }
 
     ok = true;
-    guard.reset();
     co_return;
   };
 
@@ -111,7 +101,6 @@ TEST(client_external, exec_without_connect_is_rejected) {
 
 TEST(client_external, resolve_timeout_zero_is_reported) {
   iocoro::io_context ctx;
-  auto guard = iocoro::make_work_guard(ctx);
 
   bool ok = false;
   std::string diag{};
@@ -128,12 +117,10 @@ TEST(client_external, resolve_timeout_zero_is_reported) {
     auto ec = co_await c.connect();
     if (ec != rediscoro::error::resolve_timeout) {
       diag = "expected resolve_timeout, got: " + ec.message();
-      guard.reset();
       co_return;
     }
 
     ok = true;
-    guard.reset();
     co_return;
   };
 
@@ -145,7 +132,6 @@ TEST(client_external, resolve_timeout_zero_is_reported) {
 
 TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
   iocoro::io_context ctx;
-  auto guard = iocoro::make_work_guard(ctx);
 
   bool ok = false;
   std::string diag{};
@@ -162,7 +148,6 @@ TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
     auto ec = co_await c.connect();
     if (!ec) {
       diag = "unexpected success connecting to blackhole address";
-      guard.reset();
       co_return;
     }
 
@@ -171,11 +156,9 @@ TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
           ec == rediscoro::error::connect_failed || ec == rediscoro::error::resolve_failed ||
           ec == rediscoro::error::resolve_timeout || ec == rediscoro::error::connection_reset)) {
       diag = "expected timeout/connect failure, got: " + ec.message();
-      guard.reset();
       co_return;
     }
     ok = true;
-    guard.reset();
     co_return;
   };
 
@@ -184,4 +167,3 @@ TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
 
   ASSERT_TRUE(ok) << diag;
 }
-
