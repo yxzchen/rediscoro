@@ -25,6 +25,7 @@ enum class log_level {
   info,
   warning,
   error,
+  off,
 };
 
 constexpr auto to_string(log_level level) noexcept -> char const* {
@@ -37,6 +38,8 @@ constexpr auto to_string(log_level level) noexcept -> char const* {
       return "warning";
     case log_level::error:
       return "error";
+    case log_level::off:
+      return "off";
     default:
       return "unknown";
   }
@@ -100,7 +103,8 @@ class logger {
   }
 
  private:
-  logger() : log_fn_(default_log_function()), min_level_(log_level::info) {}
+  // Default: disable all logs unless user explicitly enables them.
+  logger() : log_fn_(default_log_function()), min_level_(log_level::off) {}
 
   static auto default_log_function() -> log_function {
     return [](log_context const& ctx) {
