@@ -121,4 +121,4 @@ private:
 
 }  // namespace rediscoro::detail
 
-#include <rediscoro/detail/impl/notify_event.ipp>
+#include <rediscoro/impl/notify_event.ipp>

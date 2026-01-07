@@ -422,4 +422,4 @@ private:
 
 }  // namespace rediscoro::detail
 
-#include <rediscoro/detail/impl/connection.ipp>
+#include <rediscoro/impl/connection.ipp>

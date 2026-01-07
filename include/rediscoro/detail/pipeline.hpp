@@ -116,4 +116,4 @@ private:
 
 }  // namespace rediscoro::detail
 
-#include <rediscoro/detail/impl/pipeline.ipp>
+#include <rediscoro/impl/pipeline.ipp>
