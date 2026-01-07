@@ -6,8 +6,6 @@
 #include <rediscoro/response.hpp>
 
 #include <cstddef>
-#include <type_traits>
-#include <variant>
 
 namespace rediscoro::detail {
 
@@ -86,9 +84,6 @@ public:
   /// Deliver an error.
   /// Called by pipeline when parsing fails, connection closes, or other non-success events occur.
   ///
-  /// Template parameters:
-  /// - E: must be resp3::error or rediscoro::error (enforced at compile time)
-  ///
   /// Responsibilities of implementation:
   /// 1. Store error
   /// 2. Notify waiting coroutine (on its executor)
@@ -97,20 +92,14 @@ public:
   /// - Block the calling thread
   /// - Execute user code directly
   /// - Resume coroutine inline
-  template <typename E>
-  auto deliver_error(E err) -> void {
-    static_assert(
-      std::is_same_v<E, rediscoro::error>,
-      "deliver_error only accepts rediscoro::error"
-    );
-    
+  auto deliver_error(rediscoro::error err) -> void {
     // Structural defense: a pipeline bug must be caught immediately.
     REDISCORO_ASSERT(!is_complete() && "deliver_error() called on a completed sink - pipeline bug!");
     if (is_complete()) {
       return;  // Defensive in release builds
     }
-    
-    do_deliver_error(error_variant{err});
+
+    do_deliver_error(std::move(err));
   }
 
   /// Fail this sink until it becomes complete.
@@ -122,13 +111,7 @@ public:
   /// Semantics:
   /// - Repeatedly calls deliver_error(err) until is_complete() becomes true.
   /// - Defensive: if already complete, does nothing.
-  template <typename E>
-  auto fail_all(E err) -> void {
-    static_assert(
-      std::is_same_v<E, rediscoro::error>,
-      "fail_all only accepts rediscoro::error"
-    );
-
+  auto fail_all(rediscoro::error err) -> void {
     while (!is_complete()) {
       deliver_error(err);
     }
@@ -138,13 +121,9 @@ public:
   [[nodiscard]] virtual auto is_complete() const noexcept -> bool = 0;
 
 protected:
-  /// Error variant for generic error delivery.
-  /// Subclasses receive this and can use std::visit to dispatch to typed handlers.
-  using error_variant = rediscoro::error;
-
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;
-  virtual auto do_deliver_error(error_variant err) -> void = 0;
+  virtual auto do_deliver_error(rediscoro::error err) -> void = 0;
 };
 
 }  // namespace rediscoro::detail

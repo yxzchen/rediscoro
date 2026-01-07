@@ -27,7 +27,7 @@ public:
 
 protected:
   auto do_deliver(rediscoro::resp3::message) -> void override { msgs_ += 1; }
-  auto do_deliver_error(error_variant) -> void override { errs_ += 1; }
+  auto do_deliver_error(rediscoro::error) -> void override { errs_ += 1; }
 
 private:
   std::size_t expected_{0};

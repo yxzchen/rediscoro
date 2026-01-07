@@ -19,13 +19,13 @@ auto pending_response<Ts...>::do_deliver(resp3::message msg) -> void {
 }
 
 template <typename... Ts>
-auto pending_response<Ts...>::do_deliver_error(error_variant err) -> void {
+auto pending_response<Ts...>::do_deliver_error(rediscoro::error err) -> void {
   REDISCORO_ASSERT(!result_.has_value());
   if (result_.has_value()) {
     return;
   }
 
-  builder_.accept(err);
+  builder_.accept(std::move(err));
   if (builder_.done()) {
     result_ = builder_.take_results();
     event_.notify();
@@ -54,13 +54,13 @@ auto pending_dynamic_response<T>::do_deliver(resp3::message msg) -> void {
 }
 
 template <typename T>
-auto pending_dynamic_response<T>::do_deliver_error(error_variant err) -> void {
+auto pending_dynamic_response<T>::do_deliver_error(rediscoro::error err) -> void {
   REDISCORO_ASSERT(!result_.has_value());
   if (result_.has_value()) {
     return;
   }
 
-  builder_.accept(err);
+  builder_.accept(std::move(err));
   if (builder_.done()) {
     result_ = builder_.take_results();
     event_.notify();
