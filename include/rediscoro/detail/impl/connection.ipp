@@ -425,23 +425,42 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   auto handshake_ec = co_await iocoro::with_timeout(
     executor_.get_io_executor(),
     [&](iocoro::cancellation_token tok) -> iocoro::awaitable<std::error_code> {
-      while (!cancel_.is_cancelled() && !slot->is_complete()) {
-        // Write all pending handshake bytes.
-        while (pipeline_.has_pending_write()) {
-          auto view = pipeline_.next_write_buffer();
-          auto buf = std::as_bytes(std::span{view.data(), view.size()});
-          auto w = co_await socket_.async_write_some(buf, tok);
-          if (!w.has_value()) {
-            co_return w.error();
+      auto map_io_error = [&](std::error_code ec) -> std::error_code {
+        // IMPORTANT:
+        // - iocoro::with_timeout cancels in-flight operations via the cancellation_token.
+        // - Many async_* operations surface token cancellation as operation_aborted (not timed_out).
+        // - We disambiguate "user close()" vs "timeout token" via cancel_.
+        if (ec == iocoro::error::operation_aborted) {
+          if (cancel_.is_cancelled()) {
+            return error::operation_aborted;
           }
-          pipeline_.on_write_done(*w);
+          return error::handshake_timeout;
         }
+        if (ec == iocoro::error::timed_out) {
+          return error::handshake_timeout;
+        }
+        return error::handshake_failed;
+      };
 
+      // Phase-1: flush the full handshake request first.
+      // Handshake generates no additional writes after the initial request is fully sent.
+      while (!cancel_.is_cancelled() && pipeline_.has_pending_write()) {
+        auto view = pipeline_.next_write_buffer();
+        auto buf = std::as_bytes(std::span{view.data(), view.size()});
+        auto w = co_await socket_.async_write_some(buf, tok);
+        if (!w.has_value()) {
+          co_return map_io_error(w.error());
+        }
+        pipeline_.on_write_done(*w);
+      }
+
+      // Phase-2: read/parse until the handshake sink completes.
+      while (!cancel_.is_cancelled() && !slot->is_complete()) {
         // Read until we can parse at least one value or hit timeout/cancel.
         auto writable = parser_.prepare();
         auto r = co_await socket_.async_read_some(writable, tok);
         if (!r.has_value()) {
-          co_return r.error();
+          co_return map_io_error(r.error());
         }
         if (*r == 0) {
           co_return error::connection_reset;
@@ -484,15 +503,10 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   //   that operation resumes (or times out). This is acceptable for now; future work may bridge
   //   cancel_ into an iocoro cancellation_source to provide prompt abort semantics.
 
-  if (cancel_.is_cancelled() || handshake_ec == iocoro::error::operation_aborted) {
+  if (cancel_.is_cancelled()) {
     // Handshake aborted (close/cancel won). Fail the internal handshake sink deterministically.
     pipeline_.clear_all(error::operation_aborted);
     co_return error::operation_aborted;
-  }
-
-  if (handshake_ec == iocoro::error::timed_out) {
-    pipeline_.clear_all(error::handshake_timeout);
-    co_return error::handshake_timeout;
   }
 
   if (handshake_ec) {
@@ -505,23 +519,17 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
       // Preserve the semantic error: peer closed/reset during handshake.
       pipeline_.clear_all(error::connection_reset);
       co_return error::connection_reset;
+    } else if (handshake_ec == error::handshake_timeout) {
+      pipeline_.clear_all(error::handshake_timeout);
+      co_return error::handshake_timeout;
     } else {
-      // TCP is already connected here; any remaining error is either:
-      // - a RESP3 protocol parsing error, or
-      // - an IO failure during handshake (system error_code).
-      //
-      // With unified error codes, preserve RESP3 protocol errors for better diagnostics.
-      // Check if the error is a rediscoro::error by attempting conversion.
-      if (handshake_ec.category() == rediscoro::detail::category()) {
-        // It's a rediscoro::error - preserve it (could be RESP3 protocol error).
-        auto e = static_cast<error>(handshake_ec.value());
-        pipeline_.clear_all(e);
-        co_return e;
-      } else {
-        // System/IO error during handshake - convert to handshake_failed.
-        pipeline_.clear_all(error::handshake_failed);
-        co_return error::handshake_failed;
-      }
+      // handshake_ec is normalized inside the handshake IO coroutine:
+      // - rediscoro::error for protocol/semantic errors
+      // - error::handshake_failed for system/IO errors
+      REDISCORO_ASSERT(handshake_ec.category() == rediscoro::detail::category());
+      auto e = static_cast<error>(handshake_ec.value());
+      pipeline_.clear_all(e);
+      co_return e;
     }
   }
 
