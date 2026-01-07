@@ -14,7 +14,7 @@ TEST(client_test, connect_to_http_server_reports_protocol_error) {
   iocoro::io_context ctx;
 
   rediscoro::config cfg{};
-  cfg.host = "apple.com";
+  cfg.host = "qq.com";
   cfg.port = 80;
   cfg.resolve_timeout = 1000ms;
   cfg.connect_timeout = 1000ms;
@@ -30,7 +30,7 @@ TEST(client_test, connect_to_http_server_reports_protocol_error) {
 
     auto ec = co_await c.connect();
     if (!ec) {
-      diag = "unexpected success connecting to apple.com:80 as redis";
+      diag = "unexpected success connecting to qq.com:80 as redis";
       co_return;
     }
 
@@ -38,7 +38,7 @@ TEST(client_test, connect_to_http_server_reports_protocol_error) {
     if (ec == rediscoro::error::resolve_failed || ec == rediscoro::error::resolve_timeout ||
         ec == rediscoro::error::connect_failed || ec == rediscoro::error::connect_timeout) {
       skipped = true;
-      skip_reason = "network not available to reach apple.com:80 (connect failed: " + ec.message() + ")";
+      skip_reason = "network not available to reach qq.com:80 (connect failed: " + ec.message() + ")";
       co_return;
     }
 
@@ -108,7 +108,7 @@ TEST(client_test, resolve_timeout_zero_is_reported) {
   auto task = [&]() -> iocoro::awaitable<void> {
     rediscoro::config cfg{};
     // Deterministic: resolve_timeout <= 0 makes with_timeout_detached immediately time out.
-    cfg.host = "apple.com";
+    cfg.host = "qq.com";
     cfg.port = 80;
     cfg.resolve_timeout = 0ms;
     cfg.reconnection.enabled = false;
