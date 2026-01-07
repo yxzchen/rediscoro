@@ -653,7 +653,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::handle_error(error ec) -> void {
-  // Centralized runtime error path (step-5):
+  // Centralized runtime error path:
   // - Only OPEN may transition to FAILED (runtime IO errors after first OPEN).
   // - CONNECTING/INIT errors are handled by do_connect()/connect() and must not enter FAILED.
   // - Must NOT write CLOSED (only transition_to_closed()).
