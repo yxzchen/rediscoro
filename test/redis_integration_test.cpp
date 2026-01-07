@@ -194,7 +194,7 @@ TEST(client_local, ping_set_get_roundtrip) {
 
     {
       auto resp = co_await c.exec<std::string>("PING");
-      auto& slot = resp.template get<0>();
+      auto& slot = resp.get<0>();
       if (!slot) {
         diag = "PING failed: " + slot.error().to_string();
         co_return;
@@ -210,7 +210,7 @@ TEST(client_local, ping_set_get_roundtrip) {
 
     {
       auto resp = co_await c.exec<std::int64_t>("DEL", key);
-      auto& slot = resp.template get<0>();
+      auto& slot = resp.get<0>();
       if (!slot) {
         diag = "DEL failed: " + slot.error().to_string();
         co_return;
@@ -219,7 +219,7 @@ TEST(client_local, ping_set_get_roundtrip) {
 
     {
       auto resp = co_await c.exec<std::string>("SET", key, value);
-      auto& slot = resp.template get<0>();
+      auto& slot = resp.get<0>();
       if (!slot) {
         diag = "SET failed: " + slot.error().to_string();
         co_return;
@@ -232,7 +232,7 @@ TEST(client_local, ping_set_get_roundtrip) {
 
     {
       auto resp = co_await c.exec<std::string>("GET", key);
-      auto& slot = resp.template get<0>();
+      auto& slot = resp.get<0>();
       if (!slot) {
         diag = "GET failed: " + slot.error().to_string();
         co_return;
