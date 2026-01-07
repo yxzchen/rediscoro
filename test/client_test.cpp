@@ -10,7 +10,7 @@
 
 using namespace std::chrono_literals;
 
-TEST(client_external, connect_to_http_server_reports_protocol_error) {
+TEST(client_test, connect_to_http_server_reports_protocol_error) {
   iocoro::io_context ctx;
 
   rediscoro::config cfg{};
@@ -62,7 +62,7 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_external, exec_without_connect_is_rejected) {
+TEST(client_test, exec_without_connect_is_rejected) {
   iocoro::io_context ctx;
 
   bool ok = false;
@@ -99,7 +99,7 @@ TEST(client_external, exec_without_connect_is_rejected) {
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_external, resolve_timeout_zero_is_reported) {
+TEST(client_test, resolve_timeout_zero_is_reported) {
   iocoro::io_context ctx;
 
   bool ok = false;
@@ -130,7 +130,7 @@ TEST(client_external, resolve_timeout_zero_is_reported) {
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
+TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
   iocoro::io_context ctx;
 
   bool ok = false;
@@ -168,7 +168,7 @@ TEST(client_external, timeout_error_is_reported_for_unresponsive_peer) {
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_local, ping_set_get_roundtrip) {
+TEST(client_test, ping_set_get_roundtrip) {
   iocoro::io_context ctx;
 
   bool skipped = false;

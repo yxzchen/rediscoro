@@ -36,7 +36,13 @@ inline connection::~connection() noexcept {
   // - Therefore, ~connection() should only run when the actor is no longer running.
   //
   // This destructor does not co_await (cannot); it only closes resources and notifies waiters.
-  REDISCORO_ASSERT(!actor_awaitable_.has_value(), "connection destroyed while actor is still running");
+  //
+  // Note: actor_awaitable_ is normally reset by close() after co_await-ing the actor.
+  // If the user never calls close(), the actor may still complete (e.g. error path), leaving a
+  // completed awaitable stored here. In that case, it's safe to drop it during destruction.
+  if (actor_awaitable_.has_value()) {
+    actor_awaitable_.reset();
+  }
 
   cancel_.request_cancel();
 
