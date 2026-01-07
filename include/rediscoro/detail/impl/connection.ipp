@@ -283,13 +283,28 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     const auto delay = calculate_reconnect_delay();
 
     if (delay.count() > 0) {
+      // NOTE: control_wakeup_ is a counting event. It may already have pending notifications
+      // (e.g. from a request_timeout path) when we enter this backoff sleep.
+      // If we only wait once with when_any(timer, wake), a pending wake can skip the delay.
+      //
+      // Policy: treat wake-ups as "re-check conditions", but still respect the full delay
+      // unless we're cancelled/closing.
+      const auto deadline = pipeline::clock::now() + delay;
       iocoro::steady_timer timer{executor_.get_io_executor()};
-      timer.expires_after(delay);
 
-      // Wait either for the timer or for an external control signal (close/notify).
-      auto timer_wait = timer.async_wait(iocoro::use_awaitable);
-      auto wake_wait = control_wakeup_.wait();
-      (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
+      while (!cancel_.is_cancelled() && state_ != connection_state::CLOSING) {
+        const auto now = pipeline::clock::now();
+        if (now >= deadline) {
+          break;
+        }
+
+        timer.expires_after(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now));
+
+        // Wait either for the timer or for an external control signal (close/notify).
+        auto timer_wait = timer.async_wait(iocoro::use_awaitable);
+        auto wake_wait = control_wakeup_.wait();
+        (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
+      }
     }
 
     if (cancel_.is_cancelled() || state_ == connection_state::CLOSING) {
