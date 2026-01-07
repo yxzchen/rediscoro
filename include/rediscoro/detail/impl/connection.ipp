@@ -77,29 +77,28 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // Attempt connection. do_connect() returns error on failure.
   auto connect_ec = co_await do_connect();
 
+  if (connect_ec) {
+    // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
+    // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
+    // Note: connect_ec is NOT stored in last_error_ (user gets it directly from connect()).
+    co_await close();
+    co_return connect_ec;
+  }
+
   if (cancel_.is_cancelled()) {
     // close() won; unify cleanup via close().
     co_await close();
     co_return error::operation_aborted;
   }
 
-  if (state_ == connection_state::OPEN) {
-    // Wake IO loops that might be waiting for the OPEN transition.
-    read_wakeup_.notify();
-    write_wakeup_.notify();
-    control_wakeup_.notify();
-    co_return std::error_code{};
-  }
+  // Successful do_connect() implies OPEN.
+  REDISCORO_ASSERT(state_ == connection_state::OPEN);
 
-  // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
-  // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
-  // Note: connect_error is NOT stored in last_error_ (user gets it directly from connect()).
-  auto ec = connect_ec;
-  if (!ec) {
-    ec = error::connect_failed;
-  }
-  co_await close();
-  co_return ec;
+  // Wake IO loops that might be waiting for the OPEN transition.
+  read_wakeup_.notify();
+  write_wakeup_.notify();
+  control_wakeup_.notify();
+  co_return std::error_code{};
 }
 
 inline auto connection::close() -> iocoro::awaitable<void> {
@@ -316,6 +315,19 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     state_ = connection_state::RECONNECTING;
     auto reconnect_ec = co_await do_connect();
 
+    if (reconnect_ec) {
+      // Failed attempt: transition back to FAILED and schedule next delay.
+      // Store the reconnection error for diagnostics (user cannot obtain it directly).
+      state_ = connection_state::FAILED;
+      if (reconnect_ec.category() == rediscoro::detail::category()) {
+        last_error_ = static_cast<error>(reconnect_ec.value());
+      } else {
+        last_error_ = error::connect_failed;
+      }
+      reconnect_count_ += 1;
+      continue;
+    }
+
     if (state_ == connection_state::OPEN) {
       reconnect_count_ = 0;
       last_error_.reset();  // Clear error on successful reconnect
@@ -329,16 +341,10 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
       co_return;
     }
 
-    // Failed attempt: transition back to FAILED and schedule next delay.
-    // Store the reconnection error for diagnostics (user cannot obtain it directly).
+    // Defensive: do_connect() succeeded, but we didn't transition to OPEN.
+    // Treat as connect_failed to avoid stalling in RECONNECTING.
     state_ = connection_state::FAILED;
-    if (!reconnect_ec) {
-      last_error_ = error::connect_failed;
-    } else if (reconnect_ec.category() == rediscoro::detail::category()) {
-      last_error_ = static_cast<error>(reconnect_ec.value());
-    } else {
-      last_error_ = error::connect_failed;
-    }
+    last_error_ = error::connect_failed;
     reconnect_count_ += 1;
   }
 }
