@@ -69,7 +69,7 @@ struct value_result {
 
 }  // namespace
 
-auto parser::parse_one() -> expected<std::uint32_t, error> {
+auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   if (tree_ready_) {
     return unexpected(error::resp3_tree_not_consumed);
   }
