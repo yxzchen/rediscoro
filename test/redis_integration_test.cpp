@@ -45,9 +45,10 @@ TEST(client_external, connect_to_http_server_reports_protocol_error) {
       co_return;
     }
 
-    // For a reachable HTTP server, RESP3 parser should fail quickly.
-    if (std::string_view{ec.category().name()} != "resp3") {
-      diag = "expected resp3 protocol error category, got: " + std::string{ec.category().name()} +
+    // For a reachable HTTP server, RESP3 parser should fail quickly with a protocol error.
+    // After unification, RESP3 errors are in rediscoro category (100-199 range).
+    if (std::string_view{ec.category().name()} != "rediscoro") {
+      diag = "expected rediscoro error category, got: " + std::string{ec.category().name()} +
              " / " + ec.message();
       guard.reset();
       co_return;

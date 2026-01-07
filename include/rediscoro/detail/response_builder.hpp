@@ -33,7 +33,7 @@ public:
     next_index_ += 1;
   }
 
-  using error_variant = std::variant<resp3::error, rediscoro::error>;
+  using error_variant = rediscoro::error;
 
   void accept(error_variant err) {
     REDISCORO_ASSERT(next_index_ < static_size);
@@ -89,7 +89,7 @@ private:
 
   template <std::size_t I>
   void set_error_variant(error_variant err) {
-    std::visit([this](auto&& e) { this->set_error<I>(std::forward<decltype(e)>(e)); }, err);
+    set_error<I>(std::move(err));
   }
 
   using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
@@ -164,13 +164,11 @@ public:
     results_.push_back(std::move(*r));
   }
 
-  using error_variant = std::variant<resp3::error, rediscoro::error>;
+  using error_variant = rediscoro::error;
 
   void accept(error_variant err) {
     REDISCORO_ASSERT(results_.size() < expected_);
-    std::visit([this](auto&& e) {
-      results_.push_back(unexpected(response_error{std::forward<decltype(e)>(e)}));
-    }, err);
+    results_.push_back(unexpected(response_error{std::move(err)}));
   }
 
   auto take_results() -> dynamic_response<T> {

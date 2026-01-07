@@ -58,7 +58,7 @@ inline auto pipeline::on_message(resp3::message msg) -> void {
   }
 }
 
-inline auto pipeline::on_error(resp3::error err) -> void {
+inline auto pipeline::on_error(error err) -> void {
   REDISCORO_ASSERT(!awaiting_read_.empty());
   auto* sink = awaiting_read_.front().sink;
   REDISCORO_ASSERT(sink != nullptr);

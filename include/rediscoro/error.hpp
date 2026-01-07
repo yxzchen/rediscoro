@@ -67,9 +67,63 @@ enum class error {
   /// This occurs when an established connection fails during operation.
   /// Automatic reconnection may be in progress in the background.
   connection_lost,
+
+  /// Parser needs more data to complete parsing.
+  ///
+  /// Internal implementation detail: This error code is only used internally
+  /// between parser and connection. It will never appear in user-visible response_error.
+  ///
+  /// How it works:
+  /// - parser.parse_one() returns this error when buffer has insufficient data
+  /// - connection detects this error and continues reading from socket
+  /// - Real protocol errors are passed to pipeline and user
+  ///
+  /// Analogy: POSIX EAGAIN/EWOULDBLOCK - while in errno space, usually handled
+  /// internally by libraries, rarely used directly by applications.
+  resp3_needs_more = 100,
+
+  /// RESP3 type byte is invalid (first byte is not a valid RESP3 type marker).
+  resp3_invalid_type_byte,
+
+  /// RESP3 null format is invalid.
+  resp3_invalid_null,
+
+  /// RESP3 boolean format is invalid.
+  resp3_invalid_boolean,
+
+  /// RESP3 bulk string/error trailer is invalid (missing \r\n).
+  resp3_invalid_bulk_trailer,
+
+  /// RESP3 double format is invalid.
+  resp3_invalid_double,
+
+  /// RESP3 integer format is invalid.
+  resp3_invalid_integer,
+
+  /// RESP3 length field is invalid (negative or malformed).
+  resp3_invalid_length,
+
+  /// RESP3 map has mismatched key-value pairs.
+  resp3_invalid_map_pairs,
+
+  /// Parser internal state is invalid (should not happen, indicates a bug).
+  resp3_invalid_state,
+
+  /// Attempted to parse but tree was not consumed (reclaim not called).
+  resp3_tree_not_consumed,
+
+  /// Parser is in failed state (prior protocol error occurred).
+  resp3_parser_failed,
 };
 
 auto make_error_code(error e) -> std::error_code;
+
+/// Check if an error is an internal state that should not be exposed to users.
+///
+/// Currently only resp3_needs_more is an internal error.
+constexpr bool is_internal_error(error e) noexcept {
+  return e == error::resp3_needs_more;
+}
 
 }  // namespace rediscoro
 

@@ -2,7 +2,6 @@
 
 #include <rediscoro/assert.hpp>
 #include <rediscoro/error.hpp>
-#include <rediscoro/resp3/error.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/response.hpp>
 
@@ -101,8 +100,8 @@ public:
   template <typename E>
   auto deliver_error(E err) -> void {
     static_assert(
-      std::is_same_v<E, resp3::error> || std::is_same_v<E, rediscoro::error>,
-      "deliver_error only accepts resp3::error or rediscoro::error"
+      std::is_same_v<E, rediscoro::error>,
+      "deliver_error only accepts rediscoro::error"
     );
     
     // Structural defense: a pipeline bug must be caught immediately.
@@ -126,8 +125,8 @@ public:
   template <typename E>
   auto fail_all(E err) -> void {
     static_assert(
-      std::is_same_v<E, resp3::error> || std::is_same_v<E, rediscoro::error>,
-      "fail_all only accepts resp3::error or rediscoro::error"
+      std::is_same_v<E, rediscoro::error>,
+      "fail_all only accepts rediscoro::error"
     );
 
     while (!is_complete()) {
@@ -141,7 +140,7 @@ public:
 protected:
   /// Error variant for generic error delivery.
   /// Subclasses receive this and can use std::visit to dispatch to typed handlers.
-  using error_variant = std::variant<resp3::error, rediscoro::error>;
+  using error_variant = rediscoro::error;
 
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;

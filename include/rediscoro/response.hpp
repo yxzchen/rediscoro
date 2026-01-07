@@ -4,7 +4,6 @@
 #include <rediscoro/assert.hpp>
 #include <rediscoro/error.hpp>
 #include <rediscoro/expected.hpp>
-#include <rediscoro/resp3/error.hpp>
 
 #include <cstddef>
 #include <string>
@@ -32,21 +31,20 @@ struct redis_error {
 /// Provides user-friendly inspection APIs without exposing std::variant in the surface.
 class response_error {
 public:
-  using variant_type = std::variant<redis_error, error, resp3::error, adapter::error>;
+  using variant_type = std::variant<redis_error, error, adapter::error>;
 
   response_error(redis_error e) : v_(std::move(e)) {}
-  response_error(error e) : v_(e) {}
-  response_error(resp3::error e) : v_(e) {}
+  response_error(error e) : v_(e) {
+    REDISCORO_ASSERT(!is_internal_error(e), "Internal error should not be exposed to user");
+  }
   response_error(adapter::error e) : v_(std::move(e)) {}
 
   [[nodiscard]] bool is_redis_error() const noexcept { return std::holds_alternative<redis_error>(v_); }
   [[nodiscard]] bool is_client_error() const noexcept { return std::holds_alternative<error>(v_); }
-  [[nodiscard]] bool is_resp3_error() const noexcept { return std::holds_alternative<resp3::error>(v_); }
   [[nodiscard]] bool is_adapter_error() const noexcept { return std::holds_alternative<adapter::error>(v_); }
 
   [[nodiscard]] const redis_error& as_redis_error() const { return std::get<redis_error>(v_); }
   [[nodiscard]] error as_client_error() const { return std::get<error>(v_); }
-  [[nodiscard]] resp3::error as_resp3_error() const { return std::get<resp3::error>(v_); }
   [[nodiscard]] const adapter::error& as_adapter_error() const { return std::get<adapter::error>(v_); }
 
   [[nodiscard]] const variant_type& raw() const noexcept { return v_; }

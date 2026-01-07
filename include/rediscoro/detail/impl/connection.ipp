@@ -73,11 +73,9 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   }
 
   state_ = connection_state::CONNECTING;
-  last_error_.reset();
 
-  // Not implemented yet: do_connect() currently does nothing.
-  // We still call it to keep the control flow stable.
-  co_await do_connect();
+  // Attempt connection. do_connect() returns error on failure.
+  auto connect_error = co_await do_connect();
 
   if (cancel_.is_cancelled()) {
     // close() won; unify cleanup via close().
@@ -95,7 +93,8 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
 
   // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
   // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
-  auto ec = last_error_.value_or(error::connect_failed);
+  // Note: connect_error is NOT stored in last_error_ (user gets it directly from connect()).
+  auto ec = connect_error.value_or(error::connect_failed);
   co_await close();
   co_return ec;
 }
@@ -312,10 +311,11 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
 
     // Attempt reconnect.
     state_ = connection_state::RECONNECTING;
-    co_await do_connect();
+    auto reconnect_error = co_await do_connect();
 
     if (state_ == connection_state::OPEN) {
       reconnect_count_ = 0;
+      last_error_.reset();  // Clear error on successful reconnect
       read_wakeup_.notify();
       write_wakeup_.notify();
       control_wakeup_.notify();
@@ -327,17 +327,16 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     }
 
     // Failed attempt: transition back to FAILED and schedule next delay.
+    // Store the reconnection error for diagnostics (user cannot obtain it directly).
     state_ = connection_state::FAILED;
+    last_error_ = reconnect_error;
     reconnect_count_ += 1;
   }
 }
 
-inline auto connection::do_connect() -> iocoro::awaitable<void> {
-  last_error_.reset();
-
+inline auto connection::do_connect() -> iocoro::awaitable<std::optional<error>> {
   if (cancel_.is_cancelled()) {
-    last_error_ = error::operation_aborted;
-    co_return;
+    co_return error::operation_aborted;
   }
 
   // Defensive: ensure parser state is clean at the start of a handshake.
@@ -357,20 +356,17 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   );
   if (!res.has_value()) {
     if (res.error() == iocoro::error::timed_out) {
-      last_error_ = error::resolve_timeout;
+      co_return error::resolve_timeout;
     } else {
-      last_error_ = error::resolve_failed;
+      co_return error::resolve_failed;
     }
-    co_return;
   }
   if (res->empty()) {
-    last_error_ = error::resolve_failed;
-    co_return;
+    co_return error::resolve_failed;
   }
 
   if (cancel_.is_cancelled()) {
-    last_error_ = error::operation_aborted;
-    co_return;
+    co_return error::operation_aborted;
   }
 
   // TCP connect with timeout (try endpoints in order).
@@ -391,18 +387,16 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::error::timed_out) {
-      last_error_ = error::connect_timeout;
+      co_return error::connect_timeout;
     } else if (connect_ec == iocoro::error::operation_aborted) {
-      last_error_ = error::operation_aborted;
+      co_return error::operation_aborted;
     } else {
-      last_error_ = error::connect_failed;
+      co_return error::connect_failed;
     }
-    co_return;
   }
 
   if (cancel_.is_cancelled()) {
-    last_error_ = error::operation_aborted;
-    co_return;
+    co_return error::operation_aborted;
   }
 
   // Build handshake request (pipeline of commands).
@@ -462,7 +456,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
         for (;;) {
           auto parsed = parser_.parse_one();
           if (!parsed.has_value()) {
-            if (parsed.error() == resp3::error::needs_more) {
+            if (parsed.error() == error::resp3_needs_more) {
               break;
             }
             if (pipeline_.has_pending_read()) {
@@ -498,37 +492,42 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   if (cancel_.is_cancelled() || handshake_ec == iocoro::error::operation_aborted) {
     // Handshake aborted (close/cancel won). Fail the internal handshake sink deterministically.
     pipeline_.clear_all(error::operation_aborted);
-    last_error_ = error::operation_aborted;
-    co_return;
+    co_return error::operation_aborted;
   }
 
   if (handshake_ec == iocoro::error::timed_out) {
     pipeline_.clear_all(error::handshake_timeout);
-    last_error_ = error::handshake_timeout;
-    co_return;
+    co_return error::handshake_timeout;
   }
 
   if (handshake_ec) {
-    // Fail the internal handshake sink with a meaningful error; connect() returns last_error_.
+    // Fail the internal handshake sink with a meaningful error; connect() returns the error directly.
     // Unsolicited server messages during handshake are treated as unsupported feature for now.
     if (handshake_ec == error::unsolicited_message) {
       pipeline_.clear_all(error::handshake_failed);
-      last_error_ = error::handshake_failed;
+      co_return error::handshake_failed;
     } else if (handshake_ec == error::connection_reset) {
       // Preserve the semantic error: peer closed/reset during handshake.
       pipeline_.clear_all(error::connection_reset);
-      last_error_ = error::connection_reset;
+      co_return error::connection_reset;
     } else {
       // TCP is already connected here; any remaining error is either:
-      // - a handshake/protocol failure (RESP3 parse/redis error), or
+      // - a RESP3 protocol parsing error, or
       // - an IO failure during handshake (system error_code).
       //
-      // Use handshake_failed to fail the internal handshake sink deterministically, but preserve
-      // the original error_code for diagnostics / connect() return when possible.
-      pipeline_.clear_all(error::handshake_failed);
-      last_error_ = handshake_ec;
+      // With unified error codes, preserve RESP3 protocol errors for better diagnostics.
+      // Check if the error is a rediscoro::error by attempting conversion.
+      if (handshake_ec.category() == rediscoro::detail::category()) {
+        // It's a rediscoro::error - preserve it (could be RESP3 protocol error).
+        auto e = static_cast<error>(handshake_ec.value());
+        pipeline_.clear_all(e);
+        co_return e;
+      } else {
+        // System/IO error during handshake - convert to handshake_failed.
+        pipeline_.clear_all(error::handshake_failed);
+        co_return error::handshake_failed;
+      }
     }
-    co_return;
   }
 
   // Validate all handshake replies: any error => handshake_failed.
@@ -537,15 +536,13 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
     pipeline_.clear_all(error::connection_closed);
-    last_error_ = error::handshake_failed;
-    co_return;
+    co_return error::handshake_failed;
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i].has_value()) {
       pipeline_.clear_all(error::connection_closed);
-      last_error_ = error::handshake_failed;
-      co_return;
+      co_return error::handshake_failed;
     }
   }
 
@@ -555,7 +552,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<void> {
 
   // Defensive: ensure parser buffer/state is clean when handing over to runtime loops.
   parser_.reset();
-  co_return;
+  co_return std::nullopt;
 }
 
 inline auto connection::do_read() -> iocoro::awaitable<void> {
@@ -584,7 +581,8 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 
   auto r = co_await socket_.async_read_some(buf);
   if (!r.has_value()) {
-    handle_error(r.error());
+    // Socket IO error - treat as connection lost
+    handle_error(error::connection_lost);
     co_return;
   }
 
@@ -599,7 +597,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   for (;;) {
     auto parsed = parser_.parse_one();
     if (!parsed.has_value()) {
-      if (parsed.error() == resp3::error::needs_more) {
+      if (parsed.error() == error::resp3_needs_more) {
         break;
       }
 
@@ -653,7 +651,8 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
 
     auto r = co_await socket_.async_write_some(buf);
     if (!r.has_value()) {
-      handle_error(r.error());
+      // Socket IO error - treat as connection lost
+      handle_error(error::connection_lost);
       co_return;
     }
 
@@ -666,7 +665,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
   co_return;
 }
 
-inline auto connection::handle_error(std::error_code ec) -> void {
+inline auto connection::handle_error(error ec) -> void {
   // Centralized runtime error path (step-5):
   // - Only OPEN may transition to FAILED (runtime IO errors after first OPEN).
   // - CONNECTING/INIT errors are handled by do_connect()/connect() and must not enter FAILED.
@@ -681,12 +680,13 @@ inline auto connection::handle_error(std::error_code ec) -> void {
   }
 
   if (state_ != connection_state::OPEN) {
-    last_error_ = ec;
+    // Non-OPEN state errors are not recorded in last_error_ (handled elsewhere).
     control_wakeup_.notify();
     return;
   }
 
   // OPEN runtime error -> FAILED.
+  // Record error for diagnostics (user cannot obtain it directly).
   last_error_ = ec;
   state_ = connection_state::FAILED;
   auto clear_err = error::connection_lost;

@@ -38,6 +38,30 @@ class error_category_impl : public std::error_category {
         return "connection closed";
       case error::connection_lost:
         return "connection lost";
+      case error::resp3_needs_more:
+        return "RESP3 needs more data";
+      case error::resp3_invalid_type_byte:
+        return "RESP3 invalid type byte";
+      case error::resp3_invalid_null:
+        return "RESP3 invalid null";
+      case error::resp3_invalid_boolean:
+        return "RESP3 invalid boolean";
+      case error::resp3_invalid_bulk_trailer:
+        return "RESP3 invalid bulk trailer";
+      case error::resp3_invalid_double:
+        return "RESP3 invalid double";
+      case error::resp3_invalid_integer:
+        return "RESP3 invalid integer";
+      case error::resp3_invalid_length:
+        return "RESP3 invalid length";
+      case error::resp3_invalid_map_pairs:
+        return "RESP3 invalid map pairs";
+      case error::resp3_invalid_state:
+        return "RESP3 invalid state";
+      case error::resp3_tree_not_consumed:
+        return "RESP3 tree not consumed";
+      case error::resp3_parser_failed:
+        return "RESP3 parser failed";
       default:
         return "unknown error";
     }

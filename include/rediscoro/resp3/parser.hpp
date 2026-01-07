@@ -1,8 +1,8 @@
 #pragma once
 
 #include <rediscoro/resp3/buffer.hpp>
-#include <rediscoro/resp3/error.hpp>
 #include <rediscoro/resp3/raw.hpp>
+#include <rediscoro/error.hpp>
 #include <rediscoro/expected.hpp>
 
 #include <span>
@@ -52,9 +52,14 @@ public:
   /// Parse exactly one RESP3 value into the internal raw_tree.
   /// On success returns root node index into tree().nodes.
   ///
+  /// Returns:
+  /// - success + node_index: parsing succeeded, returns root node index
+  /// - error::resp3_needs_more: buffer has insufficient data, need to continue reading
+  /// - error::resp3_*: protocol format error
+  ///
   /// IMPORTANT: After success, you must consume the result (tree()+root) and then call reclaim()
   /// before parsing the next message, otherwise the underlying buffer may move and invalidate views.
-  auto parse_one() -> expected<std::uint32_t, error>;
+  auto parse_one() -> expected<std::uint32_t, rediscoro::error>;
 
   /// Reclaim memory after consuming the latest parsed tree:
   /// - clears raw_tree

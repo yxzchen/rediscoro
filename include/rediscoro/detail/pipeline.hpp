@@ -4,7 +4,6 @@
 #include <rediscoro/error.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/message.hpp>
-#include <rediscoro/resp3/error.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -78,7 +77,7 @@ public:
 
   /// Dispatch a RESP3 parse error to the next pending response.
   /// Precondition: has_pending_read() == true
-  auto on_error(resp3::error err) -> void;
+  auto on_error(error err) -> void;
 
   /// Clear all pending requests (on connection close/error).
   auto clear_all(rediscoro::error err) -> void;

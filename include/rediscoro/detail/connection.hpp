@@ -217,12 +217,26 @@ public:
     return state_;
   }
 
-  /// Last connection error observed (if any).
+  /// Get the last runtime connection error (for diagnostics only).
   ///
-  /// This is set when the connection transitions through FAILED due to an IO/handshake error.
-  /// When automatic reconnection is disabled, the connection will still transition to CLOSED
-  /// for deterministic cleanup, but the last_error remains available for diagnostics.
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<std::error_code> {
+  /// Semantics:
+  /// - When a connection fails at runtime (OPEN → FAILED), pending requests receive connection_lost.
+  /// - last_error() provides **why** the connection failed (EOF, timeout, parse error, etc.).
+  ///
+  /// Important contract:
+  /// 1. Errors returned by connect() are **not** recorded in last_error_ (user already has them directly).
+  /// 2. Automatic reconnection failures **are** recorded in last_error_ (user cannot obtain them directly).
+  /// 3. Runtime errors (via handle_error) **are** recorded in last_error_.
+  ///
+  /// Usage scenarios:
+  /// - OPEN → FAILED: last_error_ is meaningful (runtime error diagnostics)
+  /// - INIT/CONNECTING: last_error_ is empty (initial connection errors returned from connect())
+  /// - RECONNECTING: last_error_ preserves the reason for the previous failure
+  ///
+  /// Returns:
+  /// - std::nullopt: no error or during initial connection phase
+  /// - error: specific error code (connection or protocol error)
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<error> {
     return last_error_;
   }
 
@@ -295,7 +309,11 @@ private:
   ///
   /// These are sent as regular requests using the existing pipeline,
   /// not as special handshake methods.
-  auto do_connect() -> iocoro::awaitable<void>;
+  ///
+  /// Returns:
+  /// - std::nullopt: connection succeeded, state_ = OPEN
+  /// - error: connection failed with specific error code
+  auto do_connect() -> iocoro::awaitable<std::optional<error>>;
 
   /// Read and parse RESP3 messages from socket.
   ///
@@ -334,7 +352,7 @@ private:
   /// 6. If reconnection disabled: set state = CLOSED
   ///
   /// Thread-safety: MUST be called from connection strand only
-  auto handle_error(std::error_code ec) -> void;
+  auto handle_error(error ec) -> void;
 
   /// Perform reconnection loop with exponential backoff.
   ///
@@ -374,7 +392,7 @@ private:
   // State machine
   connection_state state_{connection_state::INIT};
 
-  std::optional<std::error_code> last_error_{};
+  std::optional<error> last_error_{};
 
   // Request/response pipeline
   pipeline pipeline_;

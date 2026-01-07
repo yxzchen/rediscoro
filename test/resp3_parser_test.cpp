@@ -43,7 +43,7 @@ TEST(resp3_parser_test, need_more_data_does_not_modify_out) {
 
   auto root = p.parse_one();
   ASSERT_FALSE(root);
-  EXPECT_EQ(root.error(), error::needs_more);
+  EXPECT_EQ(root.error(), rediscoro::error::resp3_needs_more);
 }
 
 TEST(resp3_parser_test, incremental_feed_completes_message) {
@@ -52,7 +52,7 @@ TEST(resp3_parser_test, incremental_feed_completes_message) {
 
   auto r1 = p.parse_one();
   ASSERT_FALSE(r1);
-  EXPECT_EQ(r1.error(), error::needs_more);
+  EXPECT_EQ(r1.error(), rediscoro::error::resp3_needs_more);
 
   append(p, "K\r\n");
   auto r2 = p.parse_one();
@@ -69,7 +69,7 @@ TEST(resp3_parser_test, parse_bulk_string_ok_and_split_payload) {
 
   auto r1 = p.parse_one();
   ASSERT_FALSE(r1);
-  EXPECT_EQ(r1.error(), error::needs_more);
+  EXPECT_EQ(r1.error(), rediscoro::error::resp3_needs_more);
 
   append(p, "llo\r\n");
   auto r2 = p.parse_one();
@@ -160,7 +160,7 @@ TEST(resp3_parser_test, parse_multiple_messages_from_one_feed) {
 
   auto r3 = p.parse_one();
   ASSERT_FALSE(r3);
-  EXPECT_EQ(r3.error(), error::needs_more);
+  EXPECT_EQ(r3.error(), rediscoro::error::resp3_needs_more);
 }
 
 TEST(resp3_parser_test, protocol_error_marks_failed) {
@@ -169,7 +169,7 @@ TEST(resp3_parser_test, protocol_error_marks_failed) {
 
   auto r = p.parse_one();
   ASSERT_FALSE(r);
-  EXPECT_NE(r.error(), error::needs_more);
+  EXPECT_NE(r.error(), rediscoro::error::resp3_needs_more);
   EXPECT_TRUE(p.failed());
 
   append(p, "+OK\r\n");
