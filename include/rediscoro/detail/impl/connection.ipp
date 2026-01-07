@@ -391,7 +391,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
     resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)),
     cfg_.resolve_timeout
   );
-  if (!res.has_value()) {
+  if (!res) {
     if (res.error() == iocoro::error::timed_out) {
       co_return error::resolve_timeout;
     } else {
@@ -483,7 +483,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
         auto view = pipeline_.next_write_buffer();
         auto buf = std::as_bytes(std::span{view.data(), view.size()});
         auto w = co_await socket_.async_write_some(buf, tok);
-        if (!w.has_value()) {
+        if (!w) {
           co_return map_io_error(w.error());
         }
         pipeline_.on_write_done(*w);
@@ -494,7 +494,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
         // Read until we can parse at least one value or hit timeout/cancel.
         auto writable = parser_.prepare();
         auto r = co_await socket_.async_read_some(writable, tok);
-        if (!r.has_value()) {
+        if (!r) {
           co_return map_io_error(r.error());
         }
         if (*r == 0) {
@@ -504,7 +504,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
 
         for (;;) {
           auto parsed = parser_.parse_one();
-          if (!parsed.has_value()) {
+          if (!parsed) {
             if (parsed.error() == error::resp3_needs_more) {
               break;
             }
@@ -578,7 +578,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
-    if (!results[i].has_value()) {
+    if (!results[i]) {
       pipeline_.clear_all(error::handshake_failed);
       co_return error::handshake_failed;
     }
@@ -613,7 +613,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   // This allows detecting peer close even when no pending_read exists.
   auto writable = parser_.prepare();
   auto r = co_await socket_.async_read_some(writable);
-  if (!r.has_value()) {
+  if (!r) {
     // Socket IO error - treat as connection lost
     handle_error(error::connection_lost);
     co_return;
@@ -629,7 +629,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 
   for (;;) {
     auto parsed = parser_.parse_one();
-    if (!parsed.has_value()) {
+    if (!parsed) {
       if (parsed.error() == error::resp3_needs_more) {
         break;
       }
@@ -680,7 +680,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
     auto buf = std::as_bytes(std::span{view.data(), view.size()});
 
     auto r = co_await socket_.async_write_some(buf);
-    if (!r.has_value()) {
+    if (!r) {
       // Socket IO error - treat as connection lost
       handle_error(error::connection_lost);
       co_return;
