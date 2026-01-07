@@ -97,7 +97,8 @@ inline auto pipeline::next_deadline() const noexcept -> time_point {
   return std::min(a, b);
 }
 
-inline auto pipeline::has_expired(time_point now) const noexcept -> bool {
+inline auto pipeline::has_expired() const noexcept -> bool {
+  auto now = clock::now();
   const auto d = next_deadline();
   return d != time_point::max() && d <= now;
 }

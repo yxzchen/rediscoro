@@ -87,7 +87,7 @@ public:
   [[nodiscard]] auto next_deadline() const noexcept -> time_point;
 
   /// True if the earliest pending request has reached its deadline.
-  [[nodiscard]] auto has_expired(time_point now) const noexcept -> bool;
+  [[nodiscard]] auto has_expired() const noexcept -> bool;
 
   /// Get the number of pending requests (for diagnostics).
   [[nodiscard]] auto pending_count() const noexcept -> std::size_t {

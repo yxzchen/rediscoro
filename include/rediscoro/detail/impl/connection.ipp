@@ -164,11 +164,6 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
 }
 
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
-  // Minimal actor (step-2):
-  // - Own write_loop lifetime so close() can use actor_awaitable_ as the shutdown barrier.
-  // - Step-3: own read_loop lifetime as well (joined with write_loop).
-  // - Step-3: own control_loop lifetime as well (control_wakeup_ must not be a ghost).
-  //
   // Hard constraint (IMPORTANT):
   // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
 
@@ -211,9 +206,6 @@ inline auto connection::read_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::control_loop() -> iocoro::awaitable<void> {
-  // Control loop (step-6):
-  // - Centralized state transitions and reconnection policy.
-  //
   // IMPORTANT constraints:
   // - Must NOT write CLOSED (only transition_to_closed()).
   // - Must be cancel-aware so close() can interrupt promptly.
@@ -234,8 +226,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
     }
 
     if (state_ == connection_state::OPEN && cfg_.request_timeout > std::chrono::milliseconds{0}) {
-      auto now = pipeline::clock::now();
-      if (pipeline_.has_expired(now)) {
+      if (pipeline_.has_expired()) {
         handle_error(error::request_timeout);
         continue;
       }
