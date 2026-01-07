@@ -69,12 +69,12 @@ struct value_result {
 
 }  // namespace
 
-auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
+auto parser::parse_one() -> expected<std::uint32_t, error> {
   if (tree_ready_) {
-    return unexpected(rediscoro::error::resp3_tree_not_consumed);
+    return unexpected(error::resp3_tree_not_consumed);
   }
   if (failed_) {
-    return unexpected(rediscoro::error::resp3_parser_failed);
+    return unexpected(error::resp3_parser_failed);
   }
 
   if (stack_.empty()) {
@@ -103,7 +103,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   auto start_container = [&](type3 t, std::int64_t len) -> expected<std::optional<std::uint32_t>, error> {
     if (len < -1) {
       failed_ = true;
-      return unexpected(rediscoro::error::resp3_invalid_length);
+      return unexpected(error::resp3_invalid_length);
     }
     if (len == -1) {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -155,7 +155,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   auto start_attribute = [&](std::int64_t len) -> expected<void, error> {
     if (len < 0) {
       failed_ = true;
-      return unexpected(rediscoro::error::resp3_invalid_length);
+      return unexpected(error::resp3_invalid_length);
     }
     if (len == 0) {
       return {};
@@ -175,12 +175,12 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   auto parse_length_after_type = [&](std::string_view data, std::int64_t& out_len, std::size_t& header_bytes) -> error {
     auto pos = detail::find_crlf(data.substr(1));
     if (pos == std::string_view::npos) {
-      return rediscoro::error::resp3_needs_more;
+      return error::resp3_needs_more;
     }
     auto len_str = data.substr(1, pos);
     std::int64_t len{};
     if (!detail::parse_i64(len_str, len)) {
-      return rediscoro::error::resp3_invalid_length;
+      return error::resp3_invalid_length;
     }
     out_len = len;
     header_bytes = 1 + pos + 2;
@@ -190,14 +190,14 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   auto parse_value = [&]() -> expected<value_result, error> {
     auto data = buf_.data();
     if (data.empty()) {
-      return unexpected(rediscoro::error::resp3_needs_more);
+      return unexpected(error::resp3_needs_more);
     }
 
     auto t = data[0];
     auto maybe_rt = code_to_type(t);
     if (!maybe_rt.has_value()) {
       failed_ = true;
-      return unexpected(rediscoro::error::resp3_invalid_type_byte);
+      return unexpected(error::resp3_invalid_type_byte);
     }
 
     // Attributes are handled as stack frames, not nodes.
@@ -205,8 +205,8 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
       std::int64_t len{};
       std::size_t header_bytes{};
       auto e = parse_length_after_type(data, len, header_bytes);
-      if (e == rediscoro::error::resp3_needs_more) {
-        return unexpected(rediscoro::error::resp3_needs_more);
+      if (e == error::resp3_needs_more) {
+        return unexpected(error::resp3_needs_more);
       }
       if (e != error{}) {
         failed_ = true;
@@ -230,8 +230,8 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
       std::int64_t len{};
       std::size_t header_bytes{};
       auto e = parse_length_after_type(data, len, header_bytes);
-      if (e == rediscoro::error::resp3_needs_more) {
-        return unexpected(rediscoro::error::resp3_needs_more);
+      if (e == error::resp3_needs_more) {
+        return unexpected(error::resp3_needs_more);
       }
       if (e != error{}) {
         failed_ = true;
@@ -255,11 +255,11 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     // Null: "_\r\n"
     if (*maybe_rt == type3::null) {
       if (data.size() < 3) {
-        return unexpected(rediscoro::error::resp3_needs_more);
+        return unexpected(error::resp3_needs_more);
       }
       if (data[1] != '\r' || data[2] != '\n') {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_null);
+        return unexpected(error::resp3_invalid_null);
       }
       buf_.consume(3);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -271,11 +271,11 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     // Boolean: "#t\r\n" / "#f\r\n"
     if (*maybe_rt == type3::boolean) {
       if (data.size() < 4) {
-        return unexpected(rediscoro::error::resp3_needs_more);
+        return unexpected(error::resp3_needs_more);
       }
       if (data[2] != '\r' || data[3] != '\n') {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_boolean);
+        return unexpected(error::resp3_invalid_boolean);
       }
       bool b{};
       if (data[1] == 't') {
@@ -284,7 +284,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
         b = false;
       } else {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_boolean);
+        return unexpected(error::resp3_invalid_boolean);
       }
       buf_.consume(4);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -297,16 +297,16 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     if (*maybe_rt == type3::bulk_string || *maybe_rt == type3::bulk_error || *maybe_rt == type3::verbatim_string) {
       auto pos = detail::find_crlf(data.substr(1));
       if (pos == std::string_view::npos) {
-        return unexpected(rediscoro::error::resp3_needs_more);
+        return unexpected(error::resp3_needs_more);
       }
       std::int64_t len{};
       if (!detail::parse_i64(data.substr(1, pos), len)) {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_length);
+        return unexpected(error::resp3_invalid_length);
       }
       if (len < -1) {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_length);
+        return unexpected(error::resp3_invalid_length);
       }
       auto header_bytes = 1 + pos + 2;
       if (len == -1) {
@@ -319,12 +319,12 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
       }
       auto need = static_cast<std::size_t>(header_bytes) + static_cast<std::size_t>(len) + 2;
       if (data.size() < need) {
-        return unexpected(rediscoro::error::resp3_needs_more);
+        return unexpected(error::resp3_needs_more);
       }
       auto payload = data.substr(header_bytes, static_cast<std::size_t>(len));
       if (data.substr(header_bytes + static_cast<std::size_t>(len), 2) != "\r\n") {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_bulk_trailer);
+        return unexpected(error::resp3_invalid_bulk_trailer);
       }
       buf_.consume(need);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -336,7 +336,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     // Line-like: + - : , (
     auto pos = detail::find_crlf(data.substr(1));
     if (pos == std::string_view::npos) {
-      return unexpected(rediscoro::error::resp3_needs_more);
+      return unexpected(error::resp3_needs_more);
     }
     auto line = data.substr(1, pos);
     auto consume_bytes = 1 + pos + 2;
@@ -353,7 +353,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
       std::int64_t v{};
       if (!detail::parse_i64(line, v)) {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_integer);
+        return unexpected(error::resp3_invalid_integer);
       }
       buf_.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -366,7 +366,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
       double v{};
       if (!detail::parse_double(line, v)) {
         failed_ = true;
-        return unexpected(rediscoro::error::resp3_invalid_double);
+        return unexpected(error::resp3_invalid_double);
       }
       buf_.consume(consume_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -376,21 +376,21 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     }
 
     failed_ = true;
-    return unexpected(rediscoro::error::resp3_invalid_type_byte);
+    return unexpected(error::resp3_invalid_type_byte);
   };
 
   while (true) {
     if (stack_.empty()) {
       failed_ = true;
-      return unexpected(rediscoro::error::resp3_invalid_state);
+      return unexpected(error::resp3_invalid_state);
     }
     auto& f = stack_.back();
     switch (f.kind) {
       case frame_kind::value: {
         auto r = parse_value();
         if (!r) {
-          if (r.error() == rediscoro::error::resp3_needs_more) {
-            return unexpected(rediscoro::error::resp3_needs_more);
+          if (r.error() == error::resp3_needs_more) {
+            return unexpected(error::resp3_needs_more);
           }
           failed_ = true;
           return unexpected(r.error());
@@ -449,7 +449,7 @@ auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
             REDISCORO_ASSERT(parent.container_type == type3::map);
             if (!parent.has_pending_key) {
               failed_ = true;
-              return unexpected(rediscoro::error::resp3_invalid_map_pairs);
+              return unexpected(error::resp3_invalid_map_pairs);
             }
             auto& node = tree_.nodes.at(parent.node_index);
             if (node.child_count == 0) {
