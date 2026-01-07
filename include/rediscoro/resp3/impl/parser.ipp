@@ -12,11 +12,11 @@ namespace rediscoro::resp3 {
 
 namespace detail {
 
-[[nodiscard]] inline auto find_crlf(std::string_view sv) -> std::size_t {
+[[nodiscard]] inline std::size_t find_crlf(std::string_view sv) {
   return sv.find("\r\n");
 }
 
-[[nodiscard]] inline auto parse_i64(std::string_view sv, std::int64_t& out) -> bool {
+[[nodiscard]] inline bool parse_i64(std::string_view sv, std::int64_t& out) {
   if (sv.empty()) {
     return false;
   }
@@ -29,7 +29,7 @@ namespace detail {
   return res.ptr == last;
 }
 
-[[nodiscard]] inline auto parse_double(std::string_view sv, double& out) -> bool {
+[[nodiscard]] inline bool parse_double(std::string_view sv, double& out) {
   if (sv == "inf") {
     out = std::numeric_limits<double>::infinity();
     return true;
@@ -81,7 +81,7 @@ inline auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     stack_.push_back(frame{.kind = frame_kind::value});
   }
 
-  auto attach_pending_attrs = [&](std::uint32_t node_idx) -> void {
+  auto attach_pending_attrs = [&](std::uint32_t node_idx) {
     if (pending_attr_count_ == 0) {
       return;
     }
@@ -92,7 +92,7 @@ inline auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
     pending_attr_count_ = 0;
   };
 
-  auto push_attr_link = [&](std::uint32_t kv_idx) -> void {
+  auto push_attr_link = [&](std::uint32_t kv_idx) {
     if (pending_attr_count_ == 0) {
       pending_attr_first_ = static_cast<std::uint32_t>(tree_.links.size());
     }

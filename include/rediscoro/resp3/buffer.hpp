@@ -40,7 +40,7 @@ public:
   }
 
   /// Get current available readable data size
-  [[nodiscard]] auto size() const -> std::size_t {
+  [[nodiscard]] std::size_t size() const {
     REDISCORO_ASSERT(write_pos_ >= read_pos_);
     return write_pos_ - read_pos_;
   }

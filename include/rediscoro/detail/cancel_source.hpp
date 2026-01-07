@@ -27,7 +27,7 @@ public:
   }
 
   /// Check if cancellation was requested.
-  [[nodiscard]] auto is_cancelled() const noexcept -> bool {
+  [[nodiscard]] bool is_cancelled() const noexcept {
     return cancelled_.load(std::memory_order_acquire);
   }
 

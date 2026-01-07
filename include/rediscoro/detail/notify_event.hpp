@@ -121,7 +121,7 @@ class notify_event {
   }
 
   /// Check if there are pending notifications (for optimization).
-  [[nodiscard]] auto is_ready() const noexcept -> bool {
+  [[nodiscard]] bool is_ready() const noexcept {
     return count_.load(std::memory_order_acquire) > 0;
   }
 
@@ -129,9 +129,9 @@ class notify_event {
   struct awaiter {
     notify_event* self;
 
-    auto await_ready() const noexcept -> bool { return false; }
+    bool await_ready() const noexcept { return false; }
 
-    auto await_suspend(std::coroutine_handle<> h) -> bool {
+    bool await_suspend(std::coroutine_handle<> h) {
       std::lock_guard lk{self->mutex_};
 
       // If there is already a pending notification, consume it and do not suspend.
@@ -147,7 +147,7 @@ class notify_event {
       return true;  // suspend
     }
 
-    auto await_resume() const noexcept -> void {
+    void await_resume() const noexcept {
       // Nothing to return
     }
   };

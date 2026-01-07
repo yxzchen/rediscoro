@@ -15,11 +15,11 @@ inline auto pipeline::push(request req, response_sink* sink, time_point deadline
   pending_write_.push_back(pending_item{std::move(req), sink, 0, deadline});
 }
 
-inline auto pipeline::has_pending_write() const noexcept -> bool {
+inline bool pipeline::has_pending_write() const noexcept {
   return !pending_write_.empty();
 }
 
-inline auto pipeline::has_pending_read() const noexcept -> bool {
+inline bool pipeline::has_pending_read() const noexcept {
   return !awaiting_read_.empty();
 }
 
@@ -97,7 +97,7 @@ inline auto pipeline::next_deadline() const noexcept -> time_point {
   return std::min(a, b);
 }
 
-inline auto pipeline::has_expired() const noexcept -> bool {
+inline bool pipeline::has_expired() const noexcept {
   auto now = clock::now();
   const auto d = next_deadline();
   return d != time_point::max() && d <= now;

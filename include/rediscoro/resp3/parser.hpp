@@ -73,7 +73,7 @@ public:
   [[nodiscard]] auto tree() noexcept -> raw_tree& { return tree_; }
   [[nodiscard]] auto tree() const noexcept -> const raw_tree& { return tree_; }
 
-  [[nodiscard]] auto failed() const noexcept -> bool { return failed_; }
+  [[nodiscard]] bool failed() const noexcept { return failed_; }
 
   auto reset() -> void {
     buf_.reset();

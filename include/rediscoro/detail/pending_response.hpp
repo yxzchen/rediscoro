@@ -43,11 +43,11 @@ class pending_response final : public response_sink {
 public:
   pending_response() = default;
 
-  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override {
+  [[nodiscard]] std::size_t expected_replies() const noexcept override {
     return sizeof...(Ts);
   }
 
-  [[nodiscard]] auto is_complete() const noexcept -> bool override {
+  [[nodiscard]] bool is_complete() const noexcept override {
     return result_.has_value();
   }
 
@@ -58,7 +58,7 @@ public:
   }
 
 protected:
-  auto do_deliver(resp3::message msg) -> void override {
+  void do_deliver(resp3::message msg) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;
@@ -71,7 +71,7 @@ protected:
     }
   }
 
-  auto do_deliver_error(rediscoro::error err) -> void override {
+  void do_deliver_error(rediscoro::error err) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;
@@ -97,11 +97,11 @@ public:
   explicit pending_dynamic_response(std::size_t expected_count)
     : builder_(expected_count) {}
 
-  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override {
+  [[nodiscard]] std::size_t expected_replies() const noexcept override {
     return builder_.expected_count();
   }
 
-  [[nodiscard]] auto is_complete() const noexcept -> bool override {
+  [[nodiscard]] bool is_complete() const noexcept override {
     return result_.has_value();
   }
 
@@ -112,7 +112,7 @@ public:
   }
 
 protected:
-  auto do_deliver(resp3::message msg) -> void override {
+  void do_deliver(resp3::message msg) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;
@@ -125,7 +125,7 @@ protected:
     }
   }
 
-  auto do_deliver_error(rediscoro::error err) -> void override {
+  void do_deliver_error(rediscoro::error err) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;

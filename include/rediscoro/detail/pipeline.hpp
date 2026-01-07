@@ -58,10 +58,10 @@ public:
   auto push(request req, response_sink* sink, time_point deadline) -> void;
 
   /// Check if there are pending writes.
-  [[nodiscard]] auto has_pending_write() const noexcept -> bool;
+  [[nodiscard]] bool has_pending_write() const noexcept;
 
   /// Check if there are pending reads (responses to receive).
-  [[nodiscard]] auto has_pending_read() const noexcept -> bool;
+  [[nodiscard]] bool has_pending_read() const noexcept;
 
   /// Get the next buffer to write.
   /// Precondition: has_pending_write() == true
@@ -87,10 +87,10 @@ public:
   [[nodiscard]] auto next_deadline() const noexcept -> time_point;
 
   /// True if the earliest pending request has reached its deadline.
-  [[nodiscard]] auto has_expired() const noexcept -> bool;
+  [[nodiscard]] bool has_expired() const noexcept;
 
   /// Get the number of pending requests (for diagnostics).
-  [[nodiscard]] auto pending_count() const noexcept -> std::size_t {
+  [[nodiscard]] std::size_t pending_count() const noexcept {
     return pending_write_.size() + awaiting_read_.size();
   }
 

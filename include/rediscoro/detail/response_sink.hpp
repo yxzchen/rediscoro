@@ -55,7 +55,7 @@ public:
   ///
   /// For a simple single command, this is 1.
   /// For multi-reply protocols, pipeline MUST provide an appropriate sink implementation.
-  [[nodiscard]] virtual auto expected_replies() const noexcept -> std::size_t {
+  [[nodiscard]] virtual std::size_t expected_replies() const noexcept {
     return 1;
   }
 
@@ -118,7 +118,7 @@ public:
   }
 
   /// Check if delivery is complete (for diagnostics).
-  [[nodiscard]] virtual auto is_complete() const noexcept -> bool = 0;
+  [[nodiscard]] virtual bool is_complete() const noexcept = 0;
 
 protected:
   /// Implementation hooks (called only via deliver()/deliver_error()).

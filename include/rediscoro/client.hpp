@@ -84,7 +84,7 @@ public:
   }
 
   /// Check if client is connected.
-  [[nodiscard]] auto is_connected() const noexcept -> bool {
+  [[nodiscard]] bool is_connected() const noexcept {
     return conn_->state() == detail::connection_state::OPEN;
   }
 

@@ -38,10 +38,10 @@ public:
     push(cmd, std::forward<Args>(args)...);
   }
 
-  [[nodiscard]] auto reply_count() const noexcept -> std::size_t { return command_count_; }
-  [[nodiscard]] auto command_count() const noexcept -> std::size_t { return command_count_; }
+  [[nodiscard]] std::size_t reply_count() const noexcept { return command_count_; }
+  [[nodiscard]] std::size_t command_count() const noexcept { return command_count_; }
 
-  [[nodiscard]] auto empty() const noexcept -> bool { return command_count_ == 0; }
+  [[nodiscard]] bool empty() const noexcept { return command_count_ == 0; }
 
   /// The full RESP3 wire bytes for all queued commands (pipeline).
   [[nodiscard]] auto wire() const noexcept -> const std::string& { return wire_; }

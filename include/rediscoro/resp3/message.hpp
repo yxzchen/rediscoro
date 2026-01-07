@@ -99,7 +99,7 @@ struct message {
 
   /// Check if this message is of a specific type
   template <typename T>
-  [[nodiscard]] auto is() const -> bool {
+  [[nodiscard]] bool is() const {
     return std::holds_alternative<T>(value);
   }
 
@@ -128,7 +128,7 @@ struct message {
   }
 
   /// Check if this message has attributes
-  [[nodiscard]] auto has_attributes() const -> bool {
+  [[nodiscard]] bool has_attributes() const {
     return attrs.has_value();
   }
 
@@ -151,33 +151,33 @@ struct message {
   }
 
   /// Check if this is a null message
-  [[nodiscard]] auto is_null() const -> bool {
+  [[nodiscard]] bool is_null() const {
     return is<null>();
   }
 
   /// Check if this is an aggregate type (array, map, set, push)
-  [[nodiscard]] auto is_aggregate() const -> bool {
+  [[nodiscard]] bool is_aggregate() const {
     return is<array>() || is<map>() || is<set>() || is<push>();
   }
 
   /// Check if this is a simple type
-  [[nodiscard]] auto is_simple() const -> bool {
+  [[nodiscard]] bool is_simple() const {
     return is<simple_string>() || is<simple_error>() || is<integer>() ||
            is<double_type>() || is<boolean>() || is<big_number>() || is<null>();
   }
 
   /// Check if this is a bulk type
-  [[nodiscard]] auto is_bulk() const -> bool {
+  [[nodiscard]] bool is_bulk() const {
     return is<bulk_string>() || is<bulk_error>() || is<verbatim_string>();
   }
 
   /// Check if this is an error type (simple_error or bulk_error)
-  [[nodiscard]] auto is_error() const -> bool {
+  [[nodiscard]] bool is_error() const {
     return is<simple_error>() || is<bulk_error>();
   }
 
   /// Check if this is a string type (simple_string, bulk_string, or verbatim_string)
-  [[nodiscard]] auto is_string() const -> bool {
+  [[nodiscard]] bool is_string() const {
     return is<simple_string>() || is<bulk_string>() || is<verbatim_string>();
   }
 };

@@ -466,7 +466,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   auto handshake_ec = co_await iocoro::with_timeout(
     executor_.get_io_executor(),
     [&](iocoro::cancellation_token tok) -> iocoro::awaitable<std::error_code> {
-      auto map_io_error = [&](std::error_code ec) -> std::error_code {
+      auto map_io_error = [&](std::error_code ec) {
         // IMPORTANT:
         // - iocoro::with_timeout cancels in-flight operations via the cancellation_token.
         // - Many async_* operations surface token cancellation as operation_aborted (not timed_out).
