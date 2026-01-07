@@ -31,7 +31,7 @@ inline connection::connection(iocoro::io_executor ex, config cfg)
 inline auto connection::run_actor() -> void {
   REDISCORO_ASSERT(!actor_awaitable_.has_value() && "run_actor() called while actor is running");
 
-  auto ex = executor_.strand().any_executor();
+  auto ex = executor_.strand().executor();
   actor_awaitable_.emplace(
     iocoro::co_spawn(ex, iocoro::bind_executor(ex, actor_loop()), iocoro::use_awaitable)
   );
@@ -40,7 +40,7 @@ inline auto connection::run_actor() -> void {
 inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
   // data races with the background loops.
-  co_await iocoro::this_coro::switch_to(executor_.strand().any_executor());
+  co_await iocoro::this_coro::switch_to(executor_.strand().executor());
 
   // Single-await rule for actor_awaitable_ (CRITICAL):
   // - iocoro::co_spawn(use_awaitable) supports only one awaiter.
@@ -96,7 +96,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
 }
 
 inline auto connection::close() -> iocoro::awaitable<void> {
-  co_await iocoro::this_coro::switch_to(executor_.strand().any_executor());
+  co_await iocoro::this_coro::switch_to(executor_.strand().executor());
 
   if (state_ == connection_state::CLOSED) {
     co_return;
@@ -172,7 +172,7 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Hard constraint (IMPORTANT):
   // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
 
-  auto ex = executor_.strand().any_executor();
+  auto ex = executor_.strand().executor();
   auto writer = iocoro::co_spawn(ex, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
   auto reader = iocoro::co_spawn(ex, iocoro::bind_executor(ex, read_loop()), iocoro::use_awaitable);
   auto controller = iocoro::co_spawn(ex, iocoro::bind_executor(ex, control_loop()), iocoro::use_awaitable);
@@ -723,7 +723,7 @@ auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>
   //
   // Performance: use dispatch() so if we're already on the strand, we run inline and avoid an
   // extra scheduling hop; otherwise it behaves like post().
-  executor_.strand().any_executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
+  executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
     self->enqueue_impl(std::move(req), slot.get());
   });
 
@@ -736,7 +736,7 @@ auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic
 
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
-  executor_.strand().any_executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
+  executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
     self->enqueue_impl(std::move(req), slot.get());
   });
 

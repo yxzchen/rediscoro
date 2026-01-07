@@ -45,11 +45,11 @@ namespace rediscoro::detail {
 ///
 /// Correct patterns:
 ///   // OK: spawn coroutines onto the same strand
-///   co_spawn(executor_.strand().any_executor(), read_loop(), detached);
-///   co_spawn(executor_.strand().any_executor(), write_loop(), detached);
+///   co_spawn(executor_.strand().executor(), read_loop(), detached);
+///   co_spawn(executor_.strand().executor(), write_loop(), detached);
 ///
 ///   // OK: direct await inside any strand-bound coroutine
-///   co_await socket_.async_read_some(buf, iocoro::bind_executor(executor_.strand().any_executor(), use_awaitable));
+///   co_await socket_.async_read_some(buf, iocoro::bind_executor(executor_.strand().executor(), use_awaitable));
 class connection_executor {
 public:
   explicit connection_executor(iocoro::io_executor ex)
@@ -60,12 +60,12 @@ public:
   ///
   /// Design goal: reduce accidental misuse inside connection internals.
   /// - This is NOT implicitly convertible to iocoro::any_executor.
-  /// - If you really need the raw executor, you must call .any_executor() explicitly.
+  /// - If you really need the raw executor, you must call .executor() explicitly.
   class strand_facade {
   public:
     explicit strand_facade(iocoro::any_executor ex) : ex_(std::move(ex)) {}
 
-    [[nodiscard]] auto any_executor() const noexcept -> iocoro::any_executor {
+    [[nodiscard]] auto executor() const noexcept -> iocoro::any_executor {
       return ex_;
     }
 
