@@ -22,10 +22,6 @@ namespace rediscoro {
 ///    - Never gives up automatically
 ///    - Keeps retrying with max_delay indefinitely
 ///    - Only stops on user cancel (stop() or destructor)
-///
-/// State during reconnection:
-/// - Immediate phase: FAILED (瞬态) → RECONNECTING (立即)
-/// - Backoff phase: FAILED (sleep期间) → RECONNECTING (连接尝试)
 struct reconnection_policy {
   /// Enable automatic reconnection.
   /// If false, connection enters CLOSED on error (no retry).
