@@ -51,11 +51,38 @@ public:
     return result_.has_value();
   }
 
-  auto wait() -> iocoro::awaitable<response<Ts...>>;
+  auto wait() -> iocoro::awaitable<response<Ts...>> {
+    co_await event_.wait();
+    REDISCORO_ASSERT(result_.has_value());
+    co_return std::move(*result_);
+  }
 
 protected:
-  auto do_deliver(resp3::message msg) -> void override;
-  auto do_deliver_error(rediscoro::error err) -> void override;
+  auto do_deliver(resp3::message msg) -> void override {
+    REDISCORO_ASSERT(!result_.has_value());
+    if (result_.has_value()) {
+      return;
+    }
+
+    builder_.accept(std::move(msg));
+    if (builder_.done()) {
+      result_ = builder_.take_results();
+      event_.notify();
+    }
+  }
+
+  auto do_deliver_error(rediscoro::error err) -> void override {
+    REDISCORO_ASSERT(!result_.has_value());
+    if (result_.has_value()) {
+      return;
+    }
+
+    builder_.accept(std::move(err));
+    if (builder_.done()) {
+      result_ = builder_.take_results();
+      event_.notify();
+    }
+  }
 
 private:
   notify_event event_{};
@@ -78,11 +105,38 @@ public:
     return result_.has_value();
   }
 
-  auto wait() -> iocoro::awaitable<dynamic_response<T>>;
+  auto wait() -> iocoro::awaitable<dynamic_response<T>> {
+    co_await event_.wait();
+    REDISCORO_ASSERT(result_.has_value());
+    co_return std::move(*result_);
+  }
 
 protected:
-  auto do_deliver(resp3::message msg) -> void override;
-  auto do_deliver_error(rediscoro::error err) -> void override;
+  auto do_deliver(resp3::message msg) -> void override {
+    REDISCORO_ASSERT(!result_.has_value());
+    if (result_.has_value()) {
+      return;
+    }
+
+    builder_.accept(std::move(msg));
+    if (builder_.done()) {
+      result_ = builder_.take_results();
+      event_.notify();
+    }
+  }
+
+  auto do_deliver_error(rediscoro::error err) -> void override {
+    REDISCORO_ASSERT(!result_.has_value());
+    if (result_.has_value()) {
+      return;
+    }
+
+    builder_.accept(std::move(err));
+    if (builder_.done()) {
+      result_ = builder_.take_results();
+      event_.notify();
+    }
+  }
 
 private:
   notify_event event_{};
@@ -91,5 +145,3 @@ private:
 };
 
 }  // namespace rediscoro::detail
-
-#include <rediscoro/detail/impl/pending_response.ipp>
