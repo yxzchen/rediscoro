@@ -319,11 +319,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
       // Failed attempt: transition back to FAILED and schedule next delay.
       // Store the reconnection error for diagnostics (user cannot obtain it directly).
       state_ = connection_state::FAILED;
-      if (reconnect_ec.category() == rediscoro::detail::category()) {
-        last_error_ = static_cast<error>(reconnect_ec.value());
-      } else {
-        last_error_ = error::connect_failed;
-      }
+      last_error_ = reconnect_ec;
       reconnect_count_ += 1;
       continue;
     }

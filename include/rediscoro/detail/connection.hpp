@@ -235,8 +235,8 @@ public:
   ///
   /// Returns:
   /// - std::nullopt: no error or during initial connection phase
-  /// - error: specific error code (connection or protocol error)
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<error> {
+  /// - std::error_code: specific error code (connection/protocol/system)
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<std::error_code> {
     return last_error_;
   }
 
@@ -392,7 +392,7 @@ private:
   // State machine
   connection_state state_{connection_state::INIT};
 
-  std::optional<error> last_error_{};
+  std::optional<std::error_code> last_error_{};
 
   // Request/response pipeline
   pipeline pipeline_;
