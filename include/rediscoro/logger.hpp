@@ -115,11 +115,25 @@ class logger {
         ctx.timestamp.time_since_epoch()) % 1000;
 
       // Extract filename from path
-      auto file = ctx.file;
-      auto pos = file.find_last_of("/\\");
-      if (pos != std::string_view::npos) {
-        file = file.substr(pos + 1);
-      }
+      auto file = [&]() -> std::string_view {
+        auto path = ctx.file;
+
+        // Prefer showing the path relative to the `rediscoro/` directory (excluding `rediscoro` itself).
+        constexpr std::string_view k_rediscoro_posix = "rediscoro/";
+        constexpr std::string_view k_rediscoro_win = "rediscoro\\";
+        if (auto pos = path.find(k_rediscoro_posix); pos != std::string_view::npos) {
+          return path.substr(pos + k_rediscoro_posix.size());
+        }
+        if (auto pos = path.find(k_rediscoro_win); pos != std::string_view::npos) {
+          return path.substr(pos + k_rediscoro_win.size());
+        }
+
+        // Fallback: basename only.
+        if (auto pos = path.find_last_of("/\\"); pos != std::string_view::npos) {
+          return path.substr(pos + 1);
+        }
+        return path;
+      }();
 
       auto formatted = format_impl::format(
         "[{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:03d}] [rediscoro] [{}] [{}:{}] {}",
