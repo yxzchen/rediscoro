@@ -10,12 +10,10 @@ namespace rediscoro {
 
 /// A compact error object with:
 /// - a stable error_code (domain + value)
-/// - an optional detail string (human-oriented; may include context and underlying cause)
-/// - an optional underlying std::error_code (program-oriented; no nesting)
+/// - an optional detail string (human-oriented; may include context)
 struct error_info {
   std::error_code code{};
   std::string detail{};
-  std::error_code cause_ec{};
 
   error_info() = default;
 
@@ -42,11 +40,6 @@ struct error_info {
     return *this;
   }
 
-  auto set_cause(std::error_code ec) -> error_info& {
-    cause_ec = ec;
-    return *this;
-  }
-
   [[nodiscard]] auto to_string() const -> std::string {
     std::string out;
 
@@ -64,19 +57,6 @@ struct error_info {
       out += detail;
       out += ")";
     }
-    if (!detail.empty()) {
-      return out;
-    }
-
-    // If there's no detail, we can still include a concise cause if present.
-    if (cause_ec) {
-      out += " (cause=";
-      out += cause_ec.category().name();
-      out += ": ";
-      out += cause_ec.message();
-      out += ")";
-    }
-
     return out;
   }
 };

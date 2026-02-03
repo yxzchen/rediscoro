@@ -521,7 +521,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
             }
             co_return iocoro::unexpected(parsed.error());
           }
-          if (resp3::parser::is_need_more(*parsed)) {
+          if (parsed->need_more()) {
             break;
           }
 
@@ -529,7 +529,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
             co_return iocoro::unexpected(client_errc::unsolicited_message);
           }
 
-          auto const root = std::get<std::uint32_t>(*parsed);
+          auto const root = parsed->value;
           auto msg = resp3::build_message(parser_.tree(), root);
           pipeline_.on_message(std::move(msg));
           parser_.reclaim();
@@ -549,37 +549,26 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     cfg_.connect_timeout);
 
   if (!handshake_res) {
+    auto fail_handshake = [&](error_info e) -> expected<void, error_info> {
+      pipeline_.clear_all(e);
+      return unexpected(std::move(e));
+    };
+
     auto const ec = handshake_res.error();
     if (ec == iocoro::error::timed_out) {
-      auto e = error_info{client_errc::handshake_timeout};
-      pipeline_.clear_all(e);
-      co_return unexpected(std::move(e));
+      co_return fail_handshake(error_info{client_errc::handshake_timeout});
     }
     if (ec == iocoro::error::operation_aborted) {
-      auto e = error_info{client_errc::operation_aborted};
-      pipeline_.clear_all(e);
-      co_return unexpected(std::move(e));
+      co_return fail_handshake(error_info{client_errc::operation_aborted});
+    }
+    if (is_protocol_error(ec)) {
+      co_return fail_handshake(error_info{static_cast<protocol_errc>(ec.value())});
+    }
+    if (is_client_error(ec)) {
+      co_return fail_handshake(error_info{static_cast<client_errc>(ec.value())});
     }
 
-    // Protocol parse error during handshake: surface it directly.
-    if (ec.category() == std::error_code{protocol_errc::invalid_type_byte}.category()) {
-      auto const pe = static_cast<protocol_errc>(ec.value());
-      auto out = error_info{pe};
-      pipeline_.clear_all(out);
-      co_return unexpected(std::move(out));
-    }
-
-    // Client-level error during handshake.
-    if (ec.category() == std::error_code{client_errc::connection_lost}.category()) {
-      auto const ce = static_cast<client_errc>(ec.value());
-      auto out = error_info{ce};
-      pipeline_.clear_all(out);
-      co_return unexpected(std::move(out));
-    }
-
-    auto e = error_info{client_errc::handshake_failed};
-    pipeline_.clear_all(e);
-    co_return unexpected(std::move(e));
+    co_return fail_handshake(error_info{client_errc::handshake_failed});
   }
 
   // Validate all handshake replies: any error => handshake_failed.
@@ -655,7 +644,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       handle_error(std::move(err));
       co_return;
     }
-    if (resp3::parser::is_need_more(*parsed)) {
+    if (parsed->need_more()) {
       break;
     }
 
@@ -666,7 +655,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       co_return;
     }
 
-    auto const root = std::get<std::uint32_t>(*parsed);
+    auto const root = parsed->value;
     auto msg = resp3::build_message(parser_.tree(), root);
     pipeline_.on_message(std::move(msg));
 

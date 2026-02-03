@@ -59,7 +59,7 @@ inline auto parser::parse_length_after_type(std::string_view data) const
   -> expected<parse_step<length_header>, rediscoro::protocol_errc> {
   auto pos = detail::find_crlf(data.substr(1));
   if (pos == std::string_view::npos) {
-    return parse_step<length_header>{need_more_t{}};
+    return parse_step<length_header>::make_need_more();
   }
 
   auto len_str = data.substr(1, pos);
@@ -68,10 +68,10 @@ inline auto parser::parse_length_after_type(std::string_view data) const
     return unexpected(protocol_errc::invalid_length);
   }
 
-  return parse_step<length_header>{length_header{
+  return parse_step<length_header>::make_ok(length_header{
     .length = len,
     .header_bytes = 1 + pos + 2,
-  }};
+  });
 }
 
 inline auto parser::start_container(frame& current, kind t, std::int64_t len)
@@ -85,7 +85,7 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     // Preserve container type for null container (e.g. *-1, %-1)
     tree_.nodes.push_back(raw_node{.type = t, .i64 = -1});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{idx}};
+    return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{idx});
   }
 
   auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -99,7 +99,7 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
   pending_attrs_.attach(tree_, idx);
 
   if (len == 0) {
-    return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{idx}};
+    return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{idx});
   }
 
   // Replace current value frame with a container-driving frame.
@@ -125,7 +125,7 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     };
   }
 
-  return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+  return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
 }
 
 inline auto parser::start_attribute(std::int64_t len)
@@ -134,7 +134,7 @@ inline auto parser::start_attribute(std::int64_t len)
     return unexpected(protocol_errc::invalid_length);
   }
   if (len == 0) {
-    return parse_step<std::monostate>{std::monostate{}};
+    return parse_step<std::monostate>::make_ok(std::monostate{});
   }
 
   stack_.push_back(frame{
@@ -146,7 +146,7 @@ inline auto parser::start_attribute(std::int64_t len)
     .pending_key = 0,
     .has_pending_key = false,
   });
-  return parse_step<std::monostate>{std::monostate{}};
+  return parse_step<std::monostate>::make_ok(std::monostate{});
 }
 
 inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscoro::protocol_errc> {
@@ -155,7 +155,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
 
   auto data = buf_.data();
   if (data.empty()) {
-    return parse_step<value_result>{need_more_t{}};
+    return parse_step<value_result>::make_need_more();
   }
 
   auto maybe_t = prefix_to_kind(data[0]);
@@ -169,19 +169,19 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!hdr) {
       return unexpected(hdr.error());
     }
-    if (parser::is_need_more(*hdr)) {
-      return parse_step<value_result>{need_more_t{}};
+    if (hdr->need_more()) {
+      return parse_step<value_result>::make_need_more();
     }
-    auto const& lh = std::get<length_header>(*hdr);
+    auto const& lh = hdr->value;
     buf_.consume(lh.header_bytes);
     auto started = start_attribute(lh.length);
     if (!started) {
       return unexpected(started.error());
     }
-    if (parser::is_need_more(*started)) {
-      return parse_step<value_result>{need_more_t{}};
+    if (started->need_more()) {
+      return parse_step<value_result>::make_need_more();
     }
-    return parse_step<value_result>{value_result{.step = value_step::continue_parsing}};
+    return parse_step<value_result>::make_ok(value_result{.step = value_step::continue_parsing});
   }
 
   // Containers: array/map/set/push
@@ -191,10 +191,10 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!hdr) {
       return unexpected(hdr.error());
     }
-    if (parser::is_need_more(*hdr)) {
-      return parse_step<value_result>{need_more_t{}};
+    if (hdr->need_more()) {
+      return parse_step<value_result>::make_need_more();
     }
-    auto const& lh = std::get<length_header>(*hdr);
+    auto const& lh = hdr->value;
     buf_.consume(lh.header_bytes);
 
     auto& current = stack_.back();
@@ -202,21 +202,21 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!started) {
       return unexpected(started.error());
     }
-    if (parser::is_need_more(*started)) {
-      return parse_step<value_result>{need_more_t{}};
+    if (started->need_more()) {
+      return parse_step<value_result>::make_need_more();
     }
-    auto const& opt = std::get<std::optional<std::uint32_t>>(*started);
+    auto const& opt = started->value;
     if (opt.has_value()) {
-      return parse_step<value_result>{
-        value_result{.step = value_step::produced_node, .node_index = *opt}};
+      return parse_step<value_result>::make_ok(
+        value_result{.step = value_step::produced_node, .node_index = *opt});
     }
-    return parse_step<value_result>{value_result{.step = value_step::continue_parsing}};
+    return parse_step<value_result>::make_ok(value_result{.step = value_step::continue_parsing});
   }
 
   // Null: "_\r\n"
   if (*maybe_t == kind::null) {
     if (data.size() < 3) {
-      return parse_step<value_result>{need_more_t{}};
+      return parse_step<value_result>::make_need_more();
     }
     if (data[1] != '\r' || data[2] != '\n') {
       return unexpected(protocol_errc::invalid_null);
@@ -225,13 +225,14 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::null});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
+    return parse_step<value_result>::make_ok(
+      value_result{.step = value_step::produced_node, .node_index = idx});
   }
 
   // Boolean: "#t\r\n" / "#f\r\n"
   if (*maybe_t == kind::boolean) {
     if (data.size() < 4) {
-      return parse_step<value_result>{need_more_t{}};
+      return parse_step<value_result>::make_need_more();
     }
     if (data[2] != '\r' || data[3] != '\n') {
       return unexpected(protocol_errc::invalid_boolean);
@@ -250,7 +251,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::boolean, .boolean = b});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
+    return parse_step<value_result>::make_ok(
+      value_result{.step = value_step::produced_node, .node_index = idx});
   }
 
   // Bulk-like: $ ! =
@@ -258,7 +260,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
       *maybe_t == kind::verbatim_string) {
     auto pos = detail::find_crlf(data.substr(1));
     if (pos == std::string_view::npos) {
-      return parse_step<value_result>{need_more_t{}};
+      return parse_step<value_result>::make_need_more();
     }
     std::int64_t len{};
     if (!detail::parse_i64(data.substr(1, pos), len)) {
@@ -274,13 +276,13 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_t, .i64 = -1});
       pending_attrs_.attach(tree_, idx);
-      return parse_step<value_result>{
-        value_result{.step = value_step::produced_node, .node_index = idx}};
+      return parse_step<value_result>::make_ok(
+        value_result{.step = value_step::produced_node, .node_index = idx});
     }
 
     const auto need = static_cast<std::size_t>(header_bytes) + static_cast<std::size_t>(len) + 2;
     if (data.size() < need) {
-      return parse_step<value_result>{need_more_t{}};
+      return parse_step<value_result>::make_need_more();
     }
 
     auto payload = data.substr(header_bytes, static_cast<std::size_t>(len));
@@ -292,13 +294,14 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = *maybe_t, .text = payload, .i64 = len});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
+    return parse_step<value_result>::make_ok(
+      value_result{.step = value_step::produced_node, .node_index = idx});
   }
 
   // Line-like: + - : , (
   auto pos = detail::find_crlf(data.substr(1));
   if (pos == std::string_view::npos) {
-    return parse_step<value_result>{need_more_t{}};
+    return parse_step<value_result>::make_need_more();
   }
   auto line = data.substr(1, pos);
   auto consume_bytes = 1 + pos + 2;
@@ -309,7 +312,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = *maybe_t, .text = line});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
+    return parse_step<value_result>::make_ok(
+      value_result{.step = value_step::produced_node, .node_index = idx});
   }
 
   if (*maybe_t == kind::integer) {
@@ -321,7 +325,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::integer, .text = line, .i64 = v});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
+    return parse_step<value_result>::make_ok(
+      value_result{.step = value_step::produced_node, .node_index = idx});
   }
 
   if (*maybe_t == kind::double_number) {
@@ -333,7 +338,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::double_number, .text = line, .f64 = v});
     pending_attrs_.attach(tree_, idx);
-    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
+    return parse_step<value_result>::make_ok(
+      value_result{.step = value_step::produced_node, .node_index = idx});
   }
 
   return unexpected(protocol_errc::invalid_type_byte);
@@ -343,7 +349,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
   -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc> {
   while (true) {
     if (stack_.empty()) {
-      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{child_idx}};
+      return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{child_idx});
     }
 
     auto& parent = stack_.back();
@@ -366,7 +372,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       }
 
       stack_.push_back(frame{.state = frame_kind::value});
-      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+      return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
     }
 
     if (parent.state == frame_kind::map_key) {
@@ -375,7 +381,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       parent.has_pending_key = true;
       parent.state = frame_kind::map_value;
       stack_.push_back(frame{.state = frame_kind::value});
-      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+      return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
     }
 
     if (parent.state == frame_kind::map_value) {
@@ -402,7 +408,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       }
 
       stack_.push_back(frame{.state = frame_kind::value});
-      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+      return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
     }
 
     if (parent.state == frame_kind::attribute) {
@@ -412,7 +418,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
         parent.pending_key = child_idx;
         parent.has_pending_key = true;
         stack_.push_back(frame{.state = frame_kind::value});
-        return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+        return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
       }
 
       pending_attrs_.push(tree_, parent.pending_key);
@@ -422,11 +428,11 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
 
       if (parent.produced == static_cast<std::uint32_t>(parent.expected)) {
         stack_.pop_back();  // pop attribute frame
-        return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+        return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
       }
 
       stack_.push_back(frame{.state = frame_kind::value});
-      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
+      return parse_step<std::optional<std::uint32_t>>::make_ok(std::optional<std::uint32_t>{});
     }
 
     return unexpected(protocol_errc::invalid_state);
@@ -458,10 +464,10 @@ inline auto parser::parse_one() -> expected<parse_step<std::uint32_t>, rediscoro
           failed_ = true;
           return unexpected(r.error());
         }
-        if (parser::is_need_more(*r)) {
-          return parse_step<std::uint32_t>{need_more_t{}};
+        if (r->need_more()) {
+          return parse_step<std::uint32_t>::make_need_more();
         }
-        auto const& vr = std::get<value_result>(*r);
+        auto const& vr = r->value;
 
         if (vr.step == value_step::continue_parsing) {
           break;
@@ -475,13 +481,13 @@ inline auto parser::parse_one() -> expected<parse_step<std::uint32_t>, rediscoro
           failed_ = true;
           return unexpected(done.error());
         }
-        if (parser::is_need_more(*done)) {
-          return parse_step<std::uint32_t>{need_more_t{}};
+        if (done->need_more()) {
+          return parse_step<std::uint32_t>::make_need_more();
         }
-        auto const& opt = std::get<std::optional<std::uint32_t>>(*done);
+        auto const& opt = done->value;
         if (opt.has_value()) {
           tree_ready_ = true;
-          return parse_step<std::uint32_t>{*opt};
+          return parse_step<std::uint32_t>::make_ok(*opt);
         }
         break;
       }

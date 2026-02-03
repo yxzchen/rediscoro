@@ -115,6 +115,7 @@ auto make_error_code(server_errc e) -> std::error_code;
 auto make_error_code(adapter_errc e) -> std::error_code;
 
 [[nodiscard]] auto is_timeout(std::error_code ec) noexcept -> bool;
+[[nodiscard]] auto is_client_error(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_protocol_error(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_retryable(std::error_code ec) noexcept -> bool;
 

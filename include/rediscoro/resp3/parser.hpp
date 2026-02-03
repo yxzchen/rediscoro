@@ -34,14 +34,28 @@ class parser {
  public:
   parser() = default;
 
-  struct need_more_t {};
-  template <typename T>
-  using parse_step = std::variant<need_more_t, T>;
+  enum class parse_status : std::uint8_t {
+    need_more = 0,
+    ok,
+  };
 
   template <typename T>
-  [[nodiscard]] static auto is_need_more(const parse_step<T>& s) noexcept -> bool {
-    return std::holds_alternative<need_more_t>(s);
-  }
+  struct parse_step {
+    parse_status status{parse_status::need_more};
+    T value{};
+
+    [[nodiscard]] auto need_more() const noexcept -> bool {
+      return status == parse_status::need_more;
+    }
+
+    [[nodiscard]] static auto make_need_more() noexcept -> parse_step {
+      return parse_step{.status = parse_status::need_more, .value = {}};
+    }
+
+    [[nodiscard]] static auto make_ok(T v) -> parse_step {
+      return parse_step{.status = parse_status::ok, .value = std::move(v)};
+    }
+  };
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
   auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
@@ -54,7 +68,7 @@ class parser {
   ///
   /// Returns:
   /// - success + root_index: parsing succeeded, returns root node index
-  /// - success + need_more_t: buffer has insufficient data, need to continue reading (internal signal)
+  /// - success + need_more: buffer has insufficient data, need to continue reading (internal signal)
   /// - protocol_errc: protocol format error
   ///
   /// IMPORTANT: After success, you must consume the result (tree()+root) and then call reclaim()

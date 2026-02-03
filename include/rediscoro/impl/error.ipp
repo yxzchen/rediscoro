@@ -159,6 +159,10 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
   return false;
 }
 
+[[nodiscard]] inline auto is_client_error(std::error_code ec) noexcept -> bool {
+  return ec.category() == detail::client_category();
+}
+
 [[nodiscard]] inline auto is_protocol_error(std::error_code ec) noexcept -> bool {
   return ec.category() == detail::protocol_category();
 }
