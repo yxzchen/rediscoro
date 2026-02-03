@@ -48,12 +48,12 @@ namespace rediscoro::detail {
 /// - **Retry support**:
 ///   `CLOSED` is the end of a *connection actor* lifecycle; a subsequent `connect()` may
 ///   explicitly reset `CLOSED -> INIT` to retry and start a new actor instance.
-enum class connection_state{
+enum class connection_state {
   INIT = 1,
   CONNECTING,
   OPEN,
-  FAILED,       // Error occurred, may sleep before reconnect
-  RECONNECTING, // Actively attempting reconnection
+  FAILED,        // Error occurred, may sleep before reconnect
+  RECONNECTING,  // Actively attempting reconnection
   CLOSING,
   CLOSED
 };

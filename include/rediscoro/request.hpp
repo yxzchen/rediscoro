@@ -20,7 +20,7 @@ namespace rediscoro {
 /// - Input: command name + arguments (string / argv)
 /// - Output: RESP3-encoded command (array of bulk strings)
 class request {
-public:
+ public:
   request() = default;
 
   /// Construct a request containing exactly one command.
@@ -33,7 +33,7 @@ public:
   explicit request(std::span<const std::string_view> argv) { push(argv); }
 
   template <typename... Args>
-    requires (sizeof...(Args) > 0)
+    requires(sizeof...(Args) > 0)
   request(std::string_view cmd, Args&&... args) {
     push(cmd, std::forward<Args>(args)...);
   }
@@ -86,7 +86,7 @@ public:
     command_count_ += 1;
   }
 
-private:
+ private:
   std::string wire_{};
   std::size_t command_count_{0};
 
@@ -113,9 +113,7 @@ private:
     wire_.append("\r\n");
   }
 
-  void append_arg(std::string_view sv) {
-    append_bulk_string(sv);
-  }
+  void append_arg(std::string_view sv) { append_bulk_string(sv); }
 
   void append_arg(const char* s) {
     if (s == nullptr) {
@@ -125,12 +123,11 @@ private:
     }
   }
 
-  void append_arg(const std::string& s) {
-    append_bulk_string(std::string_view{s});
-  }
+  void append_arg(const std::string& s) { append_bulk_string(std::string_view{s}); }
 
   template <typename T>
-    requires (std::is_integral_v<std::remove_cvref_t<T>> && !std::is_same_v<std::remove_cvref_t<T>, bool>)
+    requires(std::is_integral_v<std::remove_cvref_t<T>> &&
+             !std::is_same_v<std::remove_cvref_t<T>, bool>)
   void append_arg(T v) {
     char buf[64]{};
     auto* first = buf;
@@ -142,5 +139,3 @@ private:
 };
 
 }  // namespace rediscoro
-
-

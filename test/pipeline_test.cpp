@@ -12,12 +12,10 @@
 namespace {
 
 class counting_sink final : public rediscoro::detail::response_sink {
-public:
+ public:
   explicit counting_sink(std::size_t n) : expected_(n) {}
 
-  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override {
-    return expected_;
-  }
+  [[nodiscard]] auto expected_replies() const noexcept -> std::size_t override { return expected_; }
 
   [[nodiscard]] auto is_complete() const noexcept -> bool override {
     return (msgs_ + errs_) == expected_;
@@ -26,11 +24,11 @@ public:
   [[nodiscard]] auto msg_count() const noexcept -> std::size_t { return msgs_; }
   [[nodiscard]] auto err_count() const noexcept -> std::size_t { return errs_; }
 
-protected:
+ protected:
   auto do_deliver(rediscoro::resp3::message) -> void override { msgs_ += 1; }
   auto do_deliver_error(rediscoro::error) -> void override { errs_ += 1; }
 
-private:
+ private:
   std::size_t expected_{0};
   std::size_t msgs_{0};
   std::size_t errs_{0};
@@ -104,5 +102,3 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   EXPECT_FALSE(p.has_pending_write());
   EXPECT_FALSE(p.has_pending_read());
 }
-
-

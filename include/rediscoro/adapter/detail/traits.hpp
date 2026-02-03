@@ -27,7 +27,9 @@ inline constexpr bool is_std_optional_v = is_std_optional<remove_cvref_t<T>>::va
 template <typename T>
 struct optional_value_type;
 template <typename U>
-struct optional_value_type<std::optional<U>> { using type = U; };
+struct optional_value_type<std::optional<U>> {
+  using type = U;
+};
 
 template <typename T>
 using optional_value_type_t = typename optional_value_type<remove_cvref_t<T>>::type;
@@ -52,8 +54,7 @@ concept has_value_type = requires { typename remove_cvref_t<T>::value_type; };
 
 template <typename T>
 concept sequence_like =
-  has_value_type<T> &&
-  requires(remove_cvref_t<T>& c, typename remove_cvref_t<T>::value_type v) {
+  has_value_type<T> && requires(remove_cvref_t<T>& c, typename remove_cvref_t<T>::value_type v) {
     c.push_back(std::move(v));
   };
 
@@ -63,11 +64,8 @@ concept map_like =
     typename remove_cvref_t<T>::key_type;
     typename remove_cvref_t<T>::mapped_type;
   } &&
-  requires(remove_cvref_t<T>& m,
-           typename remove_cvref_t<T>::key_type k,
-           typename remove_cvref_t<T>::mapped_type v) {
-    m.emplace(std::move(k), std::move(v));
-  };
+  requires(remove_cvref_t<T>& m, typename remove_cvref_t<T>::key_type k,
+           typename remove_cvref_t<T>::mapped_type v) { m.emplace(std::move(k), std::move(v)); };
 
 template <typename T>
 struct is_std_array : std::false_type {};
@@ -78,4 +76,3 @@ template <typename T>
 inline constexpr bool is_std_array_v = is_std_array<remove_cvref_t<T>>::value;
 
 }  // namespace rediscoro::adapter::detail
-

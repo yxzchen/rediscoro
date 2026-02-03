@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <optional>
 #include <array>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -66,5 +66,3 @@ TEST(resp3_adapter, std_array_size_mismatch) {
 }
 
 }  // namespace rediscoro::resp3
-
-

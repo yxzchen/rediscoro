@@ -38,10 +38,7 @@ TEST(type3s_test, aggregate_types_array_and_map) {
 
   // Map
   map m;
-  m.entries.emplace_back(
-    message{simple_string{"key"}},
-    message{integer{100}}
-  );
+  m.entries.emplace_back(message{simple_string{"key"}}, message{integer{100}});
 
   message map_msg{std::move(m)};
   EXPECT_EQ(map_msg.get_kind(), kind::map);
@@ -51,10 +48,7 @@ TEST(type3s_test, aggregate_types_array_and_map) {
 
 TEST(type3s_test, attributes_attachment_and_access) {
   attribute attrs;
-  attrs.entries.emplace_back(
-    message{simple_string{"ttl"}},
-    message{integer{3600}}
-  );
+  attrs.entries.emplace_back(message{simple_string{"ttl"}}, message{integer{3600}});
 
   message msg{simple_string{"data"}, std::move(attrs)};
 

@@ -1,5 +1,5 @@
-#include <rediscoro/response.hpp>
 #include <rediscoro/detail/response_builder.hpp>
+#include <rediscoro/response.hpp>
 
 #include <gtest/gtest.h>
 
@@ -57,5 +57,3 @@ TEST(response_dynamic, fills_n_results_in_order) {
 }
 
 }  // namespace rediscoro::resp3
-
-

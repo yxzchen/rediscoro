@@ -1,24 +1,24 @@
 #pragma once
 
 #include <rediscoro/config.hpp>
-#include <rediscoro/error.hpp>
-#include <rediscoro/expected.hpp>
-#include <rediscoro/detail/connection_state.hpp>
 #include <rediscoro/detail/connection_executor.hpp>
+#include <rediscoro/detail/connection_state.hpp>
 #include <rediscoro/detail/pending_response.hpp>
 #include <rediscoro/detail/pipeline.hpp>
 #include <rediscoro/detail/stop_scope.hpp>
+#include <rediscoro/error.hpp>
+#include <rediscoro/expected.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/parser.hpp>
 
-#include <iocoro/awaitable.hpp>
 #include <iocoro/any_io_executor.hpp>
+#include <iocoro/awaitable.hpp>
 #include <iocoro/condition_event.hpp>
 #include <iocoro/ip/tcp.hpp>
 
+#include <chrono>
 #include <memory>
 #include <optional>
-#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
@@ -46,7 +46,7 @@ namespace rediscoro::detail {
 /// - Only `transition_to_closed()` writes `state_ = CLOSED` (called at actor shutdown).
 /// - `close()` requests shutdown (`CLOSING` + cancel + resource release) and then joins the actor.
 class connection : public std::enable_shared_from_this<connection> {
-public:
+ public:
   explicit connection(iocoro::any_io_executor ex, config cfg);
   ~connection() noexcept;
 
@@ -100,9 +100,7 @@ public:
   auto enqueue_impl(request req, std::shared_ptr<response_sink> sink) -> void;
 
   /// Get current connection state (for diagnostics).
-  [[nodiscard]] auto state() const noexcept -> connection_state {
-    return state_;
-  }
+  [[nodiscard]] auto state() const noexcept -> connection_state { return state_; }
 
   /// Get the last runtime connection error (for diagnostics only).
   ///
@@ -111,11 +109,9 @@ public:
   /// - Runtime errors after `OPEN` (including request timeout / RESP3 parse error / peer close)
   ///   are recorded and drive `OPEN -> FAILED`.
   /// - Reconnection attempt failures are also recorded (user cannot observe them otherwise).
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<error> {
-    return last_error_;
-  }
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<error> { return last_error_; }
 
-private:
+ private:
   /// Start the background connection actor (internal use only).
   ///
   /// - Spawns `actor_loop()` on the connection strand.
@@ -219,7 +215,7 @@ private:
   /// Transition to CLOSED state and cleanup.
   auto transition_to_closed() -> void;
 
-private:
+ private:
   // Configuration
   config cfg_;
 

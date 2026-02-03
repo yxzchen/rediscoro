@@ -24,7 +24,7 @@ auto adapt_sequence(const resp3::message& msg) -> expected<T, error> {
   using V = typename U::value_type;
 
   static_assert(!std::is_same_v<remove_cvref_t<V>, ignore_t>,
-    "ignore_t is only allowed as the top-level adaptation target");
+                "ignore_t is only allowed as the top-level adaptation target");
 
   const std::vector<resp3::message>* elems = nullptr;
   if (msg.is<resp3::array>()) {
@@ -56,4 +56,3 @@ auto adapt_sequence(const resp3::message& msg) -> expected<T, error> {
 
 }  // namespace detail
 }  // namespace rediscoro::adapter
-

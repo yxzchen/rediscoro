@@ -56,5 +56,3 @@ struct raw_tree {
 };
 
 }  // namespace rediscoro::resp3
-
-

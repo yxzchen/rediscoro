@@ -75,4 +75,3 @@ auto adapt_scalar(const resp3::message& msg) -> expected<T, error> {
 
 }  // namespace detail
 }  // namespace rediscoro::adapter
-

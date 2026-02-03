@@ -37,7 +37,7 @@ namespace rediscoro::detail {
 /// - All methods MUST be called from the connection's strand
 /// - No internal synchronization (relies on strand serialization)
 class pipeline {
-public:
+ public:
   pipeline() = default;
 
   using clock = std::chrono::steady_clock;
@@ -95,11 +95,11 @@ public:
     return pending_write_.size() + awaiting_read_.size();
   }
 
-private:
+ private:
   struct pending_item {
     request req;
     std::shared_ptr<response_sink> sink;  // Abstract interface, no knowledge of coroutines
-    std::size_t written{0};  // bytes written so far
+    std::size_t written{0};               // bytes written so far
     time_point deadline{time_point::max()};
   };
 

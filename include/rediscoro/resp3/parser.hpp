@@ -1,13 +1,13 @@
 #pragma once
 
-#include <rediscoro/resp3/buffer.hpp>
-#include <rediscoro/resp3/raw.hpp>
 #include <rediscoro/error.hpp>
 #include <rediscoro/expected.hpp>
+#include <rediscoro/resp3/buffer.hpp>
+#include <rediscoro/resp3/raw.hpp>
 
-#include <span>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace rediscoro::resp3 {
@@ -29,7 +29,7 @@ namespace rediscoro::resp3 {
 ///   buffer until the returned raw_tree nodes are fully consumed (string_view lifetime)
 /// - after consuming `tree()+root`, call reclaim() before parsing the next message
 class parser {
-public:
+ public:
   parser() = default;
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
@@ -70,7 +70,7 @@ public:
     pending_attrs_.reset();
   }
 
-private:
+ private:
   enum class frame_kind : std::uint8_t {
     value,
     array,      // array/set/push elements
@@ -84,11 +84,11 @@ private:
     kind container_type{kind::null};
 
     // For map/attribute: expected & produced count PAIRS (key/value), not nodes.
-    std::int64_t expected = 0;     // container len (pairs for map/attr)
-    std::uint32_t produced = 0;    // produced children (or pairs)
-    std::uint32_t node_index = 0;  // container node (for array/map/set/push)
-    std::uint32_t pending_key = 0; // for map/attr
-    bool has_pending_key = false;  // for map/attr
+    std::int64_t expected = 0;      // container len (pairs for map/attr)
+    std::uint32_t produced = 0;     // produced children (or pairs)
+    std::uint32_t node_index = 0;   // container node (for array/map/set/push)
+    std::uint32_t pending_key = 0;  // for map/attr
+    bool has_pending_key = false;   // for map/attr
   };
 
   struct length_header {
@@ -127,8 +127,8 @@ private:
   };
 
   enum class value_step : std::uint8_t {
-    produced_node,   // node_index is valid
-    continue_parsing // started container/attribute OR consumed something and should keep parsing
+    produced_node,    // node_index is valid
+    continue_parsing  // started container/attribute OR consumed something and should keep parsing
   };
 
   struct value_result {
@@ -144,16 +144,16 @@ private:
 
   pending_attributes pending_attrs_{};
 
-  [[nodiscard]] auto parse_length_after_type(std::string_view data) const -> expected<length_header, rediscoro::error>;
+  [[nodiscard]] auto parse_length_after_type(std::string_view data) const
+    -> expected<length_header, rediscoro::error>;
   [[nodiscard]] auto parse_value() -> expected<value_result, rediscoro::error>;
   [[nodiscard]] auto start_container(frame& current, kind t, std::int64_t len)
     -> expected<std::optional<std::uint32_t>, rediscoro::error>;
   [[nodiscard]] auto start_attribute(std::int64_t len) -> expected<void, rediscoro::error>;
-  [[nodiscard]] auto attach_to_parent(std::uint32_t child_idx) -> expected<std::optional<std::uint32_t>, rediscoro::error>;
+  [[nodiscard]] auto attach_to_parent(std::uint32_t child_idx)
+    -> expected<std::optional<std::uint32_t>, rediscoro::error>;
 };
 
 }  // namespace rediscoro::resp3
 
 #include <rediscoro/resp3/impl/parser.ipp>
-
-

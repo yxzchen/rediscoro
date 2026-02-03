@@ -8,7 +8,8 @@ inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink) -> 
   push(std::move(req), sink, time_point::max());
 }
 
-inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink, time_point deadline) -> void {
+inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink, time_point deadline)
+  -> void {
   REDISCORO_ASSERT(sink != nullptr);
   REDISCORO_ASSERT(req.reply_count() == sink->expected_replies());
 

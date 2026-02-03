@@ -52,7 +52,7 @@ struct log_context {
   std::chrono::system_clock::time_point timestamp;
 };
 
-using log_function = void(*)(void*, log_context const&);
+using log_function = void (*)(void*, log_context const&);
 
 class logger {
  public:
@@ -83,19 +83,18 @@ class logger {
     }
 
     if (log_fn_) {
-      log_context ctx{
-        .level = level,
-        .message = message,
-        .file = file,
-        .line = line,
-        .timestamp = std::chrono::system_clock::now()
-      };
+      log_context ctx{.level = level,
+                      .message = message,
+                      .file = file,
+                      .line = line,
+                      .timestamp = std::chrono::system_clock::now()};
       log_fn_(log_user_data_, ctx);
     }
   }
 
   template <typename... Args>
-  void log(log_level level, std::string_view file, int line, format_impl::format_string<Args...> fmt, Args&&... args) {
+  void log(log_level level, std::string_view file, int line,
+           format_impl::format_string<Args...> fmt, Args&&... args) {
     if (level < min_level_.load(std::memory_order_relaxed)) {
       return;
     }
@@ -112,8 +111,9 @@ class logger {
     auto time = std::chrono::system_clock::to_time_t(ctx.timestamp);
     std::tm tm{};
     localtime_r(&time, &tm);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      ctx.timestamp.time_since_epoch()) % 1000;
+    auto ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(ctx.timestamp.time_since_epoch()) %
+      1000;
 
     // Extract filename from path
     auto file = [&]() -> std::string_view {
@@ -138,10 +138,8 @@ class logger {
 
     auto formatted = format_impl::format(
       "[{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:03d}] [rediscoro] [{}] [{}:{}] {}",
-      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-      tm.tm_hour, tm.tm_min, tm.tm_sec, ms.count(),
-      to_string(ctx.level), file, ctx.line, ctx.message
-    );
+      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, ms.count(),
+      to_string(ctx.level), file, ctx.line, ctx.message);
 
     std::cerr << formatted << std::endl;
   }
@@ -151,23 +149,33 @@ class logger {
   std::atomic<log_level> min_level_;
 };
 
-inline auto get_logger() -> logger& { return logger::instance(); }
+inline auto get_logger() -> logger& {
+  return logger::instance();
+}
 
 // IMPORTANT: Must be called before any logging operations
-inline void set_log_function(log_function fn, void* user_data = nullptr) { logger::instance().set_log_function(fn, user_data); }
+inline void set_log_function(log_function fn, void* user_data = nullptr) {
+  logger::instance().set_log_function(fn, user_data);
+}
 
-inline void set_log_level(log_level level) { logger::instance().set_log_level(level); }
+inline void set_log_level(log_level level) {
+  logger::instance().set_log_level(level);
+}
 
 }  // namespace rediscoro
 
-#define REDISCORO_LOG_DEBUG(fmt, ...) \
-  ::rediscoro::get_logger().log(::rediscoro::log_level::debug, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
+#define REDISCORO_LOG_DEBUG(fmt, ...)                                              \
+  ::rediscoro::get_logger().log(::rediscoro::log_level::debug, __FILE__, __LINE__, \
+                                fmt __VA_OPT__(, ) __VA_ARGS__)
 
-#define REDISCORO_LOG_INFO(fmt, ...) \
-  ::rediscoro::get_logger().log(::rediscoro::log_level::info, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
+#define REDISCORO_LOG_INFO(fmt, ...)                                              \
+  ::rediscoro::get_logger().log(::rediscoro::log_level::info, __FILE__, __LINE__, \
+                                fmt __VA_OPT__(, ) __VA_ARGS__)
 
-#define REDISCORO_LOG_WARNING(fmt, ...) \
-  ::rediscoro::get_logger().log(::rediscoro::log_level::warning, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
+#define REDISCORO_LOG_WARNING(fmt, ...)                                              \
+  ::rediscoro::get_logger().log(::rediscoro::log_level::warning, __FILE__, __LINE__, \
+                                fmt __VA_OPT__(, ) __VA_ARGS__)
 
-#define REDISCORO_LOG_ERROR(fmt, ...) \
-  ::rediscoro::get_logger().log(::rediscoro::log_level::error, __FILE__, __LINE__, fmt __VA_OPT__(, ) __VA_ARGS__)
+#define REDISCORO_LOG_ERROR(fmt, ...)                                              \
+  ::rediscoro::get_logger().log(::rediscoro::log_level::error, __FILE__, __LINE__, \
+                                fmt __VA_OPT__(, ) __VA_ARGS__)

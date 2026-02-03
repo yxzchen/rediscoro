@@ -40,16 +40,12 @@ namespace rediscoro::detail {
 /// - deliver() MUST be called from connection strand
 template <typename... Ts>
 class pending_response final : public response_sink {
-public:
+ public:
   pending_response() = default;
 
-  [[nodiscard]] std::size_t expected_replies() const noexcept override {
-    return sizeof...(Ts);
-  }
+  [[nodiscard]] std::size_t expected_replies() const noexcept override { return sizeof...(Ts); }
 
-  [[nodiscard]] bool is_complete() const noexcept override {
-    return result_.has_value();
-  }
+  [[nodiscard]] bool is_complete() const noexcept override { return result_.has_value(); }
 
   auto wait() -> iocoro::awaitable<response<Ts...>> {
     (void)co_await event_.async_wait();
@@ -57,7 +53,7 @@ public:
     co_return std::move(*result_);
   }
 
-protected:
+ protected:
   void do_deliver(resp3::message msg) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
@@ -84,7 +80,7 @@ protected:
     }
   }
 
-private:
+ private:
   iocoro::condition_event event_{};
   response_builder<Ts...> builder_{};
   std::optional<response<Ts...>> result_{};
@@ -93,17 +89,14 @@ private:
 /// Pending response for a dynamic-size pipeline (homogeneous slots).
 template <typename T>
 class pending_dynamic_response final : public response_sink {
-public:
-  explicit pending_dynamic_response(std::size_t expected_count)
-    : builder_(expected_count) {}
+ public:
+  explicit pending_dynamic_response(std::size_t expected_count) : builder_(expected_count) {}
 
   [[nodiscard]] std::size_t expected_replies() const noexcept override {
     return builder_.expected_count();
   }
 
-  [[nodiscard]] bool is_complete() const noexcept override {
-    return result_.has_value();
-  }
+  [[nodiscard]] bool is_complete() const noexcept override { return result_.has_value(); }
 
   auto wait() -> iocoro::awaitable<dynamic_response<T>> {
     (void)co_await event_.async_wait();
@@ -111,7 +104,7 @@ public:
     co_return std::move(*result_);
   }
 
-protected:
+ protected:
   void do_deliver(resp3::message msg) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
@@ -138,7 +131,7 @@ protected:
     }
   }
 
-private:
+ private:
   iocoro::condition_event event_{};
   dynamic_response_builder<T> builder_;
   std::optional<dynamic_response<T>> result_{};

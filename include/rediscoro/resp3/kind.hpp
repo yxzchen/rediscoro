@@ -31,8 +31,6 @@ enum class kind {
   push,            // >
 };
 
-// clang-format on
-
 /// Convert RESP3 kind to its leading prefix byte in the wire format.
 [[nodiscard]] constexpr auto kind_to_prefix(kind k) noexcept -> char {
   switch (k) {
@@ -99,5 +97,6 @@ enum class kind {
   return "<unknown>";
 }
 
-}  // namespace rediscoro::resp3
+// clang-format on
 
+}  // namespace rediscoro::resp3

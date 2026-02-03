@@ -2,9 +2,9 @@
 
 #include <rediscoro/resp3/kind.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <cstddef>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -37,7 +37,7 @@ using path_element = std::variant<path_index, path_key, path_field>;
 struct error {
   adapter_error_kind kind{};
   resp3::kind actual_type{};
-  std::vector<resp3::kind> expected_types{};   // empty means "unknown / not applicable"
+  std::vector<resp3::kind> expected_types{};  // empty means "unknown / not applicable"
   std::vector<path_element> path{};
   std::optional<std::size_t> expected_size{};
   std::optional<std::size_t> got_size{};
@@ -118,16 +118,18 @@ inline auto error::format_message(const error& e) -> std::string {
   auto path_to_string = [](const std::vector<path_element>& path) -> std::string {
     std::string out = "$";
     for (const auto& el : path) {
-      std::visit([&](const auto& v) {
-        using V = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<V, path_index>) {
-          out += "[" + std::to_string(v.index) + "]";
-        } else if constexpr (std::is_same_v<V, path_key>) {
-          out += "[\"" + v.key + "\"]";
-        } else if constexpr (std::is_same_v<V, path_field>) {
-          out += "." + v.field;
-        }
-      }, el);
+      std::visit(
+        [&](const auto& v) {
+          using V = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<V, path_index>) {
+            out += "[" + std::to_string(v.index) + "]";
+          } else if constexpr (std::is_same_v<V, path_key>) {
+            out += "[\"" + v.key + "\"]";
+          } else if constexpr (std::is_same_v<V, path_field>) {
+            out += "." + v.field;
+          }
+        },
+        el);
     }
     return out;
   };
@@ -139,7 +141,8 @@ inline auto error::format_message(const error& e) -> std::string {
         return path + ": expected <?>, got " + type_to_string(e.actual_type);
       }
       if (e.expected_types.size() == 1) {
-        return path + ": expected " + type_to_string(e.expected_types[0]) + ", got " + type_to_string(e.actual_type);
+        return path + ": expected " + type_to_string(e.expected_types[0]) + ", got " +
+               type_to_string(e.actual_type);
       }
       std::string exp = "any of: ";
       for (std::size_t i = 0; i < e.expected_types.size(); ++i) {
@@ -174,7 +177,8 @@ inline auto error::format_message(const error& e) -> std::string {
     }
     case adapter_error_kind::size_mismatch: {
       if (e.expected_size.has_value() && e.got_size.has_value()) {
-        return path + ": size mismatch (expected " + std::to_string(*e.expected_size) + ", got " + std::to_string(*e.got_size) + ")";
+        return path + ": size mismatch (expected " + std::to_string(*e.expected_size) + ", got " +
+               std::to_string(*e.got_size) + ")";
       }
       return path + ": size mismatch";
     }
@@ -183,5 +187,3 @@ inline auto error::format_message(const error& e) -> std::string {
 }
 
 }  // namespace rediscoro::adapter
-
-

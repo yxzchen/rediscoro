@@ -17,10 +17,9 @@ namespace rediscoro::detail {
 /// - Connection code must not bypass the strand by awaiting/spawning on other executors.
 /// - The strand handle is stable/copyable (copies refer to the same strand).
 class connection_executor {
-public:
+ public:
   explicit connection_executor(iocoro::any_io_executor ex)
-    : io_executor_(ex)
-    , strand_(iocoro::make_strand(iocoro::any_executor{ex})) {}
+      : io_executor_(ex), strand_(iocoro::make_strand(iocoro::any_executor{ex})) {}
 
   /// Strand executor façade.
   ///
@@ -28,28 +27,22 @@ public:
   /// - This is NOT implicitly convertible to iocoro::any_executor.
   /// - If you really need the raw executor, you must call .executor() explicitly.
   class strand_facade {
-  public:
+   public:
     explicit strand_facade(iocoro::any_executor ex) : ex_(std::move(ex)) {}
 
-    [[nodiscard]] auto executor() const noexcept -> iocoro::any_executor {
-      return ex_;
-    }
+    [[nodiscard]] auto executor() const noexcept -> iocoro::any_executor { return ex_; }
 
-  private:
+   private:
     iocoro::any_executor ex_;
   };
 
   /// Get the strand executor façade.
-  [[nodiscard]] auto strand() const noexcept -> strand_facade {
-    return strand_facade{strand_};
-  }
+  [[nodiscard]] auto strand() const noexcept -> strand_facade { return strand_facade{strand_}; }
 
   /// Get the underlying io_executor (for socket construction).
-  [[nodiscard]] auto get_io_executor() const -> iocoro::any_io_executor {
-    return io_executor_;
-  }
+  [[nodiscard]] auto get_io_executor() const -> iocoro::any_io_executor { return io_executor_; }
 
-private:
+ private:
   iocoro::any_io_executor io_executor_{};
   iocoro::any_executor strand_;
 };

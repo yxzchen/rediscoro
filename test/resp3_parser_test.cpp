@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <rediscoro/resp3/encoder.hpp>
 #include <rediscoro/resp3/builder.hpp>
+#include <rediscoro/resp3/encoder.hpp>
 #include <rediscoro/resp3/parser.hpp>
 
 #include <cstring>
@@ -230,5 +230,3 @@ TEST(resp3_parser_test, roundtrip_encoder_parser_for_complex_message) {
 }
 
 }  // namespace
-
-

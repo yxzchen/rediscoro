@@ -21,7 +21,7 @@ class response_builder;
 
 template <typename T>
 class dynamic_response_builder;
-}
+}  // namespace detail
 
 struct redis_error {
   std::string message;
@@ -30,7 +30,7 @@ struct redis_error {
 /// Wrapper around the internal response error variant.
 /// Provides user-friendly inspection APIs without exposing std::variant in the surface.
 class response_error {
-public:
+ public:
   using variant_type = std::variant<redis_error, error, adapter::error>;
 
   response_error(redis_error e) : v_(std::move(e)) {}
@@ -39,31 +39,39 @@ public:
   }
   response_error(adapter::error e) : v_(std::move(e)) {}
 
-  [[nodiscard]] bool is_redis_error() const noexcept { return std::holds_alternative<redis_error>(v_); }
+  [[nodiscard]] bool is_redis_error() const noexcept {
+    return std::holds_alternative<redis_error>(v_);
+  }
   [[nodiscard]] bool is_client_error() const noexcept { return std::holds_alternative<error>(v_); }
-  [[nodiscard]] bool is_adapter_error() const noexcept { return std::holds_alternative<adapter::error>(v_); }
+  [[nodiscard]] bool is_adapter_error() const noexcept {
+    return std::holds_alternative<adapter::error>(v_);
+  }
 
   [[nodiscard]] const redis_error& as_redis_error() const { return std::get<redis_error>(v_); }
   [[nodiscard]] error as_client_error() const { return std::get<error>(v_); }
-  [[nodiscard]] const adapter::error& as_adapter_error() const { return std::get<adapter::error>(v_); }
+  [[nodiscard]] const adapter::error& as_adapter_error() const {
+    return std::get<adapter::error>(v_);
+  }
 
   [[nodiscard]] auto to_string() const -> std::string {
-    return std::visit([](const auto& e) -> std::string {
-      using E = std::decay_t<decltype(e)>;
-      if constexpr (std::is_same_v<E, redis_error>) {
-        return e.message;
-      } else if constexpr (std::is_same_v<E, error>) {
-        return make_error_code(e).message();
-      } else {
-        static_assert(std::is_same_v<E, adapter::error>);
-        return e.to_string();
-      }
-    }, v_);
+    return std::visit(
+      [](const auto& e) -> std::string {
+        using E = std::decay_t<decltype(e)>;
+        if constexpr (std::is_same_v<E, redis_error>) {
+          return e.message;
+        } else if constexpr (std::is_same_v<E, error>) {
+          return make_error_code(e).message();
+        } else {
+          static_assert(std::is_same_v<E, adapter::error>);
+          return e.to_string();
+        }
+      },
+      v_);
   }
 
   [[nodiscard]] const variant_type& raw() const noexcept { return v_; }
 
-private:
+ private:
   variant_type v_;
 };
 
@@ -73,7 +81,7 @@ using response_slot = expected<T, response_error>;
 /// Typed response for a pipeline (compile-time sized, heterogenous slots).
 template <typename... Ts>
 class response {
-public:
+ public:
   static constexpr std::size_t static_size = sizeof...(Ts);
 
   response() = delete;
@@ -87,7 +95,8 @@ public:
   }
 
   template <std::size_t I>
-  [[nodiscard]] auto get() const -> const response_slot<std::tuple_element_t<I, std::tuple<Ts...>>>& {
+  [[nodiscard]] auto get() const
+    -> const response_slot<std::tuple_element_t<I, std::tuple<Ts...>>>& {
     return std::get<I>(results_);
   }
 
@@ -100,7 +109,7 @@ public:
     return unpack_impl(std::index_sequence_for<Ts...>{});
   }
 
-private:
+ private:
   std::tuple<response_slot<Ts>...> results_{};
 
   template <std::size_t... Is>
@@ -109,21 +118,21 @@ private:
   }
 
   template <std::size_t... Is>
-  [[nodiscard]] auto unpack_impl(std::index_sequence<Is...>) const -> std::tuple<const response_slot<Ts>&...> {
+  [[nodiscard]] auto unpack_impl(std::index_sequence<Is...>) const
+    -> std::tuple<const response_slot<Ts>&...> {
     return std::tie(get<Is>()...);
   }
 
   template <typename...>
   friend class detail::response_builder;
 
-  explicit response(std::tuple<response_slot<Ts>...>&& results)
-    : results_(std::move(results)) {}
+  explicit response(std::tuple<response_slot<Ts>...>&& results) : results_(std::move(results)) {}
 };
 
 /// Runtime-sized response where all slots have the same value type T.
 template <typename T>
 class dynamic_response {
-public:
+ public:
   dynamic_response() = default;
 
   [[nodiscard]] std::size_t size() const noexcept { return results_.size(); }
@@ -138,16 +147,14 @@ public:
   [[nodiscard]] auto begin() const noexcept { return results_.begin(); }
   [[nodiscard]] auto end() const noexcept { return results_.end(); }
 
-private:
+ private:
   std::vector<response_slot<T>> results_{};
 
   template <typename>
   friend class detail::dynamic_response_builder;
 
   explicit dynamic_response(std::vector<response_slot<T>>&& results)
-    : results_(std::move(results)) {}
+      : results_(std::move(results)) {}
 };
 
 }  // namespace rediscoro
-
-

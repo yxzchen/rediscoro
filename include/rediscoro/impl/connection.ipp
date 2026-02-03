@@ -9,9 +9,9 @@
 #include <iocoro/ip/resolver.hpp>
 #include <iocoro/steady_timer.hpp>
 #include <iocoro/this_coro.hpp>
-#include <iocoro/with_timeout.hpp>
 #include <iocoro/when_all.hpp>
 #include <iocoro/when_any.hpp>
+#include <iocoro/with_timeout.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -23,10 +23,7 @@
 namespace rediscoro::detail {
 
 inline connection::connection(iocoro::any_io_executor ex, config cfg)
-  : cfg_(std::move(cfg))
-  , executor_(ex)
-  , socket_(executor_.get_io_executor()) {
-}
+    : cfg_(std::move(cfg)), executor_(ex), socket_(executor_.get_io_executor()) {}
 
 inline connection::~connection() noexcept {
   // Best-effort synchronous cleanup.
@@ -63,8 +60,7 @@ inline auto connection::run_actor() -> void {
   auto ex = executor_.strand().executor();
   auto self = shared_from_this();
   iocoro::co_spawn(
-    ex,
-    stop_.token(),
+    ex, stop_.token(),
     [self, ex]() mutable -> iocoro::awaitable<void> {
       // Keep the connection alive until the actor completes.
       (void)self;
@@ -116,8 +112,8 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
   state_ = connection_state::CONNECTING;
 
   // Attempt connection. do_connect() returns unexpected(error) on failure.
-  auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.token(), do_connect(),
-                                               iocoro::use_awaitable);
+  auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.token(),
+                                               do_connect(), iocoro::use_awaitable);
   if (!connect_res) {
     // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
     // Cleanup is unified via close() (joins the actor).
@@ -198,7 +194,8 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
   }
   pipeline_.push(std::move(req), std::move(sink), deadline);
   write_wakeup_.notify();
-  control_wakeup_.notify();  // request_timeout scheduling / wake control_loop when first request arrives
+  // request_timeout scheduling / wake control_loop when first request arrives
+  control_wakeup_.notify();
 }
 
 inline auto connection::transition_to_closed() -> void {
@@ -220,10 +217,10 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
 
   auto parent_stop = co_await iocoro::this_coro::stop_token;
   auto ex = executor_.strand().executor();
-  auto writer =
-    iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
-  auto reader =
-    iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, read_loop()), iocoro::use_awaitable);
+  auto writer = iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, write_loop()),
+                                 iocoro::use_awaitable);
+  auto reader = iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, read_loop()),
+                                 iocoro::use_awaitable);
   auto controller = iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, control_loop()),
                                      iocoro::use_awaitable);
 
@@ -316,10 +313,12 @@ inline auto connection::calculate_reconnect_delay() const -> std::chrono::millis
 
   const auto backoff_index = reconnect_count_ - cfg_.reconnection.immediate_attempts;
   const auto base_ms = static_cast<double>(cfg_.reconnection.initial_delay.count());
-  const auto factor = std::pow(cfg_.reconnection.backoff_factor, static_cast<double>(backoff_index));
+  const auto factor =
+    std::pow(cfg_.reconnection.backoff_factor, static_cast<double>(backoff_index));
   const auto delay_ms = base_ms * factor;
 
-  const auto capped = std::min<double>(delay_ms, static_cast<double>(cfg_.reconnection.max_delay.count()));
+  const auto capped =
+    std::min<double>(delay_ms, static_cast<double>(cfg_.reconnection.max_delay.count()));
   const auto out = static_cast<std::int64_t>(capped);
   if (out <= 0) {
     return std::chrono::milliseconds{0};
@@ -407,8 +406,8 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
   // - Cancellation is best-effort via stop_token. It cannot interrupt an in-flight getaddrinfo()
   //   but can prevent delivering results to the awaiting coroutine.
   iocoro::ip::tcp::resolver resolver{};
-  auto res = co_await iocoro::with_timeout(resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)),
-                                           cfg_.resolve_timeout);
+  auto res = co_await iocoro::with_timeout(
+    resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)), cfg_.resolve_timeout);
   if (!res) {
     if (res.error() == iocoro::error::timed_out) {
       co_return unexpected(error::resolve_timeout);
@@ -435,7 +434,8 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
       (void)socket_.close();
     }
 
-    auto connect_res = co_await iocoro::with_timeout(socket_.async_connect(ep), cfg_.connect_timeout);
+    auto connect_res =
+      co_await iocoro::with_timeout(socket_.async_connect(ep), cfg_.connect_timeout);
     if (connect_res) {
       connect_ec = {};
       break;
@@ -681,7 +681,8 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
   in_flight_guard guard{write_in_flight_};
 
   auto tok = co_await iocoro::this_coro::stop_token;
-  while (!tok.stop_requested() && state_ == connection_state::OPEN && pipeline_.has_pending_write()) {
+  while (!tok.stop_requested() && state_ == connection_state::OPEN &&
+         pipeline_.has_pending_write()) {
     auto view = pipeline_.next_write_buffer();
     auto buf = std::as_bytes(std::span{view.data(), view.size()});
 
@@ -715,7 +716,8 @@ inline auto connection::handle_error(error ec) -> void {
     return;
   }
 
-  REDISCORO_ASSERT(state_ == connection_state::OPEN, "handle_error must not be used for CONNECTING/INIT errors");
+  REDISCORO_ASSERT(state_ == connection_state::OPEN,
+                   "handle_error must not be used for CONNECTING/INIT errors");
   if (state_ != connection_state::OPEN) {
     // Non-OPEN state errors are not recorded in last_error_ (handled elsewhere).
     control_wakeup_.notify();
@@ -749,22 +751,25 @@ inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response
   //
   // Performance: use dispatch() so if we're already on the strand, we run inline and avoid an
   // extra scheduling hop; otherwise it behaves like post().
-  executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
-    self->enqueue_impl(std::move(req), std::move(slot));
-  });
+  executor_.strand().executor().dispatch(
+    [self = shared_from_this(), req = std::move(req), slot]() mutable {
+      self->enqueue_impl(std::move(req), std::move(slot));
+    });
 
   return slot;
 }
 
 template <typename T>
-inline auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_dynamic_response<T>> {
+inline auto connection::enqueue_dynamic(request req)
+  -> std::shared_ptr<pending_dynamic_response<T>> {
   auto slot = std::make_shared<pending_dynamic_response<T>>(req.reply_count());
 
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
-  executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
-    self->enqueue_impl(std::move(req), std::move(slot));
-  });
+  executor_.strand().executor().dispatch(
+    [self = shared_from_this(), req = std::move(req), slot]() mutable {
+      self->enqueue_impl(std::move(req), std::move(slot));
+    });
 
   return slot;
 }

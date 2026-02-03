@@ -1,13 +1,13 @@
 #pragma once
 
-#include <rediscoro/resp3/raw.hpp>
-#include <rediscoro/resp3/message.hpp>
 #include <rediscoro/assert.hpp>
+#include <rediscoro/resp3/message.hpp>
+#include <rediscoro/resp3/raw.hpp>
 
 #include <optional>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace rediscoro::resp3 {
 
@@ -140,7 +140,8 @@ enum class parent_slot_kind : std::uint8_t {
         f.attrs.entries.reserve(n.attr_count / 2);
       }
       if (n.type == kind::map) {
-        REDISCORO_ASSERT((n.child_count % 2) == 0, "map child_count must be even (key/value nodes)");
+        REDISCORO_ASSERT((n.child_count % 2) == 0,
+                         "map child_count must be even (key/value nodes)");
       }
     }
 
@@ -221,7 +222,8 @@ enum class parent_slot_kind : std::uint8_t {
             parent.pending_map_key = std::move(finished);
           } else {
             REDISCORO_ASSERT(parent.pending_map_key.has_value(), "map value without pending key");
-            parent.result.as<map>().entries.push_back({std::move(*parent.pending_map_key), std::move(finished)});
+            parent.result.as<map>().entries.push_back(
+              {std::move(*parent.pending_map_key), std::move(finished)});
             parent.pending_map_key.reset();
           }
           break;
@@ -246,5 +248,3 @@ enum class parent_slot_kind : std::uint8_t {
 }
 
 }  // namespace rediscoro::resp3
-
-

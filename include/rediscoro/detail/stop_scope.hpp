@@ -9,24 +9,17 @@ namespace rediscoro::detail {
 /// `std::stop_source` itself cannot be reset; this wrapper provides a convenient `reset()`
 /// that swaps in a new source.
 class stop_scope {
-public:
+ public:
   stop_scope() = default;
 
-  [[nodiscard]] auto token() const noexcept -> std::stop_token {
-    return src_.get_token();
-  }
+  [[nodiscard]] auto token() const noexcept -> std::stop_token { return src_.get_token(); }
 
-  auto request_stop() noexcept -> void {
-    src_.request_stop();
-  }
+  auto request_stop() noexcept -> void { src_.request_stop(); }
 
-  auto reset() -> void {
-    src_ = std::stop_source{};
-  }
+  auto reset() -> void { src_ = std::stop_source{}; }
 
-private:
+ private:
   std::stop_source src_{};
 };
 
 }  // namespace rediscoro::detail
-

@@ -1,8 +1,8 @@
 #pragma once
 
+#include <rediscoro/assert.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/visitor.hpp>
-#include <rediscoro/assert.hpp>
 
 #include <charconv>
 #include <cmath>
@@ -14,7 +14,7 @@ namespace rediscoro::resp3 {
 
 /// RESP3 encoder that serializes messages to byte stream
 class encoder {
-public:
+ public:
   encoder() = default;
 
   /// Encode a message to RESP3 protocol format
@@ -50,9 +50,7 @@ public:
     append_crlf();
   }
 
-  auto operator()(const double_number& val) -> void {
-    append_double(val.value);
-  }
+  auto operator()(const double_number& val) -> void { append_double(val.value); }
 
   auto operator()(const boolean& val) -> void {
     append_prefix(kind::boolean);
@@ -90,7 +88,7 @@ public:
   auto operator()(const verbatim_string& val) -> void {
     // Format: =<length>\r\n<encoding>:<data>\r\n
     // encoding is 3 bytes
-    auto total_len = val.encoding.size() + 1 + val.data.size(); // encoding + ':' + data
+    auto total_len = val.encoding.size() + 1 + val.data.size();  // encoding + ':' + data
     append_prefix(kind::verbatim_string);
     append_size(total_len);
     append_crlf();
@@ -141,16 +139,12 @@ public:
     }
   }
 
-private:
+ private:
   std::string buffer_;
 
-  auto append_prefix(kind k) -> void {
-    buffer_.push_back(kind_to_prefix(k));
-  }
+  auto append_prefix(kind k) -> void { buffer_.push_back(kind_to_prefix(k)); }
 
-  auto append_crlf() -> void {
-    buffer_.append("\r\n");
-  }
+  auto append_crlf() -> void { buffer_.append("\r\n"); }
 
   auto append_u64(std::uint64_t v) -> void {
     char tmp[32]{};
@@ -159,9 +153,7 @@ private:
     buffer_.append(tmp, res.ptr);
   }
 
-  auto append_size(std::size_t v) -> void {
-    append_u64(static_cast<std::uint64_t>(v));
-  }
+  auto append_size(std::size_t v) -> void { append_u64(static_cast<std::uint64_t>(v)); }
 
   auto append_i64(std::int64_t v) -> void {
     char tmp[32]{};
@@ -183,13 +175,8 @@ private:
       }
     } else {
       char tmp[64]{};
-      auto res = std::to_chars(
-        tmp,
-        tmp + sizeof(tmp),
-        v,
-        std::chars_format::general,
-        std::numeric_limits<double>::max_digits10
-      );
+      auto res = std::to_chars(tmp, tmp + sizeof(tmp), v, std::chars_format::general,
+                               std::numeric_limits<double>::max_digits10);
       if (res.ec != std::errc{}) {
         buffer_ += "nan";
       } else {
@@ -200,9 +187,7 @@ private:
     append_crlf();
   }
 
-  auto encode_message(const message& msg) -> void {
-    encode_with_attrs(msg);
-  }
+  auto encode_message(const message& msg) -> void { encode_with_attrs(msg); }
 
   auto encode_with_attrs(const message& msg) -> void {
     if (msg.has_attributes()) {

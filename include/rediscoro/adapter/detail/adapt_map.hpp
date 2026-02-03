@@ -24,9 +24,9 @@ auto adapt_map(const resp3::message& msg) -> expected<T, error> {
   using V = typename U::mapped_type;
 
   static_assert(!std::is_same_v<remove_cvref_t<K>, ignore_t>,
-    "ignore_t is only allowed as the top-level adaptation target");
+                "ignore_t is only allowed as the top-level adaptation target");
   static_assert(!std::is_same_v<remove_cvref_t<V>, ignore_t>,
-    "ignore_t is only allowed as the top-level adaptation target");
+                "ignore_t is only allowed as the top-level adaptation target");
 
   if (!msg.is<resp3::map>()) {
     return unexpected(detail::make_type_mismatch(msg.get_kind(), {resp3::kind::map}));
@@ -61,4 +61,3 @@ auto adapt_map(const resp3::message& msg) -> expected<T, error> {
 
 }  // namespace detail
 }  // namespace rediscoro::adapter
-

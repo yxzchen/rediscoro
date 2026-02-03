@@ -1,8 +1,8 @@
 #pragma once
 
-#include <rediscoro/resp3/parser.hpp>
-#include <rediscoro/resp3/kind.hpp>
 #include <rediscoro/assert.hpp>
+#include <rediscoro/resp3/kind.hpp>
+#include <rediscoro/resp3/parser.hpp>
 
 #include <charconv>
 #include <limits>
@@ -177,8 +177,8 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
   }
 
   // Containers: array/map/set/push
-  if (*maybe_t == kind::array || *maybe_t == kind::map ||
-      *maybe_t == kind::set || *maybe_t == kind::push) {
+  if (*maybe_t == kind::array || *maybe_t == kind::map || *maybe_t == kind::set ||
+      *maybe_t == kind::push) {
     auto hdr = parse_length_after_type(data);
     if (!hdr) {
       return unexpected(hdr.error());
@@ -237,7 +237,8 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
   }
 
   // Bulk-like: $ ! =
-  if (*maybe_t == kind::bulk_string || *maybe_t == kind::bulk_error || *maybe_t == kind::verbatim_string) {
+  if (*maybe_t == kind::bulk_string || *maybe_t == kind::bulk_error ||
+      *maybe_t == kind::verbatim_string) {
     auto pos = detail::find_crlf(data.substr(1));
     if (pos == std::string_view::npos) {
       return unexpected(error::resp3_needs_more);
@@ -284,7 +285,8 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
   auto line = data.substr(1, pos);
   auto consume_bytes = 1 + pos + 2;
 
-  if (*maybe_t == kind::simple_string || *maybe_t == kind::simple_error || *maybe_t == kind::big_number) {
+  if (*maybe_t == kind::simple_string || *maybe_t == kind::simple_error ||
+      *maybe_t == kind::big_number) {
     buf_.consume(consume_bytes);
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = *maybe_t, .text = line});
@@ -328,11 +330,8 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
 
     auto& parent = stack_.back();
     if (parent.state == frame_kind::array) {
-      REDISCORO_ASSERT(
-        parent.container_type == kind::array ||
-        parent.container_type == kind::set ||
-        parent.container_type == kind::push
-      );
+      REDISCORO_ASSERT(parent.container_type == kind::array || parent.container_type == kind::set ||
+                       parent.container_type == kind::push);
 
       auto& node = tree_.nodes.at(parent.node_index);
       if (node.child_count == 0) {
@@ -485,5 +484,3 @@ inline auto parser::reclaim() -> void {
 }
 
 }  // namespace rediscoro::resp3
-
-

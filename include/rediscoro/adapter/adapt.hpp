@@ -1,6 +1,5 @@
 #pragma once
 
-#include <rediscoro/adapter/error.hpp>
 #include <rediscoro/adapter/detail/adapt_array.hpp>
 #include <rediscoro/adapter/detail/adapt_ignore.hpp>
 #include <rediscoro/adapter/detail/adapt_map.hpp>
@@ -8,8 +7,9 @@
 #include <rediscoro/adapter/detail/adapt_scalar.hpp>
 #include <rediscoro/adapter/detail/adapt_sequence.hpp>
 #include <rediscoro/adapter/detail/traits.hpp>
-#include <rediscoro/ignore.hpp>
+#include <rediscoro/adapter/error.hpp>
 #include <rediscoro/expected.hpp>
+#include <rediscoro/ignore.hpp>
 #include <rediscoro/resp3/message.hpp>
 
 #include <string>
@@ -32,7 +32,8 @@ template <typename T>
 auto adapt(const resp3::message& msg) -> expected<T, error> {
   using U = detail::remove_cvref_t<T>;
 
-  static_assert(!detail::is_std_string_view_v<U>,
+  static_assert(
+    !detail::is_std_string_view_v<U>,
     "adapter::adapt<std::string_view> is not supported: it would produce dangling views. "
     "Use std::string instead.");
 
@@ -52,5 +53,3 @@ auto adapt(const resp3::message& msg) -> expected<T, error> {
 }
 
 }  // namespace rediscoro::adapter
-
-

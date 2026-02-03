@@ -18,4 +18,3 @@ auto adapt_ignore(const resp3::message&) -> expected<T, error> {
 
 }  // namespace detail
 }  // namespace rediscoro::adapter
-

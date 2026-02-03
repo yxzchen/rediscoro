@@ -103,14 +103,8 @@ TEST(resp3_encoder_test, encode_array_aggregate) {
 
 TEST(resp3_encoder_test, encode_map_with_ordered_entries) {
   map m;
-  m.entries.emplace_back(
-    message{simple_string{"key1"}},
-    message{simple_string{"value1"}}
-  );
-  m.entries.emplace_back(
-    message{simple_string{"key2"}},
-    message{integer{42}}
-  );
+  m.entries.emplace_back(message{simple_string{"key1"}}, message{simple_string{"value1"}});
+  m.entries.emplace_back(message{simple_string{"key2"}}, message{integer{42}});
 
   message map_msg{std::move(m)};
   EXPECT_EQ(encode(map_msg), "%2\r\n+key1\r\n+value1\r\n+key2\r\n:42\r\n");
@@ -157,10 +151,7 @@ TEST(resp3_encoder_test, encode_nested_arrays) {
 
 TEST(resp3_encoder_test, encode_message_with_attributes) {
   attribute attrs;
-  attrs.entries.emplace_back(
-    message{simple_string{"ttl"}},
-    message{integer{3600}}
-  );
+  attrs.entries.emplace_back(message{simple_string{"ttl"}}, message{integer{3600}});
 
   message msg{simple_string{"cached_value"}, std::move(attrs)};
   EXPECT_EQ(encode(msg), "|1\r\n+ttl\r\n:3600\r\n+cached_value\r\n");
@@ -169,20 +160,11 @@ TEST(resp3_encoder_test, encode_message_with_attributes) {
 TEST(resp3_encoder_test, encode_complex_redis_response) {
   // HGETALL response with attributes
   map m;
-  m.entries.emplace_back(
-    message{simple_string{"name"}},
-    message{bulk_string{"Alice"}}
-  );
-  m.entries.emplace_back(
-    message{simple_string{"age"}},
-    message{bulk_string{"30"}}
-  );
+  m.entries.emplace_back(message{simple_string{"name"}}, message{bulk_string{"Alice"}});
+  m.entries.emplace_back(message{simple_string{"age"}}, message{bulk_string{"30"}});
 
   attribute attrs;
-  attrs.entries.emplace_back(
-    message{simple_string{"db"}},
-    message{integer{0}}
-  );
+  attrs.entries.emplace_back(message{simple_string{"db"}}, message{integer{0}});
 
   message response{std::move(m), std::move(attrs)};
 

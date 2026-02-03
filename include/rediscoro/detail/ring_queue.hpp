@@ -18,7 +18,7 @@ namespace rediscoro::detail {
 // - Owns elements; move-only types are supported.
 template <typename T, typename Alloc = std::allocator<T>>
 class ring_queue {
-public:
+ public:
   using value_type = T;
   using allocator_type = Alloc;
   using alloc_traits = std::allocator_traits<allocator_type>;
@@ -28,11 +28,11 @@ public:
   ring_queue& operator=(const ring_queue&) = delete;
 
   ring_queue(ring_queue&& other) noexcept(std::is_nothrow_move_constructible_v<allocator_type>)
-    : alloc_(std::move(other.alloc_)),
-      data_(other.data_),
-      cap_(other.cap_),
-      head_(other.head_),
-      size_(other.size_) {
+      : alloc_(std::move(other.alloc_)),
+        data_(other.data_),
+        cap_(other.cap_),
+        head_(other.head_),
+        size_(other.size_) {
     other.data_ = nullptr;
     other.cap_ = 0;
     other.head_ = 0;
@@ -119,7 +119,7 @@ public:
     head_ = 0;
   }
 
-private:
+ private:
   allocator_type alloc_{};
   T* data_{nullptr};
   std::size_t cap_{0};
@@ -204,4 +204,3 @@ private:
 };
 
 }  // namespace rediscoro::detail
-

@@ -20,16 +20,14 @@ namespace rediscoro::detail {
 /// - Deliver must not block and must not inline user code; completion/resume is handled by the
 ///   concrete sink (e.g. `pending_response`) on the caller's executor.
 class response_sink {
-public:
+ public:
   virtual ~response_sink() = default;
 
   /// Expected number of replies for this sink.
   ///
   /// For a simple single command, this is 1.
   /// For multi-reply protocols, pipeline MUST provide an appropriate sink implementation.
-  [[nodiscard]] virtual std::size_t expected_replies() const noexcept {
-    return 1;
-  }
+  [[nodiscard]] virtual std::size_t expected_replies() const noexcept { return 1; }
 
   /// Deliver a successful RESP3 response.
   /// Called by pipeline when a message is received.
@@ -48,7 +46,8 @@ public:
   /// Must not block or resume coroutines inline.
   auto deliver_error(rediscoro::error err) -> void {
     // Structural defense: a pipeline bug must be caught immediately.
-    REDISCORO_ASSERT(!is_complete() && "deliver_error() called on a completed sink - pipeline bug!");
+    REDISCORO_ASSERT(!is_complete() &&
+                     "deliver_error() called on a completed sink - pipeline bug!");
     if (is_complete()) {
       return;  // Defensive in release builds
     }
@@ -74,7 +73,7 @@ public:
   /// Check if delivery is complete (for diagnostics).
   [[nodiscard]] virtual bool is_complete() const noexcept = 0;
 
-protected:
+ protected:
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;
   virtual auto do_deliver_error(rediscoro::error err) -> void = 0;
