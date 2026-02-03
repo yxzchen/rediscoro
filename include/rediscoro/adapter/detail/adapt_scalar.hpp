@@ -28,13 +28,13 @@ auto adapt_scalar(const resp3::message& msg) -> expected<T, error> {
         {resp3::kind::simple_string, resp3::kind::bulk_string, resp3::kind::verbatim_string}));
     }
     if (msg.is<resp3::simple_string>()) {
-      return msg.as<resp3::simple_string>().data;
+      return std::string{msg.as<resp3::simple_string>().data};
     }
     if (msg.is<resp3::bulk_string>()) {
-      return msg.as<resp3::bulk_string>().data;
+      return std::string{msg.as<resp3::bulk_string>().data};
     }
     if (msg.is<resp3::verbatim_string>()) {
-      return msg.as<resp3::verbatim_string>().data;
+      return std::string{msg.as<resp3::verbatim_string>().data};
     }
     return unexpected(make_type_mismatch(
       msg.get_kind(),

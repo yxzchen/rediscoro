@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <functional>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -53,7 +52,7 @@ struct log_context {
   std::chrono::system_clock::time_point timestamp;
 };
 
-using log_function = std::function<void(log_context const&)>;
+using log_function = void(*)(void*, log_context const&);
 
 class logger {
  public:
@@ -63,12 +62,15 @@ class logger {
   }
 
   // IMPORTANT: Must be called before any logging operations to avoid race conditions
-  void set_log_function(log_function fn) {
-    if (fn) {
-      log_fn_ = std::move(fn);
-    } else {
-      log_fn_ = default_log_function();
+  void set_log_function(log_function fn, void* user_data = nullptr) {
+    if (fn != nullptr) {
+      log_fn_ = fn;
+      log_user_data_ = user_data;
+      return;
     }
+
+    log_fn_ = &default_log_function;
+    log_user_data_ = nullptr;
   }
 
   void set_log_level(log_level level) { min_level_.store(level, std::memory_order_relaxed); }
@@ -88,7 +90,7 @@ class logger {
         .line = line,
         .timestamp = std::chrono::system_clock::now()
       };
-      log_fn_(ctx);
+      log_fn_(log_user_data_, ctx);
     }
   }
 
@@ -104,56 +106,55 @@ class logger {
 
  private:
   // Default: disable all logs unless user explicitly enables them.
-  logger() : log_fn_(default_log_function()), min_level_(log_level::off) {}
+  logger() : log_fn_(&default_log_function), log_user_data_(nullptr), min_level_(log_level::off) {}
 
-  static auto default_log_function() -> log_function {
-    return [](log_context const& ctx) {
-      auto time = std::chrono::system_clock::to_time_t(ctx.timestamp);
-      std::tm tm{};
-      localtime_r(&time, &tm);
-      auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        ctx.timestamp.time_since_epoch()) % 1000;
+  static void default_log_function(void*, log_context const& ctx) {
+    auto time = std::chrono::system_clock::to_time_t(ctx.timestamp);
+    std::tm tm{};
+    localtime_r(&time, &tm);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      ctx.timestamp.time_since_epoch()) % 1000;
 
-      // Extract filename from path
-      auto file = [&]() -> std::string_view {
-        auto path = ctx.file;
+    // Extract filename from path
+    auto file = [&]() -> std::string_view {
+      auto path = ctx.file;
 
-        // Prefer showing the path relative to the `rediscoro/` directory (excluding `rediscoro` itself).
-        constexpr std::string_view k_rediscoro_posix = "rediscoro/";
-        constexpr std::string_view k_rediscoro_win = "rediscoro\\";
-        if (auto pos = path.find(k_rediscoro_posix); pos != std::string_view::npos) {
-          return path.substr(pos + k_rediscoro_posix.size());
-        }
-        if (auto pos = path.find(k_rediscoro_win); pos != std::string_view::npos) {
-          return path.substr(pos + k_rediscoro_win.size());
-        }
+      // Prefer showing the path relative to the `rediscoro/` directory (excluding `rediscoro` itself).
+      constexpr std::string_view k_rediscoro_posix = "rediscoro/";
+      constexpr std::string_view k_rediscoro_win = "rediscoro\\";
+      if (auto pos = path.find(k_rediscoro_posix); pos != std::string_view::npos) {
+        return path.substr(pos + k_rediscoro_posix.size());
+      }
+      if (auto pos = path.find(k_rediscoro_win); pos != std::string_view::npos) {
+        return path.substr(pos + k_rediscoro_win.size());
+      }
 
-        // Fallback: basename only.
-        if (auto pos = path.find_last_of("/\\"); pos != std::string_view::npos) {
-          return path.substr(pos + 1);
-        }
-        return path;
-      }();
+      // Fallback: basename only.
+      if (auto pos = path.find_last_of("/\\"); pos != std::string_view::npos) {
+        return path.substr(pos + 1);
+      }
+      return path;
+    }();
 
-      auto formatted = format_impl::format(
-        "[{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:03d}] [rediscoro] [{}] [{}:{}] {}",
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-        tm.tm_hour, tm.tm_min, tm.tm_sec, ms.count(),
-        to_string(ctx.level), file, ctx.line, ctx.message
-      );
+    auto formatted = format_impl::format(
+      "[{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:03d}] [rediscoro] [{}] [{}:{}] {}",
+      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+      tm.tm_hour, tm.tm_min, tm.tm_sec, ms.count(),
+      to_string(ctx.level), file, ctx.line, ctx.message
+    );
 
-      std::cerr << formatted << std::endl;
-    };
+    std::cerr << formatted << std::endl;
   }
 
   log_function log_fn_;
+  void* log_user_data_;
   std::atomic<log_level> min_level_;
 };
 
 inline auto get_logger() -> logger& { return logger::instance(); }
 
 // IMPORTANT: Must be called before any logging operations
-inline void set_log_function(log_function fn) { logger::instance().set_log_function(std::move(fn)); }
+inline void set_log_function(log_function fn, void* user_data = nullptr) { logger::instance().set_log_function(fn, user_data); }
 
 inline void set_log_level(log_level level) { logger::instance().set_log_level(level); }
 

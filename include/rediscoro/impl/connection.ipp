@@ -750,7 +750,7 @@ inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response
   // Performance: use dispatch() so if we're already on the strand, we run inline and avoid an
   // extra scheduling hop; otherwise it behaves like post().
   executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
-    self->enqueue_impl(std::move(req), slot);
+    self->enqueue_impl(std::move(req), std::move(slot));
   });
 
   return slot;
@@ -763,7 +763,7 @@ inline auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
   executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
-    self->enqueue_impl(std::move(req), slot);
+    self->enqueue_impl(std::move(req), std::move(slot));
   });
 
   return slot;

@@ -28,7 +28,7 @@ TEST(resp3_visitor_test, visit_with_return_value) {
   auto result = visit([](const auto& val) -> std::string {
     using T = std::decay_t<decltype(val)>;
     if constexpr (std::is_same_v<T, simple_string>) {
-      return val.data;
+      return std::string{val.data};
     } else {
       return "unknown";
     }

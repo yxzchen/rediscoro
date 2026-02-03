@@ -39,6 +39,9 @@ auto adapt_sequence(const resp3::message& msg) -> expected<T, error> {
   }
 
   U out{};
+  if constexpr (requires(U& u, std::size_t n) { u.reserve(n); }) {
+    out.reserve(elems->size());
+  }
   for (std::size_t i = 0; i < elems->size(); ++i) {
     auto r = adapt<V>((*elems)[i]);
     if (!r) {

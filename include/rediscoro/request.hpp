@@ -132,8 +132,12 @@ private:
   template <typename T>
     requires (std::is_integral_v<std::remove_cvref_t<T>> && !std::is_same_v<std::remove_cvref_t<T>, bool>)
   void append_arg(T v) {
-    const auto tmp = std::to_string(v);
-    append_bulk_string(std::string_view{tmp});
+    char buf[64]{};
+    auto* first = buf;
+    auto* last = buf + sizeof(buf);
+    auto res = std::to_chars(first, last, v);
+    REDISCORO_ASSERT(res.ec == std::errc{});
+    append_bulk_string(std::string_view{first, static_cast<std::size_t>(res.ptr - first)});
   }
 };
 

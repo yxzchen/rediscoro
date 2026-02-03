@@ -3,7 +3,8 @@
 #include <rediscoro/resp3/kind.hpp>
 
 #include <cstdint>
-#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rediscoro::resp3 {
@@ -14,13 +15,13 @@ struct message;
 /// Simple string value (+)
 struct simple_string {
   static constexpr kind kind_id = kind::simple_string;
-  std::string data;
+  std::string_view data;
 };
 
 /// Simple error value (-)
 struct simple_error {
   static constexpr kind kind_id = kind::simple_error;
-  std::string message;
+  std::string_view message;
 };
 
 /// Integer value (:)
@@ -44,7 +45,7 @@ struct boolean {
 /// Big number value (()
 struct big_number {
   static constexpr kind kind_id = kind::big_number;
-  std::string value;  // Stored as string to handle arbitrary precision
+  std::string_view value;  // Stored as string-view to handle arbitrary precision
 };
 
 /// Null value (_)
@@ -55,20 +56,20 @@ struct null {
 /// Bulk string value ($)
 struct bulk_string {
   static constexpr kind kind_id = kind::bulk_string;
-  std::string data;
+  std::string_view data;
 };
 
 /// Bulk error value (!)
 struct bulk_error {
   static constexpr kind kind_id = kind::bulk_error;
-  std::string message;
+  std::string_view message;
 };
 
 /// Verbatim string value (=)
 struct verbatim_string {
   static constexpr kind kind_id = kind::verbatim_string;
-  std::string encoding;  // 3-byte encoding type
-  std::string data;
+  std::string_view encoding;  // 3-byte encoding type
+  std::string_view data;
 };
 
 /// Array value (*)

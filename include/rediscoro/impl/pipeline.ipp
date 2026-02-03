@@ -71,18 +71,20 @@ inline auto pipeline::on_error(error err) -> void {
 
 inline auto pipeline::clear_all(rediscoro::error err) -> void {
   // Pending writes: none of the replies will arrive; fail all expected replies.
-  for (auto& p : pending_write_) {
+  while (!pending_write_.empty()) {
+    auto& p = pending_write_.front();
     REDISCORO_ASSERT(p.sink != nullptr);
     p.sink->fail_all(err);
+    pending_write_.pop_front();
   }
-  pending_write_.clear();
 
   // Awaiting reads: fail all remaining replies.
-  for (auto const& a : awaiting_read_) {
+  while (!awaiting_read_.empty()) {
+    auto& a = awaiting_read_.front();
     REDISCORO_ASSERT(a.sink != nullptr);
     a.sink->fail_all(err);
+    awaiting_read_.pop_front();
   }
-  awaiting_read_.clear();
 }
 
 inline auto pipeline::next_deadline() const noexcept -> time_point {

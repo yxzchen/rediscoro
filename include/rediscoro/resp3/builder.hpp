@@ -18,11 +18,11 @@ namespace detail {
   // Policy: if input doesn't match this shape, fall back to encoding="txt" and keep full text as data.
   verbatim_string v{};
   if (payload.size() >= 4 && payload[3] == ':') {
-    v.encoding = std::string(payload.substr(0, 3));
-    v.data = std::string(payload.substr(4));
+    v.encoding = payload.substr(0, 3);
+    v.data = payload.substr(4);
   } else {
     v.encoding = "txt";
-    v.data = std::string(payload);
+    v.data = payload;
   }
   return v;
 }
@@ -76,10 +76,10 @@ enum class parent_slot_kind : std::uint8_t {
       } else {
         switch (n.type) {
           case kind::simple_string:
-            f.result = message{simple_string{std::string(n.text)}};
+            f.result = message{simple_string{n.text}};
             break;
           case kind::simple_error:
-            f.result = message{simple_error{std::string(n.text)}};
+            f.result = message{simple_error{n.text}};
             break;
           case kind::integer:
             f.result = message{integer{n.i64}};
@@ -91,13 +91,13 @@ enum class parent_slot_kind : std::uint8_t {
             f.result = message{boolean{n.boolean}};
             break;
           case kind::big_number:
-            f.result = message{big_number{std::string(n.text)}};
+            f.result = message{big_number{n.text}};
             break;
           case kind::bulk_string:
-            f.result = message{bulk_string{std::string(n.text)}};
+            f.result = message{bulk_string{n.text}};
             break;
           case kind::bulk_error:
-            f.result = message{bulk_error{std::string(n.text)}};
+            f.result = message{bulk_error{n.text}};
             break;
           case kind::verbatim_string: {
             auto v = detail::decode_verbatim(n.text);

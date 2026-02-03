@@ -19,10 +19,10 @@ namespace rediscoro::detail {
 template <typename T>
 inline auto slot_from_message(resp3::message msg) -> response_slot<T> {
   if (msg.is<resp3::simple_error>()) {
-    return unexpected(response_error{redis_error{msg.as<resp3::simple_error>().message}});
+    return unexpected(response_error{redis_error{std::string{msg.as<resp3::simple_error>().message}}});
   }
   if (msg.is<resp3::bulk_error>()) {
-    return unexpected(response_error{redis_error{msg.as<resp3::bulk_error>().message}});
+    return unexpected(response_error{redis_error{std::string{msg.as<resp3::bulk_error>().message}}});
   }
 
   auto r = adapter::adapt<T>(msg);
