@@ -16,8 +16,6 @@
 
 namespace rediscoro::detail {
 
-namespace response_builder_impl {
-
 template <typename T>
 inline auto slot_from_message(resp3::message msg) -> response_slot<T> {
   if (msg.is<resp3::simple_error>()) {
@@ -38,8 +36,6 @@ template <typename T>
 inline auto slot_from_error(rediscoro::error err) -> response_slot<T> {
   return unexpected(response_error{std::move(err)});
 }
-
-}  // namespace response_builder_impl
 
 template <typename... Ts>
 class response_builder {
@@ -91,7 +87,7 @@ private:
   template <std::size_t I>
   void set_from_message(resp3::message msg) {
     using T = nth_type<I>;
-    set_slot<I>(response_builder_impl::slot_from_message<T>(std::move(msg)));
+    set_slot<I>(slot_from_message<T>(std::move(msg)));
   }
 
   using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
@@ -148,12 +144,12 @@ public:
 
   void accept(resp3::message msg) {
     REDISCORO_ASSERT(results_.size() < expected_);
-    results_.push_back(response_builder_impl::slot_from_message<T>(std::move(msg)));
+    results_.push_back(slot_from_message<T>(std::move(msg)));
   }
 
   void accept(rediscoro::error err) {
     REDISCORO_ASSERT(results_.size() < expected_);
-    results_.push_back(response_builder_impl::slot_from_error<T>(std::move(err)));
+    results_.push_back(slot_from_error<T>(std::move(err)));
   }
 
   auto take_results() -> dynamic_response<T> {
