@@ -47,15 +47,17 @@ class parser {
     [[nodiscard]] auto need_more() const noexcept -> bool {
       return status == parse_status::need_more;
     }
-
-    [[nodiscard]] static auto make_need_more() noexcept -> parse_step {
-      return parse_step{.status = parse_status::need_more, .value = {}};
-    }
-
-    [[nodiscard]] static auto make_ok(T v) -> parse_step {
-      return parse_step{.status = parse_status::ok, .value = std::move(v)};
-    }
   };
+
+  template <typename T>
+  [[nodiscard]] static auto ok_step(T v) -> parse_step<T> {
+    return parse_step<T>{.status = parse_status::ok, .value = std::move(v)};
+  }
+
+  template <typename T>
+  [[nodiscard]] static auto need_more_step() noexcept -> parse_step<T> {
+    return parse_step<T>{.status = parse_status::need_more, .value = {}};
+  }
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
   auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
