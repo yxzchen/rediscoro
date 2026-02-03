@@ -97,7 +97,7 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   p.push(req, sink);
 
   // Before any write/read, clear_all should deliver 2 errors.
-  p.clear_all(rediscoro::error_info{rediscoro::client_errc::connection_closed});
+  p.clear_all(rediscoro::client_errc::connection_closed);
   EXPECT_TRUE(sink->is_complete());
   EXPECT_EQ(sink->err_count(), 2u);
   EXPECT_FALSE(p.has_pending_write());

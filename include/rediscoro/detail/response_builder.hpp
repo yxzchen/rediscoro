@@ -86,7 +86,7 @@ class response_builder {
   template <std::size_t I, typename E>
   void set_error(E&& e) {
     static_assert(std::is_constructible_v<error_info, E>);
-    set_slot<I>(unexpected(error_info{std::forward<E>(e)}));
+    set_slot<I>(unexpected(std::forward<E>(e)));
   }
 
   template <std::size_t I>
