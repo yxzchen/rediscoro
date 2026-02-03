@@ -4,7 +4,7 @@ project(rediscoro VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-option(REDISCORO_BUILD_TESTS "Build tests" ${PROJECT_IS_TOP_LEVEL})
+option(REDISCORO_BUILD_TESTS "Build tests" OFF)
 option(REDISCORO_ENABLE_WARNINGS "Enable warning flags for rediscoro tests/examples" ${PROJECT_IS_TOP_LEVEL})
 option(REDISCORO_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
