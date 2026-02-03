@@ -7,49 +7,15 @@ namespace rediscoro::detail {
 
 /// RAII wrapper for binding the connection to a strand executor.
 ///
-/// Responsibilities:
-/// - Ensure connection operations run on a single strand
-/// - Prevent concurrent access to socket
-/// - Provide stable executor reference
+/// Purpose: make “everything runs on the connection strand” hard to violate.
 ///
-/// Critical constraints (MUST be enforced):
-/// 1. All connection internals run on ONE strand
-///    - Multiple coroutines are allowed (read_loop / write_loop / control_loop)
-///    - They MUST all be spawned/bound onto this SAME strand executor
-///    - All state_, pipeline_, and socket_ *lifecycle* mutations are serialized by the strand
-///
-///    Note: socket IO is full-duplex:
-///    - One async_read_some and one async_write_some may be in-flight concurrently
-///    - But you MUST NOT start two concurrent reads or two concurrent writes
-///      (enforced by per-direction in-flight flags inside connection)
-///
-/// 2. NO direct executor usage in connection internals
-///    - All async operations use the strand executor
-///    - No "optimization" by bypassing strand
-///
-/// 3. Strand reference is stable
-///    - Can be copied safely
-///    - All copies refer to the same underlying strand
-///
-/// Why these constraints matter:
-/// - Strand serialization is the ONLY concurrency control
-/// - No locks, no atomics (except in coroutine-friendly event primitives)
-/// - Breaking strand guarantee = data race
-///
-/// Forbidden patterns:
-///   // WRONG: spawning onto non-strand executor (breaks serialization)
-///   co_spawn(io_executor, async_operation(), detached);
-///
-///   // WRONG: bypassing strand
-///   co_await socket_.async_read_some(buffer, use_awaitable);
-///
-/// Correct patterns:
-///   // OK: spawn coroutines onto the same strand
-///   co_spawn(executor_.strand().executor(), read_loop(), detached);
-///   co_spawn(executor_.strand().executor(), write_loop(), detached);
-///
-///   // OK: direct await inside any strand-bound coroutine
-///   co_await socket_.async_read_some(buf, iocoro::bind_executor(executor_.strand().executor(), use_awaitable));
+/// Contract:
+/// - All connection internals (state machine + pipeline + socket lifecycle) are serialized on a
+///   single strand executor.
+/// - Socket IO is full-duplex: at most one in-flight read and one in-flight write are allowed
+///   concurrently (the connection enforces the per-direction rule).
+/// - Connection code must not bypass the strand by awaiting/spawning on other executors.
+/// - The strand handle is stable/copyable (copies refer to the same strand).
 class connection_executor {
 public:
   explicit connection_executor(iocoro::any_io_executor ex)

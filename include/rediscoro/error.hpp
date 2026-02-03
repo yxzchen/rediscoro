@@ -34,8 +34,7 @@ enum class error {
   connect_timeout,
 
   /// Connection reset / peer closed.
-  ///
-  /// Used when the peer closes the TCP connection (EOF) or resets it.
+  /// Peer closed the connection (EOF) or reset it.
   connection_reset,
 
   /// Handshake with Redis server failed.
@@ -48,15 +47,11 @@ enum class error {
   handshake_timeout,
 
   /// Server sent a message we don't support (e.g. RESP3 PUSH) or an unexpected message arrived.
-  ///
   /// Current policy: treated as fatal and triggers reconnect.
   unsolicited_message,
 
   /// Request timed out.
-  ///
-  /// Contract:
-  /// - Request timeout is connection-level: once any request times out, the connection is treated
-  ///   as unhealthy and enters reconnection.
+  /// Request timeout is connection-level: triggers reconnect.
   request_timeout,
 
   /// Connection is closed (CLOSING or CLOSED state).
@@ -70,16 +65,7 @@ enum class error {
 
   /// Parser needs more data to complete parsing.
   ///
-  /// Internal implementation detail: This error code is only used internally
-  /// between parser and connection. It will never appear in user-visible response_error.
-  ///
-  /// How it works:
-  /// - parser.parse_one() returns this error when buffer has insufficient data
-  /// - connection detects this error and continues reading from socket
-  /// - Real protocol errors are passed to pipeline and user
-  ///
-  /// Analogy: POSIX EAGAIN/EWOULDBLOCK - while in errno space, usually handled
-  /// internally by libraries, rarely used directly by applications.
+  /// Internal-only signal between parser and connection: read more bytes and retry parsing.
   resp3_needs_more = 100,
 
   /// Attempted to parse but tree was not consumed (reclaim not called).
@@ -119,8 +105,7 @@ enum class error {
 auto make_error_code(error e) -> std::error_code;
 
 /// Check if an error is an internal state that should not be exposed to users.
-///
-/// Currently only resp3_needs_more is an internal error.
+/// These should not appear in user-visible responses.
 constexpr bool is_internal_error(error e) noexcept {
   return e == error::resp3_needs_more || e == error::resp3_tree_not_consumed;
 }

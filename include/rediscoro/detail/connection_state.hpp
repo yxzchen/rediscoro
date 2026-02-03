@@ -6,9 +6,9 @@ namespace rediscoro::detail {
 
 /// Connection lifecycle states used by `detail::connection`.
 ///
-/// This is an *implementation-facing* enum (not a user-level protocol contract). The actual
-/// transitions are driven by `connection::{connect,close}`, `handle_error()`, `control_loop()`,
-/// and `transition_to_closed()` and are all serialized on the connection strand.
+/// Implementation-facing enum (not a user-level contract). All transitions are serialized on the
+/// connection strand and driven by `connection::{connect,close}`, `handle_error()`,
+/// `control_loop()`, and `transition_to_closed()`.
 ///
 /// High-level lifecycle:
 ///
@@ -22,14 +22,13 @@ namespace rediscoro::detail {
 ///          CLOSED          +--------> RECONNECTING
 ///                             (connect attempt)
 ///
-/// Key semantics aligned with the current implementation:
+/// Key semantics (aligned with the current implementation):
 ///
 /// - **Enqueue gating**: only `OPEN` accepts user work; all other states fail immediately.
 ///   - `INIT`/`CONNECTING` -> `error::not_connected`
 ///   - `FAILED`/`RECONNECTING` -> `error::connection_lost`
 ///   - `CLOSING`/`CLOSED` -> `error::connection_closed`
-///   There is **no request buffering** across connection generations (no replay, no queueing
-///   during reconnect).
+///   There is **no request buffering** across connection generations.
 ///
 /// - **Initial connect failures do NOT use `FAILED`**:
 ///   `FAILED` is reserved for runtime errors *after* reaching `OPEN`.

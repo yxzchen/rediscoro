@@ -83,19 +83,8 @@ public:
   /// Can be called from any executor.
   /// Returns a pending_response that will be completed when all replies arrive.
   ///
-  /// IMPORTANT: Requests can only be enqueued AFTER connect() succeeds.
-  /// This design ensures clean separation between connection establishment and normal operation.
-  ///
-  /// Behavior by state:
-  /// - INIT, CONNECTING: Request rejected immediately (error::not_connected)
-  ///                     User must wait for connect() to complete
-  /// - OPEN: Request accepted and queued
-  /// - FAILED: Request rejected immediately (error::connection_lost)
-  ///           Connection lost due to runtime error, automatic reconnection may be in progress
-  /// - RECONNECTING: Request rejected immediately (error::connection_lost)
-  ///                Connection is not usable during reconnection attempts
-  /// - CLOSING, CLOSED: Request rejected immediately (error::connection_closed)
-  ///                    Connection has been shut down
+  /// State gating: only `OPEN` accepts work; all other states fail immediately.
+  /// See `detail/connection_state.hpp` for the exact mapping to error codes.
   template <typename... Ts>
   auto enqueue(request req) -> std::shared_ptr<pending_response<Ts...>>;
 
@@ -129,21 +118,12 @@ public:
 private:
   /// Start the background connection actor (internal use only).
   ///
-  /// Semantics:
-  /// - Spawns actor_loop() on the connection's strand
-  /// - Uses use_awaitable completion token and saves the awaitable in actor_awaitable_
-  /// - MUST NOT be called if actor_awaitable_.has_value() is true (actor already running)
-  /// - `actor_awaitable_` is joined exactly once by `close()` (single-await rule)
+  /// - Spawns `actor_loop()` on the connection strand.
+  /// - Safe to call only when the actor is not running.
+  /// - The actor keeps the connection alive via `shared_from_this()` and signals `actor_done_`
+  ///   on exit (waited by `close()`).
   ///
-  /// Single-instance guarantee:
-  /// - Only one actor_loop instance can run at a time
-  /// - Checked by: actor_awaitable_.has_value()
-  /// - After `close()` joins the actor, it resets actor_awaitable_, allowing a retry connect()
-  ///
-  /// Called by connect() to ensure the actor is running before connection attempt.
-  ///
-  /// PRE: actor_awaitable_.has_value() == false
-  /// POST: actor_awaitable_.has_value() == true
+  /// Called by `connect()` to ensure the actor is running before attempting a connection.
   auto run_actor() -> void;
 
   /// Top-level connection actor coroutine.

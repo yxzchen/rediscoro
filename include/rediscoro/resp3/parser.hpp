@@ -38,10 +38,16 @@ struct frame {
 /// - zero-copy: raw_node.text is string_view into `buffer` memory (must remain stable)
 /// - output: root node index into `tree().nodes`
 ///
+/// Algorithm sketch:
+/// - Maintains a stack of container frames (array/map/set/push/attribute).
+/// - As scalars/containers complete, appends raw nodes into `tree_` and links children via `links`.
+/// - Pending attributes are accumulated and attached to the next completed value only.
+///
 /// Contracts (important):
 /// - pending attributes apply to the next completed value only
 /// - after parse_one() returns a root, the caller must not compact/reset/reallocate the input
 ///   buffer until the returned raw_tree nodes are fully consumed (string_view lifetime)
+/// - after consuming `tree()+root`, call reclaim() before parsing the next message
 class parser {
 public:
   parser() = default;

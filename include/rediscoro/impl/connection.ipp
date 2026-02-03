@@ -87,8 +87,6 @@ inline auto connection::run_actor() -> void {
 }
 
 inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
-  // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
-  // data races with the background loops.
   co_await iocoro::this_coro::switch_to(executor_.strand().executor());
 
   if (state_ == connection_state::OPEN) {
@@ -218,7 +216,6 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
 
   (void)co_await iocoro::when_all(std::move(writer), std::move(reader), std::move(controller));
 
-  // CRITICAL: Only transition_to_closed() is allowed to write state_ = CLOSED.
   transition_to_closed();
   co_return;
 }
@@ -252,9 +249,7 @@ inline auto connection::read_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::control_loop() -> iocoro::awaitable<void> {
-  // IMPORTANT constraints:
-  // - Must NOT write CLOSED (only transition_to_closed()).
-  // - Must be stop-aware so close() can interrupt promptly.
+  // Stop-aware control loop; must not write CLOSED.
   auto tok = co_await iocoro::this_coro::stop_token;
   while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     if (state_ == connection_state::FAILED) {
