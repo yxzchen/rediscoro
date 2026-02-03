@@ -97,7 +97,7 @@ public:
 
   /// Internal enqueue implementation (type-erased).
   /// MUST be called from connection strand.
-  auto enqueue_impl(request req, response_sink* sink) -> void;
+  auto enqueue_impl(request req, std::shared_ptr<response_sink> sink) -> void;
 
   /// Get current connection state (for diagnostics).
   [[nodiscard]] auto state() const noexcept -> connection_state {

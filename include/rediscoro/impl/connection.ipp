@@ -167,7 +167,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   co_return;
 }
 
-inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
+inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink> sink) -> void {
   REDISCORO_ASSERT(sink != nullptr);
 
   // State gating: reject early if not ready.
@@ -196,10 +196,23 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
   if (cfg_.request_timeout > std::chrono::milliseconds{0}) {
     deadline = pipeline::clock::now() + cfg_.request_timeout;
   }
-  pipeline_.push(std::move(req), sink, deadline);
+  pipeline_.push(std::move(req), std::move(sink), deadline);
   write_wakeup_.notify();
   control_wakeup_.notify();  // request_timeout scheduling / wake control_loop when first request arrives
 }
+
+inline auto connection::transition_to_closed() -> void {
+  // Deterministic cleanup (idempotent).
+  state_ = connection_state::CLOSED;
+
+  pipeline_.clear_all(error::connection_closed);
+
+  if (socket_.is_open()) {
+    (void)socket_.close();
+  }
+}
+
+// -------------------- Actor loops --------------------
 
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Hard constraint (IMPORTANT):
@@ -463,7 +476,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
   }
 
   auto slot = std::make_shared<pending_dynamic_response<ignore_t>>(req.reply_count());
-  pipeline_.push(std::move(req), slot.get());
+  pipeline_.push(std::move(req), slot);
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
   auto handshake_res = co_await iocoro::with_timeout(
@@ -726,17 +739,6 @@ inline auto connection::handle_error(error ec) -> void {
   read_wakeup_.notify();
 }
 
-inline auto connection::transition_to_closed() -> void {
-  // Deterministic cleanup (idempotent).
-  state_ = connection_state::CLOSED;
-
-  pipeline_.clear_all(error::connection_closed);
-
-  if (socket_.is_open()) {
-    (void)socket_.close();
-  }
-}
-
 template <typename... Ts>
 inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>> {
   REDISCORO_ASSERT(req.reply_count() == sizeof...(Ts));
@@ -748,7 +750,7 @@ inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response
   // Performance: use dispatch() so if we're already on the strand, we run inline and avoid an
   // extra scheduling hop; otherwise it behaves like post().
   executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
-    self->enqueue_impl(std::move(req), slot.get());
+    self->enqueue_impl(std::move(req), slot);
   });
 
   return slot;
@@ -761,7 +763,7 @@ inline auto connection::enqueue_dynamic(request req) -> std::shared_ptr<pending_
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
   executor_.strand().executor().dispatch([self = shared_from_this(), req = std::move(req), slot]() mutable {
-    self->enqueue_impl(std::move(req), slot.get());
+    self->enqueue_impl(std::move(req), slot);
   });
 
   return slot;

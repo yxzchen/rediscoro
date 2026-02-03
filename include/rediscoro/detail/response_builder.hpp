@@ -16,6 +16,31 @@
 
 namespace rediscoro::detail {
 
+namespace response_builder_impl {
+
+template <typename T>
+inline auto slot_from_message(resp3::message msg) -> response_slot<T> {
+  if (msg.is<resp3::simple_error>()) {
+    return unexpected(response_error{redis_error{msg.as<resp3::simple_error>().message}});
+  }
+  if (msg.is<resp3::bulk_error>()) {
+    return unexpected(response_error{redis_error{msg.as<resp3::bulk_error>().message}});
+  }
+
+  auto r = adapter::adapt<T>(msg);
+  if (!r) {
+    return unexpected(response_error{std::move(r.error())});
+  }
+  return std::move(*r);
+}
+
+template <typename T>
+inline auto slot_from_error(rediscoro::error err) -> response_slot<T> {
+  return unexpected(response_error{std::move(err)});
+}
+
+}  // namespace response_builder_impl
+
 template <typename... Ts>
 class response_builder {
 public:
@@ -66,22 +91,7 @@ private:
   template <std::size_t I>
   void set_from_message(resp3::message msg) {
     using T = nth_type<I>;
-
-    if (msg.is<resp3::simple_error>()) {
-      set_error<I>(redis_error{msg.as<resp3::simple_error>().message});
-      return;
-    }
-    if (msg.is<resp3::bulk_error>()) {
-      set_error<I>(redis_error{msg.as<resp3::bulk_error>().message});
-      return;
-    }
-
-    auto r = adapter::adapt<T>(msg);
-    if (!r) {
-      set_error<I>(std::move(r.error()));
-      return;
-    }
-    set_slot<I>(std::move(*r));
+    set_slot<I>(response_builder_impl::slot_from_message<T>(std::move(msg)));
   }
 
   using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
@@ -138,27 +148,12 @@ public:
 
   void accept(resp3::message msg) {
     REDISCORO_ASSERT(results_.size() < expected_);
-
-    if (msg.is<resp3::simple_error>()) {
-      results_.push_back(unexpected(response_error{redis_error{msg.as<resp3::simple_error>().message}}));
-      return;
-    }
-    if (msg.is<resp3::bulk_error>()) {
-      results_.push_back(unexpected(response_error{redis_error{msg.as<resp3::bulk_error>().message}}));
-      return;
-    }
-
-    auto r = adapter::adapt<T>(msg);
-    if (!r) {
-      results_.push_back(unexpected(response_error{std::move(r.error())}));
-      return;
-    }
-    results_.push_back(std::move(*r));
+    results_.push_back(response_builder_impl::slot_from_message<T>(std::move(msg)));
   }
 
   void accept(rediscoro::error err) {
     REDISCORO_ASSERT(results_.size() < expected_);
-    results_.push_back(unexpected(response_error{std::move(err)}));
+    results_.push_back(response_builder_impl::slot_from_error<T>(std::move(err)));
   }
 
   auto take_results() -> dynamic_response<T> {

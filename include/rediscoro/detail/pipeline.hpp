@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <deque>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -50,12 +51,12 @@ public:
   /// - pipeline MUST NOT deliver more than sink->expected_replies() replies into a sink.
   /// - For a fixed-size sink (pending_response<Ts...>), req.reply_count() MUST equal sizeof...(Ts)
   ///   (enforced at connection::enqueue<Ts...> boundary).
-  auto push(request req, response_sink* sink) -> void;
+  auto push(request req, std::shared_ptr<response_sink> sink) -> void;
 
   /// Enqueue a request with a timeout deadline.
   ///
   /// deadline == time_point::max() means "no timeout".
-  auto push(request req, response_sink* sink, time_point deadline) -> void;
+  auto push(request req, std::shared_ptr<response_sink> sink, time_point deadline) -> void;
 
   /// Check if there are pending writes.
   [[nodiscard]] bool has_pending_write() const noexcept;
@@ -97,13 +98,13 @@ public:
 private:
   struct pending_item {
     request req;
-    response_sink* sink;  // Abstract interface, no knowledge of coroutines
+    std::shared_ptr<response_sink> sink;  // Abstract interface, no knowledge of coroutines
     std::size_t written{0};  // bytes written so far
     time_point deadline{time_point::max()};
   };
 
   struct awaiting_item {
-    response_sink* sink;  // Abstract interface
+    std::shared_ptr<response_sink> sink;  // Abstract interface
     time_point deadline{time_point::max()};
   };
 

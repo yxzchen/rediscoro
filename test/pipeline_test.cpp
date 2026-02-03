@@ -7,6 +7,7 @@
 #include <rediscoro/resp3/message.hpp>
 
 #include <cstddef>
+#include <memory>
 
 namespace {
 
@@ -39,13 +40,13 @@ private:
 
 TEST(pipeline_test, partial_write_and_next_write_buffer) {
   rediscoro::detail::pipeline p;
-  counting_sink sink{1};
+  auto sink = std::make_shared<counting_sink>(1);
 
   rediscoro::request req{"PING"};
   const auto wire = req.wire();
   ASSERT_FALSE(wire.empty());
 
-  p.push(req, &sink);
+  p.push(req, sink);
   ASSERT_TRUE(p.has_pending_write());
 
   auto b1 = p.next_write_buffer();
@@ -68,8 +69,8 @@ TEST(pipeline_test, multi_reply_dispatch_completes_sink) {
   req.push("PING");
   ASSERT_EQ(req.reply_count(), 2u);
 
-  counting_sink sink{2};
-  p.push(req, &sink);
+  auto sink = std::make_shared<counting_sink>(2);
+  p.push(req, sink);
 
   // Pretend socket wrote everything.
   const auto wire = req.wire();
@@ -77,12 +78,12 @@ TEST(pipeline_test, multi_reply_dispatch_completes_sink) {
   ASSERT_TRUE(p.has_pending_read());
 
   p.on_message(rediscoro::resp3::message{rediscoro::resp3::simple_string{"OK"}});
-  EXPECT_EQ(sink.msg_count(), 1u);
-  EXPECT_FALSE(sink.is_complete());
+  EXPECT_EQ(sink->msg_count(), 1u);
+  EXPECT_FALSE(sink->is_complete());
 
   p.on_message(rediscoro::resp3::message{rediscoro::resp3::simple_string{"OK"}});
-  EXPECT_EQ(sink.msg_count(), 2u);
-  EXPECT_TRUE(sink.is_complete());
+  EXPECT_EQ(sink->msg_count(), 2u);
+  EXPECT_TRUE(sink->is_complete());
   EXPECT_FALSE(p.has_pending_read());
 }
 
@@ -92,14 +93,14 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   rediscoro::request req;
   req.push("PING");
   req.push("PING");
-  counting_sink sink{2};
+  auto sink = std::make_shared<counting_sink>(2);
 
-  p.push(req, &sink);
+  p.push(req, sink);
 
   // Before any write/read, clear_all should deliver 2 errors.
   p.clear_all(rediscoro::error::connection_closed);
-  EXPECT_TRUE(sink.is_complete());
-  EXPECT_EQ(sink.err_count(), 2u);
+  EXPECT_TRUE(sink->is_complete());
+  EXPECT_EQ(sink->err_count(), 2u);
   EXPECT_FALSE(p.has_pending_write());
   EXPECT_FALSE(p.has_pending_read());
 }
