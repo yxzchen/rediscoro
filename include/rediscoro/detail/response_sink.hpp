@@ -46,7 +46,7 @@ namespace rediscoro::detail {
 /// Thread safety:
 /// - deliver() methods called ONLY from connection strand
 /// - No cross-thread synchronization needed
-/// - Implementation (pending_response) handles executor dispatch via notify_event
+/// - Implementation (pending_response) handles executor dispatch via condition_event
 class response_sink {
 public:
   virtual ~response_sink() = default;

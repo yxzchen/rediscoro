@@ -1,12 +1,12 @@
 #pragma once
 
 #include <rediscoro/assert.hpp>
-#include <rediscoro/detail/notify_event.hpp>
 #include <rediscoro/detail/response_builder.hpp>
 #include <rediscoro/detail/response_sink.hpp>
 #include <rediscoro/response.hpp>
 
 #include <iocoro/awaitable.hpp>
+#include <iocoro/condition_event.hpp>
 
 #include <optional>
 #include <utility>
@@ -21,7 +21,7 @@ namespace rediscoro::detail {
 /// - deliver() and deliver_error() are called ONLY from connection strand
 /// - wait() is called from user's coroutine context (any executor)
 /// - No cross-executor synchronization needed for deliver
-/// - notify_event handles executor dispatch for wait() resumption
+/// - condition_event handles executor dispatch for wait() resumption
 ///
 /// Why this simplification is safe:
 /// - pipeline runs on connection strand
@@ -52,7 +52,7 @@ public:
   }
 
   auto wait() -> iocoro::awaitable<response<Ts...>> {
-    co_await event_.wait();
+    (void)co_await event_.async_wait();
     REDISCORO_ASSERT(result_.has_value());
     co_return std::move(*result_);
   }
@@ -85,7 +85,7 @@ protected:
   }
 
 private:
-  notify_event event_{};
+  iocoro::condition_event event_{};
   response_builder<Ts...> builder_{};
   std::optional<response<Ts...>> result_{};
 };
@@ -106,7 +106,7 @@ public:
   }
 
   auto wait() -> iocoro::awaitable<dynamic_response<T>> {
-    co_await event_.wait();
+    (void)co_await event_.async_wait();
     REDISCORO_ASSERT(result_.has_value());
     co_return std::move(*result_);
   }
@@ -139,7 +139,7 @@ protected:
   }
 
 private:
-  notify_event event_{};
+  iocoro::condition_event event_{};
   dynamic_response_builder<T> builder_;
   std::optional<dynamic_response<T>> result_{};
 };

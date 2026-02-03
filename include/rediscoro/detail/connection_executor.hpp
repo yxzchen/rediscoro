@@ -33,7 +33,7 @@ namespace rediscoro::detail {
 ///
 /// Why these constraints matter:
 /// - Strand serialization is the ONLY concurrency control
-/// - No locks, no atomics (except in notify_event)
+/// - No locks, no atomics (except in coroutine-friendly event primitives)
 /// - Breaking strand guarantee = data race
 ///
 /// Forbidden patterns:

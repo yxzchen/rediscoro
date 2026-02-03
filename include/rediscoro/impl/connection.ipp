@@ -162,7 +162,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   control_wakeup_.notify();
 
   if (actor_running_) {
-    co_await actor_done_.wait();
+    (void)co_await actor_done_.async_wait();
   }
 
   REDISCORO_ASSERT(state_ == connection_state::CLOSED);
@@ -227,7 +227,7 @@ inline auto connection::write_loop() -> iocoro::awaitable<void> {
   auto tok = co_await iocoro::this_coro::stop_token;
   while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     if (state_ != connection_state::OPEN || !pipeline_.has_pending_write()) {
-      co_await write_wakeup_.wait();
+      (void)co_await write_wakeup_.async_wait();
       continue;
     }
 
@@ -241,7 +241,7 @@ inline auto connection::read_loop() -> iocoro::awaitable<void> {
   auto tok = co_await iocoro::this_coro::stop_token;
   while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     if (state_ != connection_state::OPEN) {
-      co_await read_wakeup_.wait();
+      (void)co_await read_wakeup_.async_wait();
       continue;
     }
 
@@ -284,7 +284,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
         timer.expires_at(next);
 
         auto timer_wait = timer.async_wait(iocoro::use_awaitable);
-        auto wake_wait = control_wakeup_.wait();
+        auto wake_wait = control_wakeup_.async_wait();
         (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
         continue;
       }
@@ -295,7 +295,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
       break;
     }
 
-    co_await control_wakeup_.wait();
+    (void)co_await control_wakeup_.async_wait();
   }
 
   co_return;
@@ -350,7 +350,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
 
         // Wait either for the timer or for an external control signal (close/notify).
         auto timer_wait = timer.async_wait(iocoro::use_awaitable);
-        auto wake_wait = control_wakeup_.wait();
+        auto wake_wait = control_wakeup_.async_wait();
         (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
       }
     }

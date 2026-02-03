@@ -5,7 +5,6 @@
 #include <rediscoro/expected.hpp>
 #include <rediscoro/detail/connection_state.hpp>
 #include <rediscoro/detail/connection_executor.hpp>
-#include <rediscoro/detail/notify_event.hpp>
 #include <rediscoro/detail/pending_response.hpp>
 #include <rediscoro/detail/pipeline.hpp>
 #include <rediscoro/detail/stop_scope.hpp>
@@ -14,6 +13,7 @@
 
 #include <iocoro/awaitable.hpp>
 #include <iocoro/any_io_executor.hpp>
+#include <iocoro/condition_event.hpp>
 #include <iocoro/ip/tcp.hpp>
 
 #include <memory>
@@ -264,9 +264,9 @@ private:
   stop_scope stop_{};
 
   // Loop notifications (counting wakeups, thread-safe notify)
-  notify_event write_wakeup_{};
-  notify_event read_wakeup_{};
-  notify_event control_wakeup_{};
+  iocoro::condition_event write_wakeup_{};
+  iocoro::condition_event read_wakeup_{};
+  iocoro::condition_event control_wakeup_{};
 
   // IO in-flight guards (strand-only mutation)
   bool read_in_flight_{false};
@@ -274,7 +274,7 @@ private:
 
   // Actor lifecycle
   bool actor_running_{false};
-  notify_event actor_done_{};
+  iocoro::condition_event actor_done_{};
 
   // Reconnection state
   int reconnect_count_{0};  // Number of reconnection attempts (reset on success)
