@@ -12,6 +12,7 @@ using namespace std::chrono_literals;
 
 TEST(client_test, connect_to_http_server_reports_protocol_error) {
   iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
 
   rediscoro::config cfg{};
   cfg.host = "qq.com";
@@ -26,29 +27,37 @@ TEST(client_test, connect_to_http_server_reports_protocol_error) {
   std::string diag{};
 
   auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
     rediscoro::client c{ctx.get_executor(), cfg};
 
-    auto ec = co_await c.connect();
-    if (!ec) {
+    auto r = co_await c.connect();
+    if (r.has_value()) {
       diag = "unexpected success connecting to qq.com:80 as redis";
       co_return;
     }
 
+    auto const e = r.error();
+
     // If we cannot even resolve/connect, we can't test protocol mismatch deterministically.
-    if (ec == rediscoro::error::resolve_failed || ec == rediscoro::error::resolve_timeout ||
-        ec == rediscoro::error::connect_failed || ec == rediscoro::error::connect_timeout) {
+    if (e == rediscoro::error::resolve_failed || e == rediscoro::error::resolve_timeout ||
+        e == rediscoro::error::connect_failed || e == rediscoro::error::connect_timeout) {
       skipped = true;
-      skip_reason = "network not available to reach qq.com:80 (connect failed: " + ec.message() + ")";
+      skip_reason = "network not available to reach qq.com:80 (connect failed: " +
+                    rediscoro::make_error_code(e).message() + ")";
       co_return;
     }
 
     // For a reachable HTTP server, RESP3 parser should fail quickly with a protocol error.
-    // After unification, RESP3 errors are in rediscoro category (100-199 range).
-    if (std::string_view{ec.category().name()} != "rediscoro") {
-      diag = "expected rediscoro error category, got: " + std::string{ec.category().name()} +
-             " / " + ec.message();
+    if (static_cast<int>(e) < static_cast<int>(rediscoro::error::resp3_invalid_type_byte)) {
+      diag = "expected RESP3 protocol error, got: " + rediscoro::make_error_code(e).message();
       co_return;
     }
+
     ok = true;
     co_return;
   };
@@ -101,22 +110,33 @@ TEST(client_test, exec_without_connect_is_rejected) {
 
 TEST(client_test, resolve_timeout_zero_is_reported) {
   iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
 
   bool ok = false;
   std::string diag{};
 
   auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
     rediscoro::config cfg{};
-    // Deterministic: resolve_timeout <= 0 makes with_timeout_detached immediately time out.
+    // Deterministic: resolve_timeout <= 0 makes with_timeout immediately time out.
     cfg.host = "qq.com";
     cfg.port = 80;
     cfg.resolve_timeout = 0ms;
     cfg.reconnection.enabled = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};
-    auto ec = co_await c.connect();
-    if (ec != rediscoro::error::resolve_timeout) {
-      diag = "expected resolve_timeout, got: " + ec.message();
+    auto r = co_await c.connect();
+    if (r.has_value()) {
+      diag = "expected resolve_timeout, got success";
+      co_return;
+    }
+    if (r.error() != rediscoro::error::resolve_timeout) {
+      diag = "expected resolve_timeout, got: " + rediscoro::make_error_code(r.error()).message();
       co_return;
     }
 
@@ -132,11 +152,18 @@ TEST(client_test, resolve_timeout_zero_is_reported) {
 
 TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
   iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
 
   bool ok = false;
   std::string diag{};
 
   auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
     rediscoro::config cfg{};
     cfg.host = "10.255.255.1";
     cfg.port = 6379;
@@ -145,19 +172,23 @@ TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
     cfg.reconnection.enabled = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};
-    auto ec = co_await c.connect();
-    if (!ec) {
+    auto r = co_await c.connect();
+    if (r.has_value()) {
       diag = "unexpected success connecting to blackhole address";
       co_return;
     }
 
+    auto const e = r.error();
+
     // Depending on routing, we may time out at TCP connect or during the handshake read/write.
-    if (!(ec == rediscoro::error::connect_timeout || ec == rediscoro::error::handshake_timeout ||
-          ec == rediscoro::error::connect_failed || ec == rediscoro::error::resolve_failed ||
-          ec == rediscoro::error::resolve_timeout || ec == rediscoro::error::connection_reset)) {
-      diag = "expected timeout/connect failure, got: " + ec.message();
+    if (!(e == rediscoro::error::connect_timeout || e == rediscoro::error::handshake_timeout ||
+          e == rediscoro::error::connect_failed || e == rediscoro::error::resolve_failed ||
+          e == rediscoro::error::resolve_timeout || e == rediscoro::error::connection_reset ||
+          e == rediscoro::error::operation_aborted)) {
+      diag = "expected timeout/connect failure, got: " + rediscoro::make_error_code(e).message();
       co_return;
     }
+
     ok = true;
     co_return;
   };
@@ -170,6 +201,7 @@ TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
 
 TEST(client_test, ping_set_get_roundtrip) {
   iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
 
   bool skipped = false;
   std::string skip_reason{};
@@ -177,6 +209,12 @@ TEST(client_test, ping_set_get_roundtrip) {
   std::string diag{};
 
   auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
     rediscoro::config cfg{};
     cfg.host = "127.0.0.1";
     cfg.port = 6379;
@@ -185,10 +223,11 @@ TEST(client_test, ping_set_get_roundtrip) {
     cfg.reconnection.enabled = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};
-    auto ec = co_await c.connect();
-    if (ec) {
+    auto r = co_await c.connect();
+    if (!r.has_value()) {
       skipped = true;
-      skip_reason = "redis not available at 127.0.0.1:6379 (" + ec.message() + ")";
+      skip_reason = "redis not available at 127.0.0.1:6379 (" +
+                    rediscoro::make_error_code(r.error()).message() + ")";
       co_return;
     }
 

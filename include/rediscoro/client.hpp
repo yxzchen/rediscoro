@@ -2,6 +2,8 @@
 
 #include <rediscoro/config.hpp>
 #include <rediscoro/detail/connection.hpp>
+#include <rediscoro/error.hpp>
+#include <rediscoro/expected.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
 
@@ -45,9 +47,9 @@ public:
   /// Performs TCP connection, authentication, and database selection.
   ///
   /// Returns:
-  /// - std::error_code{} (empty) on success
-  /// - error_code with error details on failure
-  auto connect() -> iocoro::awaitable<std::error_code> {
+  /// - expected<void, error>{} on success
+  /// - unexpected(error) with error details on failure
+  auto connect() -> iocoro::awaitable<expected<void, error>> {
     co_return co_await conn_->connect();
   }
 

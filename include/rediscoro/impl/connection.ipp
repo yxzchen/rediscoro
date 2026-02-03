@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <span>
 #include <string>
 #include <system_error>
@@ -36,14 +37,7 @@ inline connection::~connection() noexcept {
   //
   // This destructor does not co_await (cannot); it only closes resources and notifies waiters.
   //
-  // Note: actor_awaitable_ is normally reset by close() after co_await-ing the actor.
-  // If the user never calls close(), the actor may still complete (e.g. error path), leaving a
-  // completed awaitable stored here. In that case, it's safe to drop it during destruction.
-  if (actor_awaitable_.has_value()) {
-    actor_awaitable_.reset();
-  }
-
-  cancel_.request_cancel();
+  stop_.request_stop();
 
   // Do not force CLOSED here (only transition_to_closed() may write CLOSED).
   // We only ensure resources are released.
@@ -63,31 +57,46 @@ inline connection::~connection() noexcept {
 }
 
 inline auto connection::run_actor() -> void {
-  REDISCORO_ASSERT(!actor_awaitable_.has_value() && "run_actor() called while actor is running");
+  REDISCORO_ASSERT(!actor_running_ && "run_actor() called while actor is running");
+  actor_running_ = true;
 
   auto ex = executor_.strand().executor();
-  actor_awaitable_.emplace(
-    iocoro::co_spawn(ex, iocoro::bind_executor(ex, actor_loop()), iocoro::use_awaitable)
-  );
+  auto self = shared_from_this();
+  iocoro::co_spawn(
+    ex,
+    stop_.token(),
+    [self, ex]() mutable -> iocoro::awaitable<void> {
+      // Keep the connection alive until the actor completes.
+      (void)self;
+      co_return co_await iocoro::bind_executor(ex, self->actor_loop());
+    },
+    [self, ex](iocoro::expected<void, std::exception_ptr> r) mutable {
+      // Ensure lifecycle mutations are serialized on the connection strand.
+      ex.post([self = std::move(self), r = std::move(r)]() mutable {
+        self->actor_running_ = false;
+        if (!r) {
+          // No-exception policy: record a best-effort diagnostic and proceed with deterministic cleanup.
+          self->last_error_ = error::connection_lost;
+        }
+        if (self->state_ != connection_state::CLOSED) {
+          self->transition_to_closed();
+        }
+        self->actor_done_.notify();
+      });
+    });
 }
 
-inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
+inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
   // CRITICAL: All state mutations MUST occur on the connection's strand to prevent
   // data races with the background loops.
   co_await iocoro::this_coro::switch_to(executor_.strand().executor());
 
-  // Single-await rule for actor_awaitable_ (CRITICAL):
-  // - iocoro::co_spawn(use_awaitable) supports only one awaiter.
-  // - We enforce: ONLY close() awaits actor_awaitable_.
-  // - connect() MUST NOT co_await actor_awaitable_ directly.
-  // - On connect failure, connect() should co_await close() to perform cleanup and join.
-
   if (state_ == connection_state::OPEN) {
-    co_return std::error_code{};
+    co_return expected<void, error>{};
   }
 
   if (state_ == connection_state::CONNECTING) {
-    co_return error::already_in_progress;
+    co_return unexpected(error::already_in_progress);
   }
 
   if (state_ == connection_state::CLOSED) {
@@ -95,28 +104,27 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
     state_ = connection_state::INIT;
     last_error_.reset();
     reconnect_count_ = 0;
-    cancel_.reset();
+    stop_.reset();
   }
 
-  if (cancel_.is_cancelled()) {
-    co_return error::operation_aborted;
+  if (stop_.token().stop_requested()) {
+    co_return unexpected(error::operation_aborted);
   }
 
-  if (!actor_awaitable_.has_value()) {
+  if (!actor_running_) {
     run_actor();
   }
 
   state_ = connection_state::CONNECTING;
 
-  // Attempt connection. do_connect() returns error on failure.
-  auto connect_ec = co_await do_connect();
-
-  if (connect_ec) {
+  // Attempt connection. do_connect() returns unexpected(error) on failure.
+  auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.token(), do_connect(),
+                                               iocoro::use_awaitable);
+  if (!connect_res) {
     // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
-    // Cleanup must be unified via close() (single awaiter of actor_awaitable_).
-    // Note: connect_ec is NOT stored in last_error_ (user gets it directly from connect()).
+    // Cleanup is unified via close() (joins the actor).
     co_await close();
-    co_return connect_ec;
+    co_return unexpected(connect_res.error());
   }
 
   // Successful do_connect() implies OPEN.
@@ -126,7 +134,7 @@ inline auto connection::connect() -> iocoro::awaitable<std::error_code> {
   read_wakeup_.notify();
   write_wakeup_.notify();
   control_wakeup_.notify();
-  co_return std::error_code{};
+  co_return expected<void, error>{};
 }
 
 inline auto connection::close() -> iocoro::awaitable<void> {
@@ -137,7 +145,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   }
 
   // Phase-1: determinism-first shutdown.
-  cancel_.request_cancel();
+  stop_.request_stop();
   state_ = connection_state::CLOSING;
 
   // Fail all pending work deterministically.
@@ -153,10 +161,8 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   read_wakeup_.notify();
   control_wakeup_.notify();
 
-  if (actor_awaitable_.has_value()) {
-    // Critical: actor_awaitable_ can only be awaited once.
-    co_await std::move(*actor_awaitable_);
-    actor_awaitable_.reset();
+  if (actor_running_) {
+    co_await actor_done_.wait();
   }
 
   REDISCORO_ASSERT(state_ == connection_state::CLOSED);
@@ -200,17 +206,15 @@ inline auto connection::enqueue_impl(request req, response_sink* sink) -> void {
 inline auto connection::actor_loop() -> iocoro::awaitable<void> {
   // Hard constraint (IMPORTANT):
   // - actor_loop MUST own sub-loop lifetimes (do not detached-spawn without join).
-  //
-  // Lifetime (CRITICAL):
-  // - This coroutine (and its sub-loops) uses `this` across suspension points.
-  // - Keep the connection alive until the actor completes.
-  auto self = shared_from_this();
-  (void)self;
 
+  auto parent_stop = co_await iocoro::this_coro::stop_token;
   auto ex = executor_.strand().executor();
-  auto writer = iocoro::co_spawn(ex, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
-  auto reader = iocoro::co_spawn(ex, iocoro::bind_executor(ex, read_loop()), iocoro::use_awaitable);
-  auto controller = iocoro::co_spawn(ex, iocoro::bind_executor(ex, control_loop()), iocoro::use_awaitable);
+  auto writer =
+    iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, write_loop()), iocoro::use_awaitable);
+  auto reader =
+    iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, read_loop()), iocoro::use_awaitable);
+  auto controller = iocoro::co_spawn(ex, parent_stop, iocoro::bind_executor(ex, control_loop()),
+                                     iocoro::use_awaitable);
 
   (void)co_await iocoro::when_all(std::move(writer), std::move(reader), std::move(controller));
 
@@ -220,7 +224,8 @@ inline auto connection::actor_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::write_loop() -> iocoro::awaitable<void> {
-  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+  auto tok = co_await iocoro::this_coro::stop_token;
+  while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     if (state_ != connection_state::OPEN || !pipeline_.has_pending_write()) {
       co_await write_wakeup_.wait();
       continue;
@@ -233,7 +238,8 @@ inline auto connection::write_loop() -> iocoro::awaitable<void> {
 }
 
 inline auto connection::read_loop() -> iocoro::awaitable<void> {
-  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+  auto tok = co_await iocoro::this_coro::stop_token;
+  while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     if (state_ != connection_state::OPEN) {
       co_await read_wakeup_.wait();
       continue;
@@ -248,13 +254,14 @@ inline auto connection::read_loop() -> iocoro::awaitable<void> {
 inline auto connection::control_loop() -> iocoro::awaitable<void> {
   // IMPORTANT constraints:
   // - Must NOT write CLOSED (only transition_to_closed()).
-  // - Must be cancel-aware so close() can interrupt promptly.
-  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+  // - Must be stop-aware so close() can interrupt promptly.
+  auto tok = co_await iocoro::this_coro::stop_token;
+  while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     if (state_ == connection_state::FAILED) {
       if (!cfg_.reconnection.enabled) {
         // Deterministic shutdown: no reconnection.
         state_ = connection_state::CLOSING;
-        cancel_.request_cancel();
+        stop_.request_stop();
         write_wakeup_.notify();
         read_wakeup_.notify();
         // Do not wait here: cancellation must take effect immediately.
@@ -315,7 +322,8 @@ inline auto connection::calculate_reconnect_delay() const -> std::chrono::millis
 inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
   // Precondition: called on strand.
   // State intent: FAILED -> (sleep) -> RECONNECTING -> OPEN, or exit early on close/cancel.
-  while (!cancel_.is_cancelled() && state_ != connection_state::CLOSED) {
+  auto tok = co_await iocoro::this_coro::stop_token;
+  while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     // Precondition: caller enters do_reconnect() from FAILED.
     // This coroutine does not write FAILED redundantly; it only transitions:
     //   FAILED -> RECONNECTING -> (OPEN | FAILED)
@@ -332,7 +340,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
       const auto deadline = pipeline::clock::now() + delay;
       iocoro::steady_timer timer{executor_.get_io_executor()};
 
-      while (!cancel_.is_cancelled() && state_ != connection_state::CLOSING) {
+      while (!tok.stop_requested() && state_ != connection_state::CLOSING) {
         const auto now = pipeline::clock::now();
         if (now >= deadline) {
           break;
@@ -347,19 +355,18 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
       }
     }
 
-    if (cancel_.is_cancelled() || state_ == connection_state::CLOSING) {
+    if (tok.stop_requested() || state_ == connection_state::CLOSING) {
       co_return;
     }
 
     // Attempt reconnect.
     state_ = connection_state::RECONNECTING;
-    auto reconnect_ec = co_await do_connect();
-
-    if (reconnect_ec) {
+    auto reconnect_res = co_await do_connect();
+    if (!reconnect_res) {
       // Failed attempt: transition back to FAILED and schedule next delay.
       // Store the reconnection error for diagnostics (user cannot obtain it directly).
       state_ = connection_state::FAILED;
-      last_error_ = reconnect_ec;
+      last_error_ = reconnect_res.error();
       reconnect_count_ += 1;
       continue;
     }
@@ -376,9 +383,10 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
   }
 }
 
-inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
-  if (cancel_.is_cancelled()) {
-    co_return error::operation_aborted;
+inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>> {
+  auto tok = co_await iocoro::this_coro::stop_token;
+  if (tok.stop_requested()) {
+    co_return unexpected(error::operation_aborted);
   }
 
   // Defensive: ensure parser state is clean at the start of a handshake.
@@ -395,20 +403,22 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
                                            cfg_.resolve_timeout);
   if (!res) {
     if (res.error() == iocoro::error::timed_out) {
-      co_return error::resolve_timeout;
+      co_return unexpected(error::resolve_timeout);
+    } else if (res.error() == iocoro::error::operation_aborted) {
+      co_return unexpected(error::operation_aborted);
     } else {
-      co_return error::resolve_failed;
+      co_return unexpected(error::resolve_failed);
     }
   }
   if (res->empty()) {
-    co_return error::resolve_failed;
+    co_return unexpected(error::resolve_failed);
   }
 
-  if (cancel_.is_cancelled()) {
-    co_return error::operation_aborted;
+  if (tok.stop_requested()) {
+    co_return unexpected(error::operation_aborted);
   }
 
-  // TCP connect with timeout (try endpoints in order).
+  // TCP connect with timeout (iterate endpoints in order).
   std::error_code connect_ec{};
   for (auto const& ep : *res) {
     // IMPORTANT: after a failed connect attempt, the socket may be left in a platform-dependent
@@ -428,16 +438,16 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::error::timed_out) {
-      co_return error::connect_timeout;
+      co_return unexpected(error::connect_timeout);
     } else if (connect_ec == iocoro::error::operation_aborted) {
-      co_return error::operation_aborted;
+      co_return unexpected(error::operation_aborted);
     } else {
-      co_return error::connect_failed;
+      co_return unexpected(error::connect_failed);
     }
   }
 
-  if (cancel_.is_cancelled()) {
-    co_return error::operation_aborted;
+  if (tok.stop_requested()) {
+    co_return unexpected(error::operation_aborted);
   }
 
   // Build handshake request (pipeline of commands).
@@ -463,34 +473,30 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
   auto handshake_res = co_await iocoro::with_timeout(
     [&]() -> iocoro::awaitable<iocoro::result<void>> {
-      auto map_io_error = [&](std::error_code ec) -> std::error_code {
-        if (ec == iocoro::error::operation_aborted) {
-          if (cancel_.is_cancelled()) {
-            return error::operation_aborted;
-          }
-          return error::handshake_failed;
-        }
-        return error::handshake_failed;
-      };
-
       // Phase-1: flush the full handshake request first.
       // Handshake generates no additional writes after the initial request is fully sent.
-      while (!cancel_.is_cancelled() && pipeline_.has_pending_write()) {
+      while (!tok.stop_requested() && pipeline_.has_pending_write()) {
         auto view = pipeline_.next_write_buffer();
         auto buf = std::as_bytes(std::span{view.data(), view.size()});
         auto w = co_await socket_.async_write_some(buf);
         if (!w) {
-          co_return iocoro::unexpected(map_io_error(w.error()));
+          if (w.error() == iocoro::error::operation_aborted) {
+            co_return iocoro::unexpected(error::operation_aborted);
+          }
+          co_return iocoro::unexpected(error::handshake_failed);
         }
         pipeline_.on_write_done(*w);
       }
 
       // Phase-2: read/parse until the handshake sink completes.
-      while (!cancel_.is_cancelled() && !slot->is_complete()) {
+      while (!tok.stop_requested() && !slot->is_complete()) {
         auto writable = parser_.prepare();
         auto r = co_await socket_.async_read_some(writable);
         if (!r) {
-          co_return iocoro::unexpected(map_io_error(r.error()));
+          if (r.error() == iocoro::error::operation_aborted) {
+            co_return iocoro::unexpected(error::operation_aborted);
+          }
+          co_return iocoro::unexpected(error::handshake_failed);
         }
         if (*r == 0) {
           co_return iocoro::unexpected(error::connection_reset);
@@ -523,7 +529,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
         }
       }
 
-      if (cancel_.is_cancelled()) {
+      if (tok.stop_requested()) {
         co_return iocoro::unexpected(error::operation_aborted);
       }
 
@@ -532,21 +538,31 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
     cfg_.connect_timeout);
 
   if (!handshake_res) {
-    if (cancel_.is_cancelled()) {
-      pipeline_.clear_all(error::operation_aborted);
-      co_return error::operation_aborted;
-    }
-    if (handshake_res.error() == iocoro::error::timed_out) {
+    auto const ec = handshake_res.error();
+    if (ec == iocoro::error::timed_out) {
       pipeline_.clear_all(error::handshake_timeout);
-      co_return error::handshake_timeout;
+      co_return unexpected(error::handshake_timeout);
     }
-    // Unsolicited server messages during handshake are treated as unsupported feature for now.
-    if (handshake_res.error() == error::unsolicited_message) {
+    if (ec == iocoro::error::operation_aborted) {
+      pipeline_.clear_all(error::operation_aborted);
+      co_return unexpected(error::operation_aborted);
+    }
+    if (ec.category() == rediscoro::detail::category()) {
+      auto const e = static_cast<error>(ec.value());
+      if (e == error::unsolicited_message) {
+        pipeline_.clear_all(error::handshake_failed);
+        co_return unexpected(error::handshake_failed);
+      }
+      if (e == error::operation_aborted) {
+        pipeline_.clear_all(error::operation_aborted);
+        co_return unexpected(error::operation_aborted);
+      }
       pipeline_.clear_all(error::handshake_failed);
-      co_return error::handshake_failed;
+      co_return unexpected(e);
     }
+
     pipeline_.clear_all(error::handshake_failed);
-    co_return handshake_res.error();
+    co_return unexpected(error::handshake_failed);
   }
 
   // Validate all handshake replies: any error => handshake_failed.
@@ -555,13 +571,13 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
     pipeline_.clear_all(error::handshake_failed);
-    co_return error::handshake_failed;
+    co_return unexpected(error::handshake_failed);
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i]) {
       pipeline_.clear_all(error::handshake_failed);
-      co_return error::handshake_failed;
+      co_return unexpected(error::handshake_failed);
     }
   }
 
@@ -571,7 +587,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
 
   // Defensive: ensure parser buffer/state is clean when handing over to runtime loops.
   parser_.reset();
-  co_return std::error_code{};
+  co_return expected<void, error>{};
 }
 
 inline auto connection::do_read() -> iocoro::awaitable<void> {
@@ -656,7 +672,8 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
 
   in_flight_guard guard{write_in_flight_};
 
-  while (!cancel_.is_cancelled() && state_ == connection_state::OPEN && pipeline_.has_pending_write()) {
+  auto tok = co_await iocoro::this_coro::stop_token;
+  while (!tok.stop_requested() && state_ == connection_state::OPEN && pipeline_.has_pending_write()) {
     auto view = pipeline_.next_write_buffer();
     auto buf = std::as_bytes(std::span{view.data(), view.size()});
 

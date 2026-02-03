@@ -1,12 +1,14 @@
 #pragma once
 
 #include <rediscoro/config.hpp>
-#include <rediscoro/detail/cancel_source.hpp>
+#include <rediscoro/error.hpp>
+#include <rediscoro/expected.hpp>
 #include <rediscoro/detail/connection_state.hpp>
 #include <rediscoro/detail/connection_executor.hpp>
 #include <rediscoro/detail/notify_event.hpp>
 #include <rediscoro/detail/pending_response.hpp>
 #include <rediscoro/detail/pipeline.hpp>
+#include <rediscoro/detail/stop_scope.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/parser.hpp>
 
@@ -18,7 +20,6 @@
 #include <optional>
 #include <chrono>
 #include <string>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -64,7 +65,7 @@ public:
   /// - Automatic reconnection applies only to runtime failures after reaching `OPEN`.
   ///
   /// Thread-safety: Can be called from any executor (switches to strand internally).
-  auto connect() -> iocoro::awaitable<std::error_code>;
+  auto connect() -> iocoro::awaitable<expected<void, error>>;
 
   /// Request graceful shutdown.
   ///
@@ -121,7 +122,7 @@ public:
   /// - Runtime errors after `OPEN` (including request timeout / RESP3 parse error / peer close)
   ///   are recorded and drive `OPEN -> FAILED`.
   /// - Reconnection attempt failures are also recorded (user cannot observe them otherwise).
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<std::error_code> {
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<error> {
     return last_error_;
   }
 
@@ -189,9 +190,9 @@ private:
   /// not as special handshake methods.
   ///
   /// Returns:
-  /// - std::error_code{}: connection succeeded, state_ = OPEN
-  /// - non-empty error_code: connection failed with specific error code
-  auto do_connect() -> iocoro::awaitable<std::error_code>;
+  /// - expected<void, error>{}: connection succeeded, state_ = OPEN
+  /// - unexpected(error): connection failed with specific error
+  auto do_connect() -> iocoro::awaitable<expected<void, error>>;
 
   /// Read and parse RESP3 messages from socket.
   ///
@@ -251,7 +252,7 @@ private:
   // State machine
   connection_state state_{connection_state::INIT};
 
-  std::optional<std::error_code> last_error_{};
+  std::optional<error> last_error_{};
 
   // Request/response pipeline
   pipeline pipeline_;
@@ -259,8 +260,8 @@ private:
   // RESP3 parser
   resp3::parser parser_{};
 
-  // Cancellation
-  cancel_source cancel_;
+  // Lifecycle cancellation scope (resettable).
+  stop_scope stop_{};
 
   // Loop notifications (counting wakeups, thread-safe notify)
   notify_event write_wakeup_{};
@@ -272,7 +273,8 @@ private:
   bool write_in_flight_{false};
 
   // Actor lifecycle
-  std::optional<iocoro::awaitable<void>> actor_awaitable_{};  // For close() to co_await
+  bool actor_running_{false};
+  notify_event actor_done_{};
 
   // Reconnection state
   int reconnect_count_{0};  // Number of reconnection attempts (reset on success)
