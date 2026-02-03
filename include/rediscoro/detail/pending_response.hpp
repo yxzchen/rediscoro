@@ -3,6 +3,7 @@
 #include <rediscoro/assert.hpp>
 #include <rediscoro/detail/response_builder.hpp>
 #include <rediscoro/detail/response_sink.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/response.hpp>
 
 #include <iocoro/awaitable.hpp>
@@ -67,7 +68,7 @@ class pending_response final : public response_sink {
     }
   }
 
-  void do_deliver_error(rediscoro::error err) override {
+  void do_deliver_error(error_info err) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;
@@ -118,7 +119,7 @@ class pending_dynamic_response final : public response_sink {
     }
   }
 
-  void do_deliver_error(rediscoro::error err) override {
+  void do_deliver_error(error_info err) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;

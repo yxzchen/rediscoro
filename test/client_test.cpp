@@ -44,17 +44,19 @@ TEST(client_test, connect_to_http_server_reports_protocol_error) {
     auto const e = r.error();
 
     // If we cannot even resolve/connect, we can't test protocol mismatch deterministically.
-    if (e == rediscoro::error::resolve_failed || e == rediscoro::error::resolve_timeout ||
-        e == rediscoro::error::connect_failed || e == rediscoro::error::connect_timeout) {
+    if (e.code == rediscoro::client_errc::resolve_failed ||
+        e.code == rediscoro::client_errc::resolve_timeout ||
+        e.code == rediscoro::client_errc::connect_failed ||
+        e.code == rediscoro::client_errc::connect_timeout) {
       skipped = true;
-      skip_reason = "network not available to reach qq.com:80 (connect failed: " +
-                    rediscoro::make_error_code(e).message() + ")";
+      skip_reason = "network not available to reach qq.com:80 (connect failed: " + e.to_string() +
+                    ")";
       co_return;
     }
 
     // For a reachable HTTP server, RESP3 parser should fail quickly with a protocol error.
-    if (static_cast<int>(e) < static_cast<int>(rediscoro::error::resp3_invalid_type_byte)) {
-      diag = "expected RESP3 protocol error, got: " + rediscoro::make_error_code(e).message();
+    if (!rediscoro::is_protocol_error(e.code)) {
+      diag = "expected RESP3 protocol error, got: " + e.to_string();
       co_return;
     }
 
@@ -89,12 +91,8 @@ TEST(client_test, exec_without_connect_is_rejected) {
       diag = "expected not_connected error, got value";
       co_return;
     }
-    if (!resp.get<0>().error().is_client_error()) {
-      diag = "expected client error, got different error category";
-      co_return;
-    }
-    if (resp.get<0>().error().as_client_error() != rediscoro::error::not_connected) {
-      diag = "expected not_connected";
+    if (resp.get<0>().error().code != rediscoro::client_errc::not_connected) {
+      diag = "expected not_connected, got: " + resp.get<0>().error().to_string();
       co_return;
     }
 
@@ -135,8 +133,8 @@ TEST(client_test, resolve_timeout_zero_is_reported) {
       diag = "expected resolve_timeout, got success";
       co_return;
     }
-    if (r.error() != rediscoro::error::resolve_timeout) {
-      diag = "expected resolve_timeout, got: " + rediscoro::make_error_code(r.error()).message();
+    if (r.error().code != rediscoro::client_errc::resolve_timeout) {
+      diag = "expected resolve_timeout, got: " + r.error().to_string();
       co_return;
     }
 
@@ -181,11 +179,14 @@ TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
     auto const e = r.error();
 
     // Depending on routing, we may time out at TCP connect or during the handshake read/write.
-    if (!(e == rediscoro::error::connect_timeout || e == rediscoro::error::handshake_timeout ||
-          e == rediscoro::error::connect_failed || e == rediscoro::error::resolve_failed ||
-          e == rediscoro::error::resolve_timeout || e == rediscoro::error::connection_reset ||
-          e == rediscoro::error::operation_aborted)) {
-      diag = "expected timeout/connect failure, got: " + rediscoro::make_error_code(e).message();
+    if (!(e.code == rediscoro::client_errc::connect_timeout ||
+          e.code == rediscoro::client_errc::handshake_timeout ||
+          e.code == rediscoro::client_errc::connect_failed ||
+          e.code == rediscoro::client_errc::resolve_failed ||
+          e.code == rediscoro::client_errc::resolve_timeout ||
+          e.code == rediscoro::client_errc::connection_reset ||
+          e.code == rediscoro::client_errc::operation_aborted)) {
+      diag = "expected timeout/connect failure, got: " + e.to_string();
       co_return;
     }
 
@@ -226,8 +227,7 @@ TEST(client_test, ping_set_get_roundtrip) {
     auto r = co_await c.connect();
     if (!r.has_value()) {
       skipped = true;
-      skip_reason = "redis not available at 127.0.0.1:6379 (" +
-                    rediscoro::make_error_code(r.error()).message() + ")";
+      skip_reason = "redis not available at 127.0.0.1:6379 (" + r.error().to_string() + ")";
       co_return;
     }
 

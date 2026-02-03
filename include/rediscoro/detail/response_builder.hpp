@@ -2,6 +2,7 @@
 
 #include <rediscoro/adapter/adapt.hpp>
 #include <rediscoro/assert.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/response.hpp>
@@ -19,24 +20,26 @@ namespace rediscoro::detail {
 template <typename T>
 inline auto slot_from_message(resp3::message msg) -> response_slot<T> {
   if (msg.is<resp3::simple_error>()) {
-    return unexpected(
-      response_error{redis_error{std::string{msg.as<resp3::simple_error>().message}}});
+    return unexpected(error_info{server_errc::redis_error,
+                                 std::string{msg.as<resp3::simple_error>().message}});
   }
   if (msg.is<resp3::bulk_error>()) {
     return unexpected(
-      response_error{redis_error{std::string{msg.as<resp3::bulk_error>().message}}});
+      error_info{server_errc::redis_error, std::string{msg.as<resp3::bulk_error>().message}});
   }
 
   auto r = adapter::adapt<T>(msg);
   if (!r) {
-    return unexpected(response_error{std::move(r.error())});
+    auto e = std::move(r.error());
+    error_info out{e.kind, e.to_string()};
+    return unexpected(std::move(out));
   }
   return std::move(*r);
 }
 
 template <typename T>
-inline auto slot_from_error(rediscoro::error err) -> response_slot<T> {
-  return unexpected(response_error{std::move(err)});
+inline auto slot_from_error(error_info err) -> response_slot<T> {
+  return unexpected(std::move(err));
 }
 
 template <typename... Ts>
@@ -55,7 +58,7 @@ class response_builder {
     next_index_ += 1;
   }
 
-  void accept(rediscoro::error err) {
+  void accept(error_info err) {
     REDISCORO_ASSERT(next_index_ < static_size);
     err_dispatch_table()[next_index_](this, std::move(err));
     next_index_ += 1;
@@ -82,8 +85,8 @@ class response_builder {
 
   template <std::size_t I, typename E>
   void set_error(E&& e) {
-    static_assert(std::is_constructible_v<response_error, E>);
-    set_slot<I>(unexpected(response_error{std::forward<E>(e)}));
+    static_assert(std::is_constructible_v<error_info, E>);
+    set_slot<I>(unexpected(error_info{std::forward<E>(e)}));
   }
 
   template <std::size_t I>
@@ -93,7 +96,7 @@ class response_builder {
   }
 
   using msg_dispatch_fn = void (*)(response_builder*, resp3::message);
-  using err_dispatch_fn = void (*)(response_builder*, rediscoro::error);
+  using err_dispatch_fn = void (*)(response_builder*, error_info);
 
   template <std::size_t I>
   static void msg_dispatch(response_builder* self, resp3::message msg) {
@@ -101,7 +104,7 @@ class response_builder {
   }
 
   template <std::size_t I>
-  static void err_dispatch(response_builder* self, rediscoro::error err) {
+  static void err_dispatch(response_builder* self, error_info err) {
     self->set_error<I>(std::move(err));
   }
 
@@ -150,7 +153,7 @@ class dynamic_response_builder {
     results_.push_back(slot_from_message<T>(std::move(msg)));
   }
 
-  void accept(rediscoro::error err) {
+  void accept(error_info err) {
     REDISCORO_ASSERT(results_.size() < expected_);
     results_.push_back(slot_from_error<T>(std::move(err)));
   }

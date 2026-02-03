@@ -1,8 +1,7 @@
 #pragma once
 
-#include <rediscoro/adapter/error.hpp>
 #include <rediscoro/assert.hpp>
-#include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
 
 #include <cstddef>
@@ -23,60 +22,8 @@ template <typename T>
 class dynamic_response_builder;
 }  // namespace detail
 
-struct redis_error {
-  std::string message;
-};
-
-/// Wrapper around the internal response error variant.
-/// Provides user-friendly inspection APIs without exposing std::variant in the surface.
-class response_error {
- public:
-  using variant_type = std::variant<redis_error, error, adapter::error>;
-
-  response_error(redis_error e) : v_(std::move(e)) {}
-  response_error(error e) : v_(e) {
-    REDISCORO_ASSERT(!is_internal_error(e), "Internal error should not be exposed to user");
-  }
-  response_error(adapter::error e) : v_(std::move(e)) {}
-
-  [[nodiscard]] bool is_redis_error() const noexcept {
-    return std::holds_alternative<redis_error>(v_);
-  }
-  [[nodiscard]] bool is_client_error() const noexcept { return std::holds_alternative<error>(v_); }
-  [[nodiscard]] bool is_adapter_error() const noexcept {
-    return std::holds_alternative<adapter::error>(v_);
-  }
-
-  [[nodiscard]] const redis_error& as_redis_error() const { return std::get<redis_error>(v_); }
-  [[nodiscard]] error as_client_error() const { return std::get<error>(v_); }
-  [[nodiscard]] const adapter::error& as_adapter_error() const {
-    return std::get<adapter::error>(v_);
-  }
-
-  [[nodiscard]] auto to_string() const -> std::string {
-    return std::visit(
-      [](const auto& e) -> std::string {
-        using E = std::decay_t<decltype(e)>;
-        if constexpr (std::is_same_v<E, redis_error>) {
-          return e.message;
-        } else if constexpr (std::is_same_v<E, error>) {
-          return make_error_code(e).message();
-        } else {
-          static_assert(std::is_same_v<E, adapter::error>);
-          return e.to_string();
-        }
-      },
-      v_);
-  }
-
-  [[nodiscard]] const variant_type& raw() const noexcept { return v_; }
-
- private:
-  variant_type v_;
-};
-
 template <typename T>
-using response_slot = expected<T, response_error>;
+using response_slot = expected<T, error_info>;
 
 /// Typed response for a pipeline (compile-time sized, heterogenous slots).
 template <typename... Ts>

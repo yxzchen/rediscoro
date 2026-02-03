@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rediscoro/error.hpp>
 #include <rediscoro/resp3/kind.hpp>
 
 #include <cstddef>
@@ -12,13 +13,6 @@
 #include <vector>
 
 namespace rediscoro::adapter {
-
-enum class adapter_error_kind : std::uint8_t {
-  type_mismatch,
-  unexpected_null,
-  value_out_of_range,
-  size_mismatch,
-};
 
 struct path_index {
   std::size_t index{};
@@ -35,7 +29,7 @@ struct path_field {
 using path_element = std::variant<path_index, path_key, path_field>;
 
 struct error {
-  adapter_error_kind kind{};
+  rediscoro::adapter_errc kind{};
   resp3::kind actual_type{};
   std::vector<resp3::kind> expected_types{};  // empty means "unknown / not applicable"
   std::vector<path_element> path{};
@@ -62,7 +56,7 @@ namespace detail {
 
 inline auto make_type_mismatch(resp3::kind actual, std::vector<resp3::kind> expected) -> error {
   return error{
-    .kind = adapter_error_kind::type_mismatch,
+    .kind = rediscoro::adapter_errc::type_mismatch,
     .actual_type = actual,
     .expected_types = std::move(expected),
     .path = {},
@@ -74,7 +68,7 @@ inline auto make_type_mismatch(resp3::kind actual, std::vector<resp3::kind> expe
 
 inline auto make_unexpected_null(std::vector<resp3::kind> expected) -> error {
   return error{
-    .kind = adapter_error_kind::unexpected_null,
+    .kind = rediscoro::adapter_errc::unexpected_null,
     .actual_type = resp3::kind::null,
     .expected_types = std::move(expected),
     .path = {},
@@ -86,7 +80,7 @@ inline auto make_unexpected_null(std::vector<resp3::kind> expected) -> error {
 
 inline auto make_value_out_of_range(resp3::kind k) -> error {
   return error{
-    .kind = adapter_error_kind::value_out_of_range,
+    .kind = rediscoro::adapter_errc::value_out_of_range,
     .actual_type = k,
     .expected_types = {k},
     .path = {},
@@ -98,7 +92,7 @@ inline auto make_value_out_of_range(resp3::kind k) -> error {
 
 inline auto make_size_mismatch(resp3::kind actual, std::size_t expected, std::size_t got) -> error {
   return error{
-    .kind = adapter_error_kind::size_mismatch,
+    .kind = rediscoro::adapter_errc::size_mismatch,
     .actual_type = actual,
     .expected_types = {},
     .path = {},
@@ -136,7 +130,7 @@ inline auto error::format_message(const error& e) -> std::string {
 
   const auto path = path_to_string(e.path);
   switch (e.kind) {
-    case adapter_error_kind::type_mismatch: {
+    case rediscoro::adapter_errc::type_mismatch: {
       if (e.expected_types.empty()) {
         return path + ": expected <?>, got " + type_to_string(e.actual_type);
       }
@@ -153,7 +147,7 @@ inline auto error::format_message(const error& e) -> std::string {
       }
       return path + ": expected (" + exp + "), got " + type_to_string(e.actual_type);
     }
-    case adapter_error_kind::unexpected_null: {
+    case rediscoro::adapter_errc::unexpected_null: {
       if (e.expected_types.size() == 1) {
         return path + ": unexpected null (expected " + type_to_string(e.expected_types[0]) + ")";
       }
@@ -169,13 +163,13 @@ inline auto error::format_message(const error& e) -> std::string {
       }
       return path + ": unexpected null";
     }
-    case adapter_error_kind::value_out_of_range: {
+    case rediscoro::adapter_errc::value_out_of_range: {
       if (e.expected_types.size() == 1) {
         return path + ": value out of range for " + type_to_string(e.expected_types[0]);
       }
       return path + ": value out of range";
     }
-    case adapter_error_kind::size_mismatch: {
+    case rediscoro::adapter_errc::size_mismatch: {
       if (e.expected_size.has_value() && e.got_size.has_value()) {
         return path + ": size mismatch (expected " + std::to_string(*e.expected_size) + ", got " +
                std::to_string(*e.got_size) + ")";

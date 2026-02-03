@@ -1,9 +1,8 @@
 #pragma once
 
 #include <rediscoro/assert.hpp>
-#include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/resp3/message.hpp>
-#include <rediscoro/response.hpp>
 
 #include <cstddef>
 
@@ -44,7 +43,7 @@ class response_sink {
   /// Deliver an error.
   /// Called by pipeline when parsing fails, connection closes, or other non-success events occur.
   /// Must not block or resume coroutines inline.
-  auto deliver_error(rediscoro::error err) -> void {
+  auto deliver_error(error_info err) -> void {
     // Structural defense: a pipeline bug must be caught immediately.
     REDISCORO_ASSERT(!is_complete() &&
                      "deliver_error() called on a completed sink - pipeline bug!");
@@ -64,7 +63,7 @@ class response_sink {
   /// Semantics:
   /// - Repeatedly calls deliver_error(err) until is_complete() becomes true.
   /// - Defensive: if already complete, does nothing.
-  auto fail_all(rediscoro::error err) -> void {
+  auto fail_all(error_info err) -> void {
     while (!is_complete()) {
       deliver_error(err);
     }
@@ -76,7 +75,7 @@ class response_sink {
  protected:
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;
-  virtual auto do_deliver_error(rediscoro::error err) -> void = 0;
+  virtual auto do_deliver_error(error_info err) -> void = 0;
 };
 
 }  // namespace rediscoro::detail

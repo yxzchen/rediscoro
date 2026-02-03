@@ -3,6 +3,7 @@
 #include <rediscoro/detail/pipeline.hpp>
 #include <rediscoro/detail/response_sink.hpp>
 #include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/message.hpp>
 
@@ -26,7 +27,7 @@ class counting_sink final : public rediscoro::detail::response_sink {
 
  protected:
   auto do_deliver(rediscoro::resp3::message) -> void override { msgs_ += 1; }
-  auto do_deliver_error(rediscoro::error) -> void override { errs_ += 1; }
+  auto do_deliver_error(rediscoro::error_info) -> void override { errs_ += 1; }
 
  private:
   std::size_t expected_{0};
@@ -96,7 +97,7 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   p.push(req, sink);
 
   // Before any write/read, clear_all should deliver 2 errors.
-  p.clear_all(rediscoro::error::connection_closed);
+  p.clear_all(rediscoro::error_info{rediscoro::client_errc::connection_closed});
   EXPECT_TRUE(sink->is_complete());
   EXPECT_EQ(sink->err_count(), 2u);
   EXPECT_FALSE(p.has_pending_write());

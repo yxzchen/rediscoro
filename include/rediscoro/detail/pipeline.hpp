@@ -2,7 +2,7 @@
 
 #include <rediscoro/detail/response_sink.hpp>
 #include <rediscoro/detail/ring_queue.hpp>
-#include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/message.hpp>
 
@@ -78,10 +78,10 @@ class pipeline {
 
   /// Dispatch a RESP3 parse error to the next pending response.
   /// Precondition: has_pending_read() == true
-  auto on_error(error err) -> void;
+  auto on_error(error_info err) -> void;
 
   /// Clear all pending requests (on connection close/error).
-  auto clear_all(rediscoro::error err) -> void;
+  auto clear_all(error_info err) -> void;
 
   /// Earliest deadline among all pending requests.
   /// Returns time_point::max() if there is no deadline.

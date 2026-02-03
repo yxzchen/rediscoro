@@ -7,7 +7,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <variant>
 #include <vector>
 
 namespace rediscoro::resp3 {
@@ -32,6 +34,15 @@ class parser {
  public:
   parser() = default;
 
+  struct need_more_t {};
+  template <typename T>
+  using parse_step = std::variant<need_more_t, T>;
+
+  template <typename T>
+  [[nodiscard]] static auto is_need_more(const parse_step<T>& s) noexcept -> bool {
+    return std::holds_alternative<need_more_t>(s);
+  }
+
   /// Zero-copy input API (caller writes into parser-owned buffer).
   auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
     return std::as_writable_bytes(buf_.prepare(min_size));
@@ -42,13 +53,13 @@ class parser {
   /// On success returns root node index into tree().nodes.
   ///
   /// Returns:
-  /// - success + node_index: parsing succeeded, returns root node index
-  /// - error::resp3_needs_more: buffer has insufficient data, need to continue reading
-  /// - error::resp3_*: protocol format error
+  /// - success + root_index: parsing succeeded, returns root node index
+  /// - success + need_more_t: buffer has insufficient data, need to continue reading (internal signal)
+  /// - protocol_errc: protocol format error
   ///
   /// IMPORTANT: After success, you must consume the result (tree()+root) and then call reclaim()
   /// before parsing the next message, otherwise the underlying buffer may move and invalidate views.
-  auto parse_one() -> expected<std::uint32_t, rediscoro::error>;
+  auto parse_one() -> expected<parse_step<std::uint32_t>, rediscoro::protocol_errc>;
 
   /// Reclaim memory after consuming the latest parsed tree:
   /// - clears raw_tree
@@ -145,13 +156,14 @@ class parser {
   pending_attributes pending_attrs_{};
 
   [[nodiscard]] auto parse_length_after_type(std::string_view data) const
-    -> expected<length_header, rediscoro::error>;
-  [[nodiscard]] auto parse_value() -> expected<value_result, rediscoro::error>;
+    -> expected<parse_step<length_header>, rediscoro::protocol_errc>;
+  [[nodiscard]] auto parse_value() -> expected<parse_step<value_result>, rediscoro::protocol_errc>;
   [[nodiscard]] auto start_container(frame& current, kind t, std::int64_t len)
-    -> expected<std::optional<std::uint32_t>, rediscoro::error>;
-  [[nodiscard]] auto start_attribute(std::int64_t len) -> expected<void, rediscoro::error>;
+    -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc>;
+  [[nodiscard]] auto start_attribute(std::int64_t len)
+    -> expected<parse_step<std::monostate>, rediscoro::protocol_errc>;
   [[nodiscard]] auto attach_to_parent(std::uint32_t child_idx)
-    -> expected<std::optional<std::uint32_t>, rediscoro::error>;
+    -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc>;
 };
 
 }  // namespace rediscoro::resp3

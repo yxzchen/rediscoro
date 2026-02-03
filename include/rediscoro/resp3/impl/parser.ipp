@@ -56,28 +56,28 @@ namespace detail {
 }  // namespace detail
 
 inline auto parser::parse_length_after_type(std::string_view data) const
-  -> expected<length_header, rediscoro::error> {
+  -> expected<parse_step<length_header>, rediscoro::protocol_errc> {
   auto pos = detail::find_crlf(data.substr(1));
   if (pos == std::string_view::npos) {
-    return unexpected(error::resp3_needs_more);
+    return parse_step<length_header>{need_more_t{}};
   }
 
   auto len_str = data.substr(1, pos);
   std::int64_t len{};
   if (!detail::parse_i64(len_str, len)) {
-    return unexpected(error::resp3_invalid_length);
+    return unexpected(protocol_errc::invalid_length);
   }
 
-  return length_header{
+  return parse_step<length_header>{length_header{
     .length = len,
     .header_bytes = 1 + pos + 2,
-  };
+  }};
 }
 
 inline auto parser::start_container(frame& current, kind t, std::int64_t len)
-  -> expected<std::optional<std::uint32_t>, rediscoro::error> {
+  -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc> {
   if (len < -1) {
-    return unexpected(error::resp3_invalid_length);
+    return unexpected(protocol_errc::invalid_length);
   }
 
   if (len == -1) {
@@ -85,7 +85,7 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     // Preserve container type for null container (e.g. *-1, %-1)
     tree_.nodes.push_back(raw_node{.type = t, .i64 = -1});
     pending_attrs_.attach(tree_, idx);
-    return std::optional<std::uint32_t>{idx};
+    return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{idx}};
   }
 
   auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -99,7 +99,7 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
   pending_attrs_.attach(tree_, idx);
 
   if (len == 0) {
-    return std::optional<std::uint32_t>{idx};
+    return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{idx}};
   }
 
   // Replace current value frame with a container-driving frame.
@@ -125,15 +125,16 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     };
   }
 
-  return std::optional<std::uint32_t>{};
+  return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
 }
 
-inline auto parser::start_attribute(std::int64_t len) -> expected<void, rediscoro::error> {
+inline auto parser::start_attribute(std::int64_t len)
+  -> expected<parse_step<std::monostate>, rediscoro::protocol_errc> {
   if (len < 0) {
-    return unexpected(error::resp3_invalid_length);
+    return unexpected(protocol_errc::invalid_length);
   }
   if (len == 0) {
-    return {};
+    return parse_step<std::monostate>{std::monostate{}};
   }
 
   stack_.push_back(frame{
@@ -145,21 +146,21 @@ inline auto parser::start_attribute(std::int64_t len) -> expected<void, rediscor
     .pending_key = 0,
     .has_pending_key = false,
   });
-  return {};
+  return parse_step<std::monostate>{std::monostate{}};
 }
 
-inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
+inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscoro::protocol_errc> {
   REDISCORO_ASSERT(!stack_.empty());
   REDISCORO_ASSERT(stack_.back().state == frame_kind::value);
 
   auto data = buf_.data();
   if (data.empty()) {
-    return unexpected(error::resp3_needs_more);
+    return parse_step<value_result>{need_more_t{}};
   }
 
   auto maybe_t = prefix_to_kind(data[0]);
   if (!maybe_t.has_value()) {
-    return unexpected(error::resp3_invalid_type_byte);
+    return unexpected(protocol_errc::invalid_type_byte);
   }
 
   // Attribute prefix: handled as a frame, not a node.
@@ -168,12 +169,19 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
     if (!hdr) {
       return unexpected(hdr.error());
     }
-    buf_.consume(hdr->header_bytes);
-    auto started = start_attribute(hdr->length);
+    if (parser::is_need_more(*hdr)) {
+      return parse_step<value_result>{need_more_t{}};
+    }
+    auto const& lh = std::get<length_header>(*hdr);
+    buf_.consume(lh.header_bytes);
+    auto started = start_attribute(lh.length);
     if (!started) {
       return unexpected(started.error());
     }
-    return value_result{.step = value_step::continue_parsing};
+    if (parser::is_need_more(*started)) {
+      return parse_step<value_result>{need_more_t{}};
+    }
+    return parse_step<value_result>{value_result{.step = value_step::continue_parsing}};
   }
 
   // Containers: array/map/set/push
@@ -183,41 +191,50 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
     if (!hdr) {
       return unexpected(hdr.error());
     }
-    buf_.consume(hdr->header_bytes);
+    if (parser::is_need_more(*hdr)) {
+      return parse_step<value_result>{need_more_t{}};
+    }
+    auto const& lh = std::get<length_header>(*hdr);
+    buf_.consume(lh.header_bytes);
 
     auto& current = stack_.back();
-    auto started = start_container(current, *maybe_t, hdr->length);
+    auto started = start_container(current, *maybe_t, lh.length);
     if (!started) {
       return unexpected(started.error());
     }
-    if (started->has_value()) {
-      return value_result{.step = value_step::produced_node, .node_index = **started};
+    if (parser::is_need_more(*started)) {
+      return parse_step<value_result>{need_more_t{}};
     }
-    return value_result{.step = value_step::continue_parsing};
+    auto const& opt = std::get<std::optional<std::uint32_t>>(*started);
+    if (opt.has_value()) {
+      return parse_step<value_result>{
+        value_result{.step = value_step::produced_node, .node_index = *opt}};
+    }
+    return parse_step<value_result>{value_result{.step = value_step::continue_parsing}};
   }
 
   // Null: "_\r\n"
   if (*maybe_t == kind::null) {
     if (data.size() < 3) {
-      return unexpected(error::resp3_needs_more);
+      return parse_step<value_result>{need_more_t{}};
     }
     if (data[1] != '\r' || data[2] != '\n') {
-      return unexpected(error::resp3_invalid_null);
+      return unexpected(protocol_errc::invalid_null);
     }
     buf_.consume(3);
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::null});
     pending_attrs_.attach(tree_, idx);
-    return value_result{.step = value_step::produced_node, .node_index = idx};
+    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
   }
 
   // Boolean: "#t\r\n" / "#f\r\n"
   if (*maybe_t == kind::boolean) {
     if (data.size() < 4) {
-      return unexpected(error::resp3_needs_more);
+      return parse_step<value_result>{need_more_t{}};
     }
     if (data[2] != '\r' || data[3] != '\n') {
-      return unexpected(error::resp3_invalid_boolean);
+      return unexpected(protocol_errc::invalid_boolean);
     }
 
     bool b{};
@@ -226,14 +243,14 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
     } else if (data[1] == 'f') {
       b = false;
     } else {
-      return unexpected(error::resp3_invalid_boolean);
+      return unexpected(protocol_errc::invalid_boolean);
     }
 
     buf_.consume(4);
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::boolean, .boolean = b});
     pending_attrs_.attach(tree_, idx);
-    return value_result{.step = value_step::produced_node, .node_index = idx};
+    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
   }
 
   // Bulk-like: $ ! =
@@ -241,14 +258,14 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
       *maybe_t == kind::verbatim_string) {
     auto pos = detail::find_crlf(data.substr(1));
     if (pos == std::string_view::npos) {
-      return unexpected(error::resp3_needs_more);
+      return parse_step<value_result>{need_more_t{}};
     }
     std::int64_t len{};
     if (!detail::parse_i64(data.substr(1, pos), len)) {
-      return unexpected(error::resp3_invalid_length);
+      return unexpected(protocol_errc::invalid_length);
     }
     if (len < -1) {
-      return unexpected(error::resp3_invalid_length);
+      return unexpected(protocol_errc::invalid_length);
     }
 
     auto header_bytes = 1 + pos + 2;
@@ -257,30 +274,31 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
       tree_.nodes.push_back(raw_node{.type = *maybe_t, .i64 = -1});
       pending_attrs_.attach(tree_, idx);
-      return value_result{.step = value_step::produced_node, .node_index = idx};
+      return parse_step<value_result>{
+        value_result{.step = value_step::produced_node, .node_index = idx}};
     }
 
     const auto need = static_cast<std::size_t>(header_bytes) + static_cast<std::size_t>(len) + 2;
     if (data.size() < need) {
-      return unexpected(error::resp3_needs_more);
+      return parse_step<value_result>{need_more_t{}};
     }
 
     auto payload = data.substr(header_bytes, static_cast<std::size_t>(len));
     if (data.substr(header_bytes + static_cast<std::size_t>(len), 2) != "\r\n") {
-      return unexpected(error::resp3_invalid_bulk_trailer);
+      return unexpected(protocol_errc::invalid_bulk_trailer);
     }
 
     buf_.consume(need);
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = *maybe_t, .text = payload, .i64 = len});
     pending_attrs_.attach(tree_, idx);
-    return value_result{.step = value_step::produced_node, .node_index = idx};
+    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
   }
 
   // Line-like: + - : , (
   auto pos = detail::find_crlf(data.substr(1));
   if (pos == std::string_view::npos) {
-    return unexpected(error::resp3_needs_more);
+    return parse_step<value_result>{need_more_t{}};
   }
   auto line = data.substr(1, pos);
   auto consume_bytes = 1 + pos + 2;
@@ -291,41 +309,41 @@ inline auto parser::parse_value() -> expected<value_result, rediscoro::error> {
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = *maybe_t, .text = line});
     pending_attrs_.attach(tree_, idx);
-    return value_result{.step = value_step::produced_node, .node_index = idx};
+    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
   }
 
   if (*maybe_t == kind::integer) {
     std::int64_t v{};
     if (!detail::parse_i64(line, v)) {
-      return unexpected(error::resp3_invalid_integer);
+      return unexpected(protocol_errc::invalid_integer);
     }
     buf_.consume(consume_bytes);
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::integer, .text = line, .i64 = v});
     pending_attrs_.attach(tree_, idx);
-    return value_result{.step = value_step::produced_node, .node_index = idx};
+    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
   }
 
   if (*maybe_t == kind::double_number) {
     double v{};
     if (!detail::parse_double(line, v)) {
-      return unexpected(error::resp3_invalid_double);
+      return unexpected(protocol_errc::invalid_double);
     }
     buf_.consume(consume_bytes);
     auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
     tree_.nodes.push_back(raw_node{.type = kind::double_number, .text = line, .f64 = v});
     pending_attrs_.attach(tree_, idx);
-    return value_result{.step = value_step::produced_node, .node_index = idx};
+    return parse_step<value_result>{value_result{.step = value_step::produced_node, .node_index = idx}};
   }
 
-  return unexpected(error::resp3_invalid_type_byte);
+  return unexpected(protocol_errc::invalid_type_byte);
 }
 
 inline auto parser::attach_to_parent(std::uint32_t child_idx)
-  -> expected<std::optional<std::uint32_t>, rediscoro::error> {
+  -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc> {
   while (true) {
     if (stack_.empty()) {
-      return std::optional<std::uint32_t>{child_idx};
+      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{child_idx}};
     }
 
     auto& parent = stack_.back();
@@ -348,7 +366,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       }
 
       stack_.push_back(frame{.state = frame_kind::value});
-      return std::optional<std::uint32_t>{};
+      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
     }
 
     if (parent.state == frame_kind::map_key) {
@@ -357,13 +375,13 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       parent.has_pending_key = true;
       parent.state = frame_kind::map_value;
       stack_.push_back(frame{.state = frame_kind::value});
-      return std::optional<std::uint32_t>{};
+      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
     }
 
     if (parent.state == frame_kind::map_value) {
       REDISCORO_ASSERT(parent.container_type == kind::map);
       if (!parent.has_pending_key) {
-        return unexpected(error::resp3_invalid_map_pairs);
+        return unexpected(protocol_errc::invalid_map_pairs);
       }
 
       auto& node = tree_.nodes.at(parent.node_index);
@@ -384,7 +402,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       }
 
       stack_.push_back(frame{.state = frame_kind::value});
-      return std::optional<std::uint32_t>{};
+      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
     }
 
     if (parent.state == frame_kind::attribute) {
@@ -394,7 +412,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
         parent.pending_key = child_idx;
         parent.has_pending_key = true;
         stack_.push_back(frame{.state = frame_kind::value});
-        return std::optional<std::uint32_t>{};
+        return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
       }
 
       pending_attrs_.push(tree_, parent.pending_key);
@@ -404,23 +422,23 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
 
       if (parent.produced == static_cast<std::uint32_t>(parent.expected)) {
         stack_.pop_back();  // pop attribute frame
-        return std::optional<std::uint32_t>{};
+        return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
       }
 
       stack_.push_back(frame{.state = frame_kind::value});
-      return std::optional<std::uint32_t>{};
+      return parse_step<std::optional<std::uint32_t>>{std::optional<std::uint32_t>{}};
     }
 
-    return unexpected(error::resp3_invalid_state);
+    return unexpected(protocol_errc::invalid_state);
   }
 }
 
-inline auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
+inline auto parser::parse_one() -> expected<parse_step<std::uint32_t>, rediscoro::protocol_errc> {
   if (tree_ready_) {
-    return unexpected(error::resp3_tree_not_consumed);
+    return unexpected(rediscoro::protocol_errc::tree_not_consumed);
   }
   if (failed_) {
-    return unexpected(error::resp3_parser_failed);
+    return unexpected(rediscoro::protocol_errc::parser_failed);
   }
 
   if (stack_.empty()) {
@@ -430,35 +448,40 @@ inline auto parser::parse_one() -> expected<std::uint32_t, rediscoro::error> {
   while (true) {
     if (stack_.empty()) {
       failed_ = true;
-      return unexpected(error::resp3_invalid_state);
+      return unexpected(rediscoro::protocol_errc::invalid_state);
     }
     auto& f = stack_.back();
     switch (f.state) {
       case frame_kind::value: {
         auto r = parse_value();
         if (!r) {
-          if (r.error() == error::resp3_needs_more) {
-            return unexpected(error::resp3_needs_more);
-          }
           failed_ = true;
           return unexpected(r.error());
         }
+        if (parser::is_need_more(*r)) {
+          return parse_step<std::uint32_t>{need_more_t{}};
+        }
+        auto const& vr = std::get<value_result>(*r);
 
-        if (r->step == value_step::continue_parsing) {
+        if (vr.step == value_step::continue_parsing) {
           break;
         }
 
         // Completed a node: pop value frame and attach to parent frames.
-        auto child_idx = r->node_index;
+        auto child_idx = vr.node_index;
         stack_.pop_back();  // pop value frame
         auto done = attach_to_parent(child_idx);
         if (!done) {
           failed_ = true;
           return unexpected(done.error());
         }
-        if (done->has_value()) {
+        if (parser::is_need_more(*done)) {
+          return parse_step<std::uint32_t>{need_more_t{}};
+        }
+        auto const& opt = std::get<std::optional<std::uint32_t>>(*done);
+        if (opt.has_value()) {
           tree_ready_ = true;
-          return **done;
+          return parse_step<std::uint32_t>{*opt};
         }
         break;
       }

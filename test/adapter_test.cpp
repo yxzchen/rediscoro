@@ -62,7 +62,7 @@ TEST(resp3_adapter, std_array_size_mismatch) {
   message m{array{{message{integer{1}}, message{integer{2}}}}};
   auto r = rediscoro::adapter::adapt<std::array<int, 3>>(m);
   ASSERT_FALSE(r.has_value());
-  EXPECT_EQ(r.error().kind, rediscoro::adapter::adapter_error_kind::size_mismatch);
+  EXPECT_EQ(r.error().kind, rediscoro::adapter_errc::size_mismatch);
 }
 
 }  // namespace rediscoro::resp3

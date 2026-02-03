@@ -59,18 +59,18 @@ inline auto pipeline::on_message(resp3::message msg) -> void {
   }
 }
 
-inline auto pipeline::on_error(error err) -> void {
+inline auto pipeline::on_error(error_info err) -> void {
   REDISCORO_ASSERT(!awaiting_read_.empty());
   auto& sink = awaiting_read_.front().sink;
   REDISCORO_ASSERT(sink != nullptr);
 
-  sink->deliver_error(err);
+  sink->deliver_error(std::move(err));
   if (sink->is_complete()) {
     awaiting_read_.pop_front();
   }
 }
 
-inline auto pipeline::clear_all(rediscoro::error err) -> void {
+inline auto pipeline::clear_all(error_info err) -> void {
   // Pending writes: none of the replies will arrive; fail all expected replies.
   while (!pending_write_.empty()) {
     auto& p = pending_write_.front();

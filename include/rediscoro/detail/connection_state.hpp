@@ -25,9 +25,9 @@ namespace rediscoro::detail {
 /// Key semantics (aligned with the current implementation):
 ///
 /// - **Enqueue gating**: only `OPEN` accepts user work; all other states fail immediately.
-///   - `INIT`/`CONNECTING` -> `error::not_connected`
-///   - `FAILED`/`RECONNECTING` -> `error::connection_lost`
-///   - `CLOSING`/`CLOSED` -> `error::connection_closed`
+///   - `INIT`/`CONNECTING` -> `client_errc::not_connected`
+///   - `FAILED`/`RECONNECTING` -> `client_errc::connection_lost`
+///   - `CLOSING`/`CLOSED` -> `client_errc::connection_closed`
 ///   There is **no request buffering** across connection generations.
 ///
 /// - **Initial connect failures do NOT use `FAILED`**:

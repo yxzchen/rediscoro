@@ -7,6 +7,7 @@
 #include <rediscoro/detail/pipeline.hpp>
 #include <rediscoro/detail/stop_scope.hpp>
 #include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/parser.hpp>
@@ -53,7 +54,7 @@ class connection : public std::enable_shared_from_this<connection> {
   /// Perform initial connection to Redis server.
   ///
   /// Contract:
-  /// - Before `connect()` succeeds, `enqueue()` rejects user requests with `error::not_connected`.
+  /// - Before `connect()` succeeds, `enqueue()` rejects user requests with `client_errc::not_connected`.
   /// - After it succeeds, the connection is `OPEN` and ready for normal request processing.
   ///
   /// Implementation notes:
@@ -65,7 +66,7 @@ class connection : public std::enable_shared_from_this<connection> {
   /// - Automatic reconnection applies only to runtime failures after reaching `OPEN`.
   ///
   /// Thread-safety: Can be called from any executor (switches to strand internally).
-  auto connect() -> iocoro::awaitable<expected<void, error>>;
+  auto connect() -> iocoro::awaitable<expected<void, error_info>>;
 
   /// Request graceful shutdown.
   ///
@@ -109,7 +110,7 @@ class connection : public std::enable_shared_from_this<connection> {
   /// - Runtime errors after `OPEN` (including request timeout / RESP3 parse error / peer close)
   ///   are recorded and drive `OPEN -> FAILED`.
   /// - Reconnection attempt failures are also recorded (user cannot observe them otherwise).
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<error> { return last_error_; }
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<error_info> { return last_error_; }
 
  private:
   /// Start the background connection actor (internal use only).
@@ -166,9 +167,9 @@ class connection : public std::enable_shared_from_this<connection> {
   /// not as special handshake methods.
   ///
   /// Returns:
-  /// - expected<void, error>{}: connection succeeded, state_ = OPEN
-  /// - unexpected(error): connection failed with specific error
-  auto do_connect() -> iocoro::awaitable<expected<void, error>>;
+  /// - expected<void, error_info>{}: connection succeeded, state_ = OPEN
+  /// - unexpected(error_info): connection failed with specific error
+  auto do_connect() -> iocoro::awaitable<expected<void, error_info>>;
 
   /// Read and parse RESP3 messages from socket.
   ///
@@ -196,7 +197,7 @@ class connection : public std::enable_shared_from_this<connection> {
   /// - Reconnection (or deterministic shutdown when disabled) is driven by `control_loop()`.
   ///
   /// Thread-safety: MUST be called from connection strand only
-  auto handle_error(error ec) -> void;
+  auto handle_error(error_info ec) -> void;
 
   /// Perform reconnection loop with exponential backoff.
   ///
@@ -228,7 +229,7 @@ class connection : public std::enable_shared_from_this<connection> {
   // State machine
   connection_state state_{connection_state::INIT};
 
-  std::optional<error> last_error_{};
+  std::optional<error_info> last_error_{};
 
   // Request/response pipeline
   pipeline pipeline_;

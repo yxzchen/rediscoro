@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rediscoro/detail/connection.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/ignore.hpp>
 #include <rediscoro/resp3/builder.hpp>
 
@@ -42,7 +43,7 @@ inline connection::~connection() noexcept {
     state_ = connection_state::CLOSING;
   }
 
-  pipeline_.clear_all(error::connection_closed);
+  pipeline_.clear_all(error_info{client_errc::connection_closed});
 
   if (socket_.is_open()) {
     (void)socket_.close();
@@ -72,7 +73,7 @@ inline auto connection::run_actor() -> void {
         self->actor_running_ = false;
         if (!r) {
           // No-exception policy: record a best-effort diagnostic and proceed with deterministic cleanup.
-          self->last_error_ = error::connection_lost;
+          self->last_error_ = error_info{client_errc::connection_lost};
         }
         if (self->state_ != connection_state::CLOSED) {
           self->transition_to_closed();
@@ -82,15 +83,15 @@ inline auto connection::run_actor() -> void {
     });
 }
 
-inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
+inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info>> {
   co_await iocoro::this_coro::switch_to(executor_.strand().executor());
 
   if (state_ == connection_state::OPEN) {
-    co_return expected<void, error>{};
+    co_return expected<void, error_info>{};
   }
 
   if (state_ == connection_state::CONNECTING) {
-    co_return unexpected(error::already_in_progress);
+    co_return unexpected(error_info{client_errc::already_in_progress});
   }
 
   if (state_ == connection_state::CLOSED) {
@@ -102,7 +103,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
   }
 
   if (stop_.token().stop_requested()) {
-    co_return unexpected(error::operation_aborted);
+    co_return unexpected(error_info{client_errc::operation_aborted});
   }
 
   if (!actor_running_) {
@@ -118,7 +119,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
     // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
     // Cleanup is unified via close() (joins the actor).
     co_await close();
-    co_return unexpected(connect_res.error());
+    co_return unexpected(std::move(connect_res.error()));
   }
 
   // Successful do_connect() implies OPEN.
@@ -128,7 +129,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error>> {
   read_wakeup_.notify();
   write_wakeup_.notify();
   control_wakeup_.notify();
-  co_return expected<void, error>{};
+  co_return expected<void, error_info>{};
 }
 
 inline auto connection::close() -> iocoro::awaitable<void> {
@@ -143,7 +144,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   state_ = connection_state::CLOSING;
 
   // Fail all pending work deterministically.
-  pipeline_.clear_all(error::connection_closed);
+  pipeline_.clear_all(error_info{client_errc::connection_closed});
 
   // Close socket immediately.
   if (socket_.is_open()) {
@@ -170,17 +171,17 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
   switch (state_) {
     case connection_state::INIT:
     case connection_state::CONNECTING: {
-      sink->fail_all(error::not_connected);
+      sink->fail_all(error_info{client_errc::not_connected});
       return;
     }
     case connection_state::FAILED:
     case connection_state::RECONNECTING: {
-      sink->fail_all(error::connection_lost);
+      sink->fail_all(error_info{client_errc::connection_lost});
       return;
     }
     case connection_state::CLOSING:
     case connection_state::CLOSED: {
-      sink->fail_all(error::connection_closed);
+      sink->fail_all(error_info{client_errc::connection_closed});
       return;
     }
     case connection_state::OPEN: {
@@ -202,7 +203,7 @@ inline auto connection::transition_to_closed() -> void {
   // Deterministic cleanup (idempotent).
   state_ = connection_state::CLOSED;
 
-  pipeline_.clear_all(error::connection_closed);
+  pipeline_.clear_all(error_info{client_errc::connection_closed});
 
   if (socket_.is_open()) {
     (void)socket_.close();
@@ -279,7 +280,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
 
     if (state_ == connection_state::OPEN && cfg_.request_timeout > std::chrono::milliseconds{0}) {
       if (pipeline_.has_expired()) {
-        handle_error(error::request_timeout);
+        handle_error(error_info{client_errc::request_timeout});
         continue;
       }
 
@@ -390,10 +391,10 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
   }
 }
 
-inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>> {
+inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_info>> {
   auto tok = co_await iocoro::this_coro::stop_token;
   if (tok.stop_requested()) {
-    co_return unexpected(error::operation_aborted);
+    co_return unexpected(error_info{client_errc::operation_aborted});
   }
 
   // Defensive: ensure parser state is clean at the start of a handshake.
@@ -410,19 +411,19 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
     resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)), cfg_.resolve_timeout);
   if (!res) {
     if (res.error() == iocoro::error::timed_out) {
-      co_return unexpected(error::resolve_timeout);
+      co_return unexpected(error_info{client_errc::resolve_timeout});
     } else if (res.error() == iocoro::error::operation_aborted) {
-      co_return unexpected(error::operation_aborted);
+      co_return unexpected(error_info{client_errc::operation_aborted});
     } else {
-      co_return unexpected(error::resolve_failed);
+      co_return unexpected(error_info{client_errc::resolve_failed});
     }
   }
   if (res->empty()) {
-    co_return unexpected(error::resolve_failed);
+    co_return unexpected(error_info{client_errc::resolve_failed});
   }
 
   if (tok.stop_requested()) {
-    co_return unexpected(error::operation_aborted);
+    co_return unexpected(error_info{client_errc::operation_aborted});
   }
 
   // TCP connect with timeout (iterate endpoints in order).
@@ -446,16 +447,17 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
   if (connect_ec) {
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::error::timed_out) {
-      co_return unexpected(error::connect_timeout);
+      co_return unexpected(error_info{client_errc::connect_timeout});
     } else if (connect_ec == iocoro::error::operation_aborted) {
-      co_return unexpected(error::operation_aborted);
+      co_return unexpected(error_info{client_errc::operation_aborted});
     } else {
-      co_return unexpected(error::connect_failed);
+      co_return unexpected(error_info{client_errc::connect_failed});
     }
   }
 
   if (tok.stop_requested()) {
-    co_return unexpected(error::operation_aborted);
+    co_return unexpected(
+      error_info{client_errc::operation_aborted});
   }
 
   // Build handshake request (pipeline of commands).
@@ -489,9 +491,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
         auto w = co_await socket_.async_write_some(buf);
         if (!w) {
           if (w.error() == iocoro::error::operation_aborted) {
-            co_return iocoro::unexpected(error::operation_aborted);
+            co_return iocoro::unexpected(client_errc::operation_aborted);
           }
-          co_return iocoro::unexpected(error::handshake_failed);
+          co_return iocoro::unexpected(client_errc::handshake_failed);
         }
         pipeline_.on_write_done(*w);
       }
@@ -502,32 +504,33 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
         auto r = co_await socket_.async_read_some(writable);
         if (!r) {
           if (r.error() == iocoro::error::operation_aborted) {
-            co_return iocoro::unexpected(error::operation_aborted);
+            co_return iocoro::unexpected(client_errc::operation_aborted);
           }
-          co_return iocoro::unexpected(error::handshake_failed);
+          co_return iocoro::unexpected(client_errc::handshake_failed);
         }
         if (*r == 0) {
-          co_return iocoro::unexpected(error::connection_reset);
+          co_return iocoro::unexpected(client_errc::connection_reset);
         }
         parser_.commit(*r);
 
         for (;;) {
           auto parsed = parser_.parse_one();
           if (!parsed) {
-            if (parsed.error() == error::resp3_needs_more) {
-              break;
-            }
             if (pipeline_.has_pending_read()) {
-              pipeline_.on_error(parsed.error());
+              pipeline_.on_error(error_info{parsed.error()});
             }
             co_return iocoro::unexpected(parsed.error());
           }
-
-          if (!pipeline_.has_pending_read()) {
-            co_return iocoro::unexpected(error::unsolicited_message);
+          if (resp3::parser::is_need_more(*parsed)) {
+            break;
           }
 
-          auto msg = resp3::build_message(parser_.tree(), *parsed);
+          if (!pipeline_.has_pending_read()) {
+            co_return iocoro::unexpected(client_errc::unsolicited_message);
+          }
+
+          auto const root = std::get<std::uint32_t>(*parsed);
+          auto msg = resp3::build_message(parser_.tree(), root);
           pipeline_.on_message(std::move(msg));
           parser_.reclaim();
 
@@ -538,7 +541,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
       }
 
       if (tok.stop_requested()) {
-        co_return iocoro::unexpected(error::operation_aborted);
+        co_return iocoro::unexpected(client_errc::operation_aborted);
       }
 
       co_return iocoro::ok();
@@ -548,29 +551,35 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
   if (!handshake_res) {
     auto const ec = handshake_res.error();
     if (ec == iocoro::error::timed_out) {
-      pipeline_.clear_all(error::handshake_timeout);
-      co_return unexpected(error::handshake_timeout);
+      auto e = error_info{client_errc::handshake_timeout};
+      pipeline_.clear_all(e);
+      co_return unexpected(std::move(e));
     }
     if (ec == iocoro::error::operation_aborted) {
-      pipeline_.clear_all(error::operation_aborted);
-      co_return unexpected(error::operation_aborted);
-    }
-    if (ec.category() == rediscoro::detail::category()) {
-      auto const e = static_cast<error>(ec.value());
-      if (e == error::unsolicited_message) {
-        pipeline_.clear_all(error::handshake_failed);
-        co_return unexpected(error::handshake_failed);
-      }
-      if (e == error::operation_aborted) {
-        pipeline_.clear_all(error::operation_aborted);
-        co_return unexpected(error::operation_aborted);
-      }
-      pipeline_.clear_all(error::handshake_failed);
-      co_return unexpected(e);
+      auto e = error_info{client_errc::operation_aborted};
+      pipeline_.clear_all(e);
+      co_return unexpected(std::move(e));
     }
 
-    pipeline_.clear_all(error::handshake_failed);
-    co_return unexpected(error::handshake_failed);
+    // Protocol parse error during handshake: surface it directly.
+    if (ec.category() == std::error_code{protocol_errc::invalid_type_byte}.category()) {
+      auto const pe = static_cast<protocol_errc>(ec.value());
+      auto out = error_info{pe};
+      pipeline_.clear_all(out);
+      co_return unexpected(std::move(out));
+    }
+
+    // Client-level error during handshake.
+    if (ec.category() == std::error_code{client_errc::connection_lost}.category()) {
+      auto const ce = static_cast<client_errc>(ec.value());
+      auto out = error_info{ce};
+      pipeline_.clear_all(out);
+      co_return unexpected(std::move(out));
+    }
+
+    auto e = error_info{client_errc::handshake_failed};
+    pipeline_.clear_all(e);
+    co_return unexpected(std::move(e));
   }
 
   // Validate all handshake replies: any error => handshake_failed.
@@ -578,14 +587,16 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
   // Defensive: handshake_res == ok() implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
-    pipeline_.clear_all(error::handshake_failed);
-    co_return unexpected(error::handshake_failed);
+    auto e = error_info{client_errc::handshake_failed};
+    pipeline_.clear_all(e);
+    co_return unexpected(std::move(e));
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i]) {
-      pipeline_.clear_all(error::handshake_failed);
-      co_return unexpected(error::handshake_failed);
+      auto e = error_info{client_errc::handshake_failed};
+      pipeline_.clear_all(e);
+      co_return unexpected(std::move(e));
     }
   }
 
@@ -595,7 +606,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error>>
 
   // Defensive: ensure parser buffer/state is clean when handing over to runtime loops.
   parser_.reset();
-  co_return expected<void, error>{};
+  co_return expected<void, error_info>{};
 }
 
 inline auto connection::do_read() -> iocoro::awaitable<void> {
@@ -620,13 +631,13 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   auto r = co_await socket_.async_read_some(writable);
   if (!r) {
     // Socket IO error - treat as connection lost
-    handle_error(error::connection_lost);
+    handle_error(error_info{client_errc::connection_lost});
     co_return;
   }
 
   if (*r == 0) {
     // Peer closed (EOF).
-    handle_error(error::connection_reset);
+    handle_error(error_info{client_errc::connection_reset});
     co_return;
   }
 
@@ -635,26 +646,28 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   for (;;) {
     auto parsed = parser_.parse_one();
     if (!parsed) {
-      if (parsed.error() == error::resp3_needs_more) {
-        break;
-      }
-
       // Deliver parser error into the pipeline, then treat it as a fatal connection error.
       if (pipeline_.has_pending_read()) {
-        pipeline_.on_error(parsed.error());
+        auto err = error_info{parsed.error()};
+        pipeline_.on_error(err);
       }
-      handle_error(parsed.error());
+      auto err = error_info{parsed.error()};
+      handle_error(std::move(err));
       co_return;
+    }
+    if (resp3::parser::is_need_more(*parsed)) {
+      break;
     }
 
     if (!pipeline_.has_pending_read()) {
       // Unsolicited message (e.g. PUSH) is not supported yet.
       // Temporary policy: treat as "unsupported feature" rather than protocol violation.
-      handle_error(error::unsolicited_message);
+      handle_error(error_info{client_errc::unsolicited_message});
       co_return;
     }
 
-    auto msg = resp3::build_message(parser_.tree(), *parsed);
+    auto const root = std::get<std::uint32_t>(*parsed);
+    auto msg = resp3::build_message(parser_.tree(), root);
     pipeline_.on_message(std::move(msg));
 
     // Critical for zero-copy parser: reclaim before parsing the next message.
@@ -689,7 +702,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
     auto r = co_await socket_.async_write_some(buf);
     if (!r) {
       // Socket IO error - treat as connection lost
-      handle_error(error::connection_lost);
+      handle_error(error_info{client_errc::connection_lost});
       co_return;
     }
 
@@ -702,7 +715,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
   co_return;
 }
 
-inline auto connection::handle_error(error ec) -> void {
+inline auto connection::handle_error(error_info ec) -> void {
   // Centralized runtime error path:
   // - Only OPEN may transition to FAILED (runtime IO errors after first OPEN).
   // - CONNECTING/INIT errors are handled by do_connect()/connect() and must not enter FAILED.
@@ -728,11 +741,7 @@ inline auto connection::handle_error(error ec) -> void {
   // Record error for diagnostics (user cannot obtain it directly).
   last_error_ = ec;
   state_ = connection_state::FAILED;
-  auto clear_err = error::connection_lost;
-  if (ec == error::request_timeout) {
-    clear_err = error::request_timeout;
-  }
-  pipeline_.clear_all(clear_err);
+  pipeline_.clear_all(ec);
   if (socket_.is_open()) {
     (void)socket_.close();
   }

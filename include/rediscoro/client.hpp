@@ -2,7 +2,7 @@
 
 #include <rediscoro/config.hpp>
 #include <rediscoro/detail/connection.hpp>
-#include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
@@ -46,9 +46,9 @@ class client {
   /// Performs TCP connection, authentication, and database selection.
   ///
   /// Returns:
-  /// - expected<void, error>{} on success
-  /// - unexpected(error) with error details on failure
-  auto connect() -> iocoro::awaitable<expected<void, error>> {
+  /// - expected<void, error_info>{} on success
+  /// - unexpected(error_info) with error details on failure
+  auto connect() -> iocoro::awaitable<expected<void, error_info>> {
     co_return co_await conn_->connect();
   }
 
