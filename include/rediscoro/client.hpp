@@ -6,7 +6,7 @@
 #include <rediscoro/response.hpp>
 
 #include <iocoro/awaitable.hpp>
-#include <iocoro/io_executor.hpp>
+#include <iocoro/any_io_executor.hpp>
 
 #include <memory>
 #include <utility>
@@ -37,7 +37,7 @@ namespace rediscoro {
 class client {
 public:
   /// Construct a client with the given executor and configuration.
-  explicit client(iocoro::io_executor ex, config cfg)
+  explicit client(iocoro::any_io_executor ex, config cfg)
     : conn_(std::make_shared<detail::connection>(ex, std::move(cfg))) {
   }
 

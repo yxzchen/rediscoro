@@ -6,7 +6,6 @@
 
 #include <iocoro/bind_executor.hpp>
 #include <iocoro/co_spawn.hpp>
-#include <iocoro/io/connect.hpp>
 #include <iocoro/ip/resolver.hpp>
 #include <iocoro/steady_timer.hpp>
 #include <iocoro/this_coro.hpp>
@@ -22,7 +21,7 @@
 
 namespace rediscoro::detail {
 
-inline connection::connection(iocoro::io_executor ex, config cfg)
+inline connection::connection(iocoro::any_io_executor ex, config cfg)
   : cfg_(std::move(cfg))
   , executor_(ex)
   , socket_(executor_.get_io_executor()) {
@@ -55,7 +54,7 @@ inline connection::~connection() noexcept {
   pipeline_.clear_all(error::connection_closed);
 
   if (socket_.is_open()) {
-    socket_.close();
+    (void)socket_.close();
   }
 
   write_wakeup_.notify();
@@ -146,7 +145,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
 
   // Close socket immediately.
   if (socket_.is_open()) {
-    socket_.close();
+    (void)socket_.close();
   }
 
   // Wake loops / actor.
@@ -387,16 +386,13 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   parser_.reset();
 
   // Resolve:
-  // - iocoro resolver always runs getaddrinfo on a background thread_pool and resumes on this
-  //   coroutine's executor (our strand).
-  // - It does NOT support cancellation; timeout/close will only stop waiting (the resolve may
-  //   still complete in the background and be ignored).
+  // - iocoro resolver runs getaddrinfo on a background thread_pool and resumes on this coroutine's
+  //   executor (our strand).
+  // - Cancellation is best-effort via stop_token. It cannot interrupt an in-flight getaddrinfo()
+  //   but can prevent delivering results to the awaiting coroutine.
   iocoro::ip::tcp::resolver resolver{};
-  auto res = co_await iocoro::with_timeout_detached(
-    executor_.get_io_executor(),
-    resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)),
-    cfg_.resolve_timeout
-  );
+  auto res = co_await iocoro::with_timeout(resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)),
+                                           cfg_.resolve_timeout);
   if (!res) {
     if (res.error() == iocoro::error::timed_out) {
       co_return error::resolve_timeout;
@@ -418,13 +414,15 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
     // IMPORTANT: after a failed connect attempt, the socket may be left in a platform-dependent
     // error state. Always close before trying the next endpoint.
     if (socket_.is_open()) {
-      socket_.close();
+      (void)socket_.close();
     }
 
-    connect_ec = co_await iocoro::io::async_connect_timeout(socket_, ep, cfg_.connect_timeout);
-    if (!connect_ec) {
+    auto connect_res = co_await iocoro::with_timeout(socket_.async_connect(ep), cfg_.connect_timeout);
+    if (connect_res) {
+      connect_ec = {};
       break;
     }
+    connect_ec = connect_res.error();
   }
 
   if (connect_ec) {
@@ -463,22 +461,14 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
   pipeline_.push(std::move(req), slot.get());
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
-  auto handshake_ec = co_await iocoro::with_timeout(
-    executor_.get_io_executor(),
-    [&](iocoro::cancellation_token tok) -> iocoro::awaitable<std::error_code> {
-      auto map_io_error = [&](std::error_code ec) {
-        // IMPORTANT:
-        // - iocoro::with_timeout cancels in-flight operations via the cancellation_token.
-        // - Many async_* operations surface token cancellation as operation_aborted (not timed_out).
-        // - We disambiguate "user close()" vs "timeout token" via cancel_.
+  auto handshake_res = co_await iocoro::with_timeout(
+    [&]() -> iocoro::awaitable<iocoro::result<void>> {
+      auto map_io_error = [&](std::error_code ec) -> std::error_code {
         if (ec == iocoro::error::operation_aborted) {
           if (cancel_.is_cancelled()) {
             return error::operation_aborted;
           }
-          return error::handshake_timeout;
-        }
-        if (ec == iocoro::error::timed_out) {
-          return error::handshake_timeout;
+          return error::handshake_failed;
         }
         return error::handshake_failed;
       };
@@ -488,23 +478,22 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
       while (!cancel_.is_cancelled() && pipeline_.has_pending_write()) {
         auto view = pipeline_.next_write_buffer();
         auto buf = std::as_bytes(std::span{view.data(), view.size()});
-        auto w = co_await socket_.async_write_some(buf, tok);
+        auto w = co_await socket_.async_write_some(buf);
         if (!w) {
-          co_return map_io_error(w.error());
+          co_return iocoro::unexpected(map_io_error(w.error()));
         }
         pipeline_.on_write_done(*w);
       }
 
       // Phase-2: read/parse until the handshake sink completes.
       while (!cancel_.is_cancelled() && !slot->is_complete()) {
-        // Read until we can parse at least one value or hit timeout/cancel.
         auto writable = parser_.prepare();
-        auto r = co_await socket_.async_read_some(writable, tok);
+        auto r = co_await socket_.async_read_some(writable);
         if (!r) {
-          co_return map_io_error(r.error());
+          co_return iocoro::unexpected(map_io_error(r.error()));
         }
         if (*r == 0) {
-          co_return error::connection_reset;
+          co_return iocoro::unexpected(error::connection_reset);
         }
         parser_.commit(*r);
 
@@ -517,11 +506,11 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
             if (pipeline_.has_pending_read()) {
               pipeline_.on_error(parsed.error());
             }
-            co_return parsed.error();
+            co_return iocoro::unexpected(parsed.error());
           }
 
           if (!pipeline_.has_pending_read()) {
-            co_return error::unsolicited_message;
+            co_return iocoro::unexpected(error::unsolicited_message);
           }
 
           auto msg = resp3::build_message(parser_.tree(), *parsed);
@@ -534,49 +523,35 @@ inline auto connection::do_connect() -> iocoro::awaitable<std::error_code> {
         }
       }
 
-      co_return std::error_code{};
-    },
+      if (cancel_.is_cancelled()) {
+        co_return iocoro::unexpected(error::operation_aborted);
+      }
+
+      co_return iocoro::ok();
+    }(),
     cfg_.connect_timeout);
 
-  // NOTE (current limitation):
-  // - connect() lifecycle cancellation (cancel_) is not wired into iocoro::cancellation_token.
-  // - If cancel_ is requested while an async_* operation is in-flight, we only observe it after
-  //   that operation resumes (or times out). This is acceptable for now; future work may bridge
-  //   cancel_ into an iocoro cancellation_source to provide prompt abort semantics.
-
-  if (cancel_.is_cancelled()) {
-    // Handshake aborted (close/cancel won). Fail the internal handshake sink deterministically.
-    pipeline_.clear_all(error::operation_aborted);
-    co_return error::operation_aborted;
-  }
-
-  if (handshake_ec) {
-    // Fail the internal handshake sink with a meaningful error; connect() returns the error directly.
-    // Unsolicited server messages during handshake are treated as unsupported feature for now.
-    if (handshake_ec == error::unsolicited_message) {
-      pipeline_.clear_all(error::handshake_failed);
-      co_return error::handshake_failed;
-    } else if (handshake_ec == error::connection_reset) {
-      // Preserve the semantic error: peer closed/reset during handshake.
-      pipeline_.clear_all(error::connection_reset);
-      co_return error::connection_reset;
-    } else if (handshake_ec == error::handshake_timeout) {
+  if (!handshake_res) {
+    if (cancel_.is_cancelled()) {
+      pipeline_.clear_all(error::operation_aborted);
+      co_return error::operation_aborted;
+    }
+    if (handshake_res.error() == iocoro::error::timed_out) {
       pipeline_.clear_all(error::handshake_timeout);
       co_return error::handshake_timeout;
-    } else {
-      // handshake_ec is normalized inside the handshake IO coroutine:
-      // - rediscoro::error for protocol/semantic errors
-      // - error::handshake_failed for system/IO errors
-      REDISCORO_ASSERT(handshake_ec.category() == rediscoro::detail::category());
-      auto e = static_cast<error>(handshake_ec.value());
-      pipeline_.clear_all(e);
-      co_return e;
     }
+    // Unsolicited server messages during handshake are treated as unsupported feature for now.
+    if (handshake_res.error() == error::unsolicited_message) {
+      pipeline_.clear_all(error::handshake_failed);
+      co_return error::handshake_failed;
+    }
+    pipeline_.clear_all(error::handshake_failed);
+    co_return handshake_res.error();
   }
 
   // Validate all handshake replies: any error => handshake_failed.
   //
-  // Defensive: handshake_ec == {} implies slot should be complete (loop condition). Keep this
+  // Defensive: handshake_res == ok() implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
     pipeline_.clear_all(error::handshake_failed);
@@ -732,7 +707,7 @@ inline auto connection::handle_error(error ec) -> void {
   }
   pipeline_.clear_all(clear_err);
   if (socket_.is_open()) {
-    socket_.close();
+    (void)socket_.close();
   }
   control_wakeup_.notify();
   write_wakeup_.notify();
@@ -746,7 +721,7 @@ inline auto connection::transition_to_closed() -> void {
   pipeline_.clear_all(error::connection_closed);
 
   if (socket_.is_open()) {
-    socket_.close();
+    (void)socket_.close();
   }
 }
 

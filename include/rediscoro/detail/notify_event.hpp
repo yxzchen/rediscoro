@@ -2,7 +2,6 @@
 
 #include <iocoro/any_executor.hpp>
 #include <iocoro/awaitable.hpp>
-#include <iocoro/io_executor.hpp>
 
 #include <atomic>
 #include <coroutine>
@@ -131,7 +130,9 @@ class notify_event {
 
     bool await_ready() const noexcept { return false; }
 
-    bool await_suspend(std::coroutine_handle<> h) {
+    template <class Promise>
+      requires requires(Promise& p) { p.get_executor(); }
+    bool await_suspend(std::coroutine_handle<Promise> h) {
       std::lock_guard lk{self->mutex_};
 
       // If there is already a pending notification, consume it and do not suspend.
@@ -143,7 +144,7 @@ class notify_event {
 
       // Otherwise, register waiter atomically with the decision to suspend.
       self->awaiting_ = h;
-      self->executor_ = iocoro::this_coro::get_executor();
+      self->executor_ = h.promise().get_executor();
       return true;  // suspend
     }
 

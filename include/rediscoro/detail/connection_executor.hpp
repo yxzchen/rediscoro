@@ -1,6 +1,6 @@
 #pragma once
 
-#include <iocoro/io_executor.hpp>
+#include <iocoro/any_io_executor.hpp>
 #include <iocoro/strand.hpp>
 
 namespace rediscoro::detail {
@@ -52,7 +52,7 @@ namespace rediscoro::detail {
 ///   co_await socket_.async_read_some(buf, iocoro::bind_executor(executor_.strand().executor(), use_awaitable));
 class connection_executor {
 public:
-  explicit connection_executor(iocoro::io_executor ex)
+  explicit connection_executor(iocoro::any_io_executor ex)
     : io_executor_(ex)
     , strand_(iocoro::make_strand(iocoro::any_executor{ex})) {}
 
@@ -79,12 +79,12 @@ public:
   }
 
   /// Get the underlying io_executor (for socket construction).
-  [[nodiscard]] auto get_io_executor() const -> iocoro::io_executor {
+  [[nodiscard]] auto get_io_executor() const -> iocoro::any_io_executor {
     return io_executor_;
   }
 
 private:
-  iocoro::io_executor io_executor_{};
+  iocoro::any_io_executor io_executor_{};
   iocoro::any_executor strand_;
 };
 

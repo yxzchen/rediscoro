@@ -11,7 +11,7 @@
 #include <rediscoro/resp3/parser.hpp>
 
 #include <iocoro/awaitable.hpp>
-#include <iocoro/io_executor.hpp>
+#include <iocoro/any_io_executor.hpp>
 #include <iocoro/ip/tcp.hpp>
 
 #include <memory>
@@ -46,7 +46,7 @@ namespace rediscoro::detail {
 /// - `close()` requests shutdown (`CLOSING` + cancel + resource release) and then joins the actor.
 class connection : public std::enable_shared_from_this<connection> {
 public:
-  explicit connection(iocoro::io_executor ex, config cfg);
+  explicit connection(iocoro::any_io_executor ex, config cfg);
   ~connection() noexcept;
 
   /// Perform initial connection to Redis server.
