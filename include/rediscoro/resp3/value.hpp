@@ -1,6 +1,6 @@
 #pragma once
 
-#include <rediscoro/resp3/type.hpp>
+#include <rediscoro/resp3/kind.hpp>
 
 #include <cstdint>
 #include <string>
@@ -13,93 +13,93 @@ struct message;
 
 /// Simple string value (+)
 struct simple_string {
-  static constexpr type3 type_id = type3::simple_string;
+  static constexpr kind kind_id = kind::simple_string;
   std::string data;
 };
 
 /// Simple error value (-)
 struct simple_error {
-  static constexpr type3 type_id = type3::simple_error;
+  static constexpr kind kind_id = kind::simple_error;
   std::string message;
 };
 
 /// Integer value (:)
 struct integer {
-  static constexpr type3 type_id = type3::integer;
+  static constexpr kind kind_id = kind::integer;
   std::int64_t value;
 };
 
 /// Double value (,)
-struct double_type {
-  static constexpr type3 type_id = type3::double_type;
+struct double_number {
+  static constexpr kind kind_id = kind::double_number;
   double value;
 };
 
 /// Boolean value (#)
 struct boolean {
-  static constexpr type3 type_id = type3::boolean;
+  static constexpr kind kind_id = kind::boolean;
   bool value;
 };
 
 /// Big number value (()
 struct big_number {
-  static constexpr type3 type_id = type3::big_number;
+  static constexpr kind kind_id = kind::big_number;
   std::string value;  // Stored as string to handle arbitrary precision
 };
 
 /// Null value (_)
 struct null {
-  static constexpr type3 type_id = type3::null;
+  static constexpr kind kind_id = kind::null;
 };
 
 /// Bulk string value ($)
 struct bulk_string {
-  static constexpr type3 type_id = type3::bulk_string;
+  static constexpr kind kind_id = kind::bulk_string;
   std::string data;
 };
 
 /// Bulk error value (!)
 struct bulk_error {
-  static constexpr type3 type_id = type3::bulk_error;
+  static constexpr kind kind_id = kind::bulk_error;
   std::string message;
 };
 
 /// Verbatim string value (=)
 struct verbatim_string {
-  static constexpr type3 type_id = type3::verbatim_string;
+  static constexpr kind kind_id = kind::verbatim_string;
   std::string encoding;  // 3-byte encoding type
   std::string data;
 };
 
 /// Array value (*)
 struct array {
-  static constexpr type3 type_id = type3::array;
+  static constexpr kind kind_id = kind::array;
   std::vector<message> elements;
 };
 
 /// Map value (%)
 /// Stored as vector of key-value pairs to preserve order
 struct map {
-  static constexpr type3 type_id = type3::map;
+  static constexpr kind kind_id = kind::map;
   std::vector<std::pair<message, message>> entries;
 };
 
 /// Set value (~)
 struct set {
-  static constexpr type3 type_id = type3::set;
+  static constexpr kind kind_id = kind::set;
   std::vector<message> elements;
 };
 
 /// Attribute value (|)
 /// Attributes are metadata that can be attached to any RESP3 value
 struct attribute {
-  static constexpr type3 type_id = type3::attribute;
+  static constexpr kind kind_id = kind::attribute;
   std::vector<std::pair<message, message>> entries;
 };
 
 /// Push value (>)
 struct push {
-  static constexpr type3 type_id = type3::push;
+  static constexpr kind kind_id = kind::push;
   std::vector<message> elements;
 };
 

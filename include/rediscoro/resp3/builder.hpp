@@ -11,24 +11,52 @@
 
 namespace rediscoro::resp3 {
 
+namespace detail {
+
+[[nodiscard]] inline auto decode_verbatim(std::string_view payload) -> verbatim_string {
+  // RESP3: encoding is 3 bytes, payload is "xxx:<data>".
+  // Policy: if input doesn't match this shape, fall back to encoding="txt" and keep full text as data.
+  verbatim_string v{};
+  if (payload.size() >= 4 && payload[3] == ':') {
+    v.encoding = std::string(payload.substr(0, 3));
+    v.data = std::string(payload.substr(4));
+  } else {
+    v.encoding = "txt";
+    v.data = std::string(payload);
+  }
+  return v;
+}
+
+enum class parent_slot_kind : std::uint8_t {
+  child,
+  attribute,
+};
+
+}  // namespace detail
+
 [[nodiscard]] inline auto build_message(const raw_tree& tree, std::uint32_t root) -> message {
   struct frame {
     std::uint32_t node = 0;
-    std::uint32_t next_link = 0;  // [0..child_count) children, [child_count..child_count+attr_count) attrs
+
+    std::uint32_t next_child = 0;
+    std::uint32_t next_attr = 0;
     bool initialized = false;
-    bool has_parent_slot = false;
-    std::uint32_t parent_slot = 0;
+
+    bool has_parent = false;
+    detail::parent_slot_kind parent_kind{detail::parent_slot_kind::child};
+    std::uint32_t parent_index = 0;  // child index within children OR attr index within attrs
 
     message result{};
 
-    // For map children and attrs (both are alternating key/value), hold pending key.
-    std::optional<message> pending_key{};
+    // Separate pending keys for map children and attrs.
+    std::optional<message> pending_map_key{};
+    std::optional<message> pending_attr_key{};
     attribute attrs{};  // accumulate attrs here, assign to result.attrs at finalize
   };
 
-  std::vector<frame> stack;
+  std::vector<frame> stack{};
   stack.reserve(64);
-  stack.push_back(frame{.node = root, .next_link = 0, .initialized = false, .has_parent_slot = false});
+  stack.push_back(frame{.node = root});
 
   while (!stack.empty()) {
     auto& f = stack.back();
@@ -37,80 +65,71 @@ namespace rediscoro::resp3 {
     if (!f.initialized) {
       f.initialized = true;
 
-      // attribute should never be materialized
-      if (n.type == type3::attribute) {
+      if (n.type == kind::attribute) {
+        // Attribute nodes must never be materialized (parser stores them as pending links only).
         REDISCORO_UNREACHABLE();
       }
 
       // Null-like: preserve type in raw tree, but current message model materializes to null.
-      if (n.type == type3::null || n.i64 == -1) {
+      if (n.type == kind::null || n.i64 == -1) {
         f.result = message{null{}};
       } else {
         switch (n.type) {
-          case type3::simple_string:
+          case kind::simple_string:
             f.result = message{simple_string{std::string(n.text)}};
             break;
-          case type3::simple_error:
+          case kind::simple_error:
             f.result = message{simple_error{std::string(n.text)}};
             break;
-          case type3::integer:
+          case kind::integer:
             f.result = message{integer{n.i64}};
             break;
-          case type3::double_type:
-            f.result = message{double_type{n.f64}};
+          case kind::double_number:
+            f.result = message{double_number{n.f64}};
             break;
-          case type3::boolean:
+          case kind::boolean:
             f.result = message{boolean{n.boolean}};
             break;
-          case type3::big_number:
+          case kind::big_number:
             f.result = message{big_number{std::string(n.text)}};
             break;
-          case type3::bulk_string:
+          case kind::bulk_string:
             f.result = message{bulk_string{std::string(n.text)}};
             break;
-          case type3::bulk_error:
+          case kind::bulk_error:
             f.result = message{bulk_error{std::string(n.text)}};
             break;
-          case type3::verbatim_string: {
-            verbatim_string v{};
-            // RESP3: encoding is 3 bytes, payload is "xxx:<data>".
-            // Policy: if input doesn't match this shape, fall back to encoding="txt" and keep full text as data.
-            if (n.text.size() >= 4 && n.text[3] == ':') {
-              v.encoding = std::string(n.text.substr(0, 3));
-              v.data = std::string(n.text.substr(4));
-            } else {
-              v.encoding = "txt";
-              v.data = std::string(n.text);
-            }
+          case kind::verbatim_string: {
+            auto v = detail::decode_verbatim(n.text);
             f.result = message{std::move(v)};
             break;
           }
-          case type3::array: {
+          case kind::array: {
             array a{};
             a.elements.reserve(n.child_count);
             f.result = message{std::move(a)};
             break;
           }
-          case type3::set: {
+          case kind::set: {
             set s{};
             s.elements.reserve(n.child_count);
             f.result = message{std::move(s)};
             break;
           }
-          case type3::push: {
+          case kind::push: {
             push p{};
             p.elements.reserve(n.child_count);
             f.result = message{std::move(p)};
             break;
           }
-          case type3::map: {
+          case kind::map: {
             map m{};
             m.entries.reserve(n.child_count / 2);
             f.result = message{std::move(m)};
             break;
           }
-          case type3::null:
-          case type3::attribute:
+          case kind::null:
+          case kind::attribute:
             REDISCORO_UNREACHABLE();
             break;
         }
@@ -120,47 +139,61 @@ namespace rediscoro::resp3 {
         REDISCORO_ASSERT((n.attr_count % 2) == 0, "attr_count must be even (key/value pairs)");
         f.attrs.entries.reserve(n.attr_count / 2);
       }
-      if (n.type == type3::map) {
+      if (n.type == kind::map) {
         REDISCORO_ASSERT((n.child_count % 2) == 0, "map child_count must be even (key/value nodes)");
       }
     }
 
-    const auto total = n.child_count + n.attr_count;
-    if (f.next_link < total) {
-      const auto slot = f.next_link;
-      std::uint32_t child_idx{};
-      if (slot < n.child_count) {
-        child_idx = tree.links.at(n.first_child + slot);
-      } else {
-        const auto attr_i = slot - n.child_count;
-        child_idx = tree.links.at(n.first_attr + attr_i);
-      }
-      ++f.next_link;
+    // Drive child traversal first, then attributes (both preserve wire order as stored by parser).
+    if (f.next_child < n.child_count) {
+      const auto child_pos = f.next_child;
+      const auto child_idx = tree.links.at(n.first_child + child_pos);
+      f.next_child += 1;
 
       stack.push_back(frame{
         .node = child_idx,
-        .next_link = 0,
+        .next_child = 0,
+        .next_attr = 0,
         .initialized = false,
-        .has_parent_slot = true,
-        .parent_slot = slot,
+        .has_parent = true,
+        .parent_kind = detail::parent_slot_kind::child,
+        .parent_index = child_pos,
       });
       continue;
     }
 
-    // finalize attrs
+    if (f.next_attr < n.attr_count) {
+      const auto attr_pos = f.next_attr;
+      const auto attr_idx = tree.links.at(n.first_attr + attr_pos);
+      f.next_attr += 1;
+
+      stack.push_back(frame{
+        .node = attr_idx,
+        .next_child = 0,
+        .next_attr = 0,
+        .initialized = false,
+        .has_parent = true,
+        .parent_kind = detail::parent_slot_kind::attribute,
+        .parent_index = attr_pos,
+      });
+      continue;
+    }
+
+    // Finalize attributes.
     if (n.attr_count > 0) {
-      if (!f.pending_key.has_value()) {
+      if (!f.pending_attr_key.has_value()) {
         f.result.attrs = std::move(f.attrs);
       } else {
-        // odd number of attr nodes (should not happen if parser is correct)
+        // Odd number of attr nodes (should not happen if parser is correct).
         REDISCORO_UNREACHABLE();
       }
     }
 
-    // pop + attach to parent
+    // Pop + attach to parent.
     auto finished = std::move(f.result);
-    const auto finished_slot = f.parent_slot;
-    const auto has_slot = f.has_parent_slot;
+    const auto has_parent = f.has_parent;
+    const auto parent_kind = f.parent_kind;
+    const auto parent_index = f.parent_index;
     stack.pop_back();
 
     if (stack.empty()) {
@@ -169,44 +202,42 @@ namespace rediscoro::resp3 {
 
     auto& parent = stack.back();
     const auto& pn = tree.nodes.at(parent.node);
-    REDISCORO_ASSERT(has_slot, "non-root frame must have a parent slot");
+    REDISCORO_ASSERT(has_parent, "non-root frame must have a parent slot");
 
-    if (finished_slot < pn.child_count) {
-      // attach as child
+    if (parent_kind == detail::parent_slot_kind::child) {
       switch (pn.type) {
-        case type3::array:
+        case kind::array:
           parent.result.as<array>().elements.push_back(std::move(finished));
           break;
-        case type3::set:
+        case kind::set:
           parent.result.as<set>().elements.push_back(std::move(finished));
           break;
-        case type3::push:
+        case kind::push:
           parent.result.as<push>().elements.push_back(std::move(finished));
           break;
-        case type3::map: {
-          // key/value alternating
-          if ((finished_slot % 2) == 0) {
-            parent.pending_key = std::move(finished);
+        case kind::map: {
+          // Key/value alternating.
+          if ((parent_index % 2) == 0) {
+            parent.pending_map_key = std::move(finished);
           } else {
-            REDISCORO_ASSERT(parent.pending_key.has_value(), "map value without pending key");
-            parent.result.as<map>().entries.push_back({std::move(*parent.pending_key), std::move(finished)});
-            parent.pending_key.reset();
+            REDISCORO_ASSERT(parent.pending_map_key.has_value(), "map value without pending key");
+            parent.result.as<map>().entries.push_back({std::move(*parent.pending_map_key), std::move(finished)});
+            parent.pending_map_key.reset();
           }
           break;
         }
         default:
-          // scalars should not have children
+          // Scalars should not have children.
           REDISCORO_UNREACHABLE();
       }
     } else {
-      // attach as attribute key/value
-      const auto attr_i = finished_slot - pn.child_count;
-      if ((attr_i % 2) == 0) {
-        parent.pending_key = std::move(finished);
+      // Attach as attribute key/value.
+      if ((parent_index % 2) == 0) {
+        parent.pending_attr_key = std::move(finished);
       } else {
-        REDISCORO_ASSERT(parent.pending_key.has_value(), "attr value without pending key");
-        parent.attrs.entries.push_back({std::move(*parent.pending_key), std::move(finished)});
-        parent.pending_key.reset();
+        REDISCORO_ASSERT(parent.pending_attr_key.has_value(), "attr value without pending key");
+        parent.attrs.entries.push_back({std::move(*parent.pending_attr_key), std::move(finished)});
+        parent.pending_attr_key.reset();
       }
     }
   }

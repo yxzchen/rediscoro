@@ -2,9 +2,11 @@
 
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/resp3/visitor.hpp>
+#include <rediscoro/assert.hpp>
 
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -31,77 +33,77 @@ public:
 
   // Visitor interface
   auto operator()(const simple_string& val) -> void {
-    buffer_ += type_to_code(type3::simple_string);
+    append_prefix(kind::simple_string);
     buffer_ += val.data;
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const simple_error& val) -> void {
-    buffer_ += type_to_code(type3::simple_error);
+    append_prefix(kind::simple_error);
     buffer_ += val.message;
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const integer& val) -> void {
-    buffer_ += type_to_code(type3::integer);
-    buffer_ += std::to_string(val.value);
-    buffer_ += "\r\n";
+    append_prefix(kind::integer);
+    append_i64(val.value);
+    append_crlf();
   }
 
-  auto operator()(const double_type& val) -> void {
+  auto operator()(const double_number& val) -> void {
     append_double(val.value);
   }
 
   auto operator()(const boolean& val) -> void {
-    buffer_ += type_to_code(type3::boolean);
+    append_prefix(kind::boolean);
     buffer_ += val.value ? 't' : 'f';
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const big_number& val) -> void {
-    buffer_ += type_to_code(type3::big_number);
+    append_prefix(kind::big_number);
     buffer_ += val.value;
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const null&) -> void {
-    buffer_ += type_to_code(type3::null);
-    buffer_ += "\r\n";
+    append_prefix(kind::null);
+    append_crlf();
   }
 
   auto operator()(const bulk_string& val) -> void {
-    buffer_ += type_to_code(type3::bulk_string);
-    buffer_ += std::to_string(val.data.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::bulk_string);
+    append_size(val.data.size());
+    append_crlf();
     buffer_ += val.data;
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const bulk_error& val) -> void {
-    buffer_ += type_to_code(type3::bulk_error);
-    buffer_ += std::to_string(val.message.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::bulk_error);
+    append_size(val.message.size());
+    append_crlf();
     buffer_ += val.message;
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const verbatim_string& val) -> void {
     // Format: =<length>\r\n<encoding>:<data>\r\n
     // encoding is 3 bytes
     auto total_len = val.encoding.size() + 1 + val.data.size(); // encoding + ':' + data
-    buffer_ += type_to_code(type3::verbatim_string);
-    buffer_ += std::to_string(total_len);
-    buffer_ += "\r\n";
+    append_prefix(kind::verbatim_string);
+    append_size(total_len);
+    append_crlf();
     buffer_ += val.encoding;
     buffer_ += ':';
     buffer_ += val.data;
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto operator()(const array& val) -> void {
-    buffer_ += type_to_code(type3::array);
-    buffer_ += std::to_string(val.elements.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::array);
+    append_size(val.elements.size());
+    append_crlf();
 
     for (const auto& elem : val.elements) {
       encode_message(elem);
@@ -109,9 +111,9 @@ public:
   }
 
   auto operator()(const map& val) -> void {
-    buffer_ += type_to_code(type3::map);
-    buffer_ += std::to_string(val.entries.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::map);
+    append_size(val.entries.size());
+    append_crlf();
 
     for (const auto& [key, value] : val.entries) {
       encode_message(key);
@@ -120,9 +122,9 @@ public:
   }
 
   auto operator()(const set& val) -> void {
-    buffer_ += type_to_code(type3::set);
-    buffer_ += std::to_string(val.elements.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::set);
+    append_size(val.elements.size());
+    append_crlf();
 
     for (const auto& elem : val.elements) {
       encode_message(elem);
@@ -130,9 +132,9 @@ public:
   }
 
   auto operator()(const push& val) -> void {
-    buffer_ += type_to_code(type3::push);
-    buffer_ += std::to_string(val.elements.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::push);
+    append_size(val.elements.size());
+    append_crlf();
 
     for (const auto& elem : val.elements) {
       encode_message(elem);
@@ -142,8 +144,34 @@ public:
 private:
   std::string buffer_;
 
+  auto append_prefix(kind k) -> void {
+    buffer_.push_back(kind_to_prefix(k));
+  }
+
+  auto append_crlf() -> void {
+    buffer_.append("\r\n");
+  }
+
+  auto append_u64(std::uint64_t v) -> void {
+    char tmp[32]{};
+    auto res = std::to_chars(tmp, tmp + sizeof(tmp), v);
+    REDISCORO_ASSERT(res.ec == std::errc{});
+    buffer_.append(tmp, res.ptr);
+  }
+
+  auto append_size(std::size_t v) -> void {
+    append_u64(static_cast<std::uint64_t>(v));
+  }
+
+  auto append_i64(std::int64_t v) -> void {
+    char tmp[32]{};
+    auto res = std::to_chars(tmp, tmp + sizeof(tmp), v);
+    REDISCORO_ASSERT(res.ec == std::errc{});
+    buffer_.append(tmp, res.ptr);
+  }
+
   auto append_double(double v) -> void {
-    buffer_ += type_to_code(type3::double_type);
+    append_prefix(kind::double_number);
 
     if (std::isnan(v)) {
       buffer_ += "nan";
@@ -169,7 +197,7 @@ private:
       }
     }
 
-    buffer_ += "\r\n";
+    append_crlf();
   }
 
   auto encode_message(const message& msg) -> void {
@@ -184,9 +212,9 @@ private:
   }
 
   auto encode_attribute(const attribute& attr) -> void {
-    buffer_ += type_to_code(type3::attribute);
-    buffer_ += std::to_string(attr.entries.size());
-    buffer_ += "\r\n";
+    append_prefix(kind::attribute);
+    append_size(attr.entries.size());
+    append_crlf();
 
     for (const auto& [key, value] : attr.entries) {
       encode_message(key);

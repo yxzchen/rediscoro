@@ -1,7 +1,7 @@
 #pragma once
 
 #include <rediscoro/assert.hpp>
-#include <rediscoro/resp3/type.hpp>
+#include <rediscoro/resp3/kind.hpp>
 
 #include <charconv>
 #include <cstddef>
@@ -100,13 +100,13 @@ private:
   }
 
   void append_command_header(std::size_t argc) {
-    wire_.push_back(resp3::type_to_code(resp3::type3::array));
+    wire_.push_back(resp3::kind_to_prefix(resp3::kind::array));
     append_unsigned(argc);
     wire_.append("\r\n");
   }
 
   void append_bulk_string(std::string_view sv) {
-    wire_.push_back(resp3::type_to_code(resp3::type3::bulk_string));
+    wire_.push_back(resp3::kind_to_prefix(resp3::kind::bulk_string));
     append_unsigned(sv.size());
     wire_.append("\r\n");
     wire_.append(sv.data(), sv.size());

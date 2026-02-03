@@ -28,7 +28,7 @@ TEST(resp3_parser_test, parse_simple_string_ok) {
   ASSERT_TRUE(root);
 
   const auto& n = p.tree().nodes.at(*root);
-  EXPECT_EQ(n.type, type3::simple_string);
+  EXPECT_EQ(n.type, kind::simple_string);
   EXPECT_EQ(n.text, "OK");
 
   auto msg = build_message(p.tree(), *root);
@@ -75,7 +75,7 @@ TEST(resp3_parser_test, parse_bulk_string_ok_and_split_payload) {
   auto r2 = p.parse_one();
   ASSERT_TRUE(r2);
   const auto& n = p.tree().nodes.at(*r2);
-  EXPECT_EQ(n.type, type3::bulk_string);
+  EXPECT_EQ(n.type, kind::bulk_string);
   EXPECT_EQ(n.text, "hello");
 
   auto msg = build_message(p.tree(), *r2);

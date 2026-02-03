@@ -1,11 +1,12 @@
 #pragma once
 
-#include <rediscoro/resp3/type.hpp>
+#include <rediscoro/resp3/kind.hpp>
 
 #include <cstdint>
 #include <optional>
 #include <cstddef>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -36,8 +37,8 @@ using path_element = std::variant<path_index, path_key, path_field>;
 
 struct error {
   adapter_error_kind kind{};
-  resp3::type3 actual_type{};
-  std::vector<resp3::type3> expected_types{};   // empty means "unknown / not applicable"
+  resp3::kind actual_type{};
+  std::vector<resp3::kind> expected_types{};   // empty means "unknown / not applicable"
   std::vector<path_element> path{};
   std::optional<std::size_t> expected_size{};
   std::optional<std::size_t> got_size{};
@@ -60,7 +61,7 @@ struct error {
 
 namespace detail {
 
-inline auto make_type_mismatch(resp3::type3 actual, std::vector<resp3::type3> expected) -> error {
+inline auto make_type_mismatch(resp3::kind actual, std::vector<resp3::kind> expected) -> error {
   return error{
     .kind = adapter_error_kind::type_mismatch,
     .actual_type = actual,
@@ -72,10 +73,10 @@ inline auto make_type_mismatch(resp3::type3 actual, std::vector<resp3::type3> ex
   };
 }
 
-inline auto make_unexpected_null(resp3::type3 expected) -> error {
+inline auto make_unexpected_null(resp3::kind expected) -> error {
   return error{
     .kind = adapter_error_kind::unexpected_null,
-    .actual_type = resp3::type3::null,
+    .actual_type = resp3::kind::null,
     .expected_types = {expected},
     .path = {},
     .expected_size = std::nullopt,
@@ -84,11 +85,11 @@ inline auto make_unexpected_null(resp3::type3 expected) -> error {
   };
 }
 
-inline auto make_value_out_of_range(resp3::type3 t) -> error {
+inline auto make_value_out_of_range(resp3::kind k) -> error {
   return error{
     .kind = adapter_error_kind::value_out_of_range,
-    .actual_type = t,
-    .expected_types = {t},
+    .actual_type = k,
+    .expected_types = {k},
     .path = {},
     .expected_size = std::nullopt,
     .got_size = std::nullopt,
@@ -96,7 +97,7 @@ inline auto make_value_out_of_range(resp3::type3 t) -> error {
   };
 }
 
-inline auto make_size_mismatch(resp3::type3 actual, std::size_t expected, std::size_t got) -> error {
+inline auto make_size_mismatch(resp3::kind actual, std::size_t expected, std::size_t got) -> error {
   return error{
     .kind = adapter_error_kind::size_mismatch,
     .actual_type = actual,
@@ -111,8 +112,8 @@ inline auto make_size_mismatch(resp3::type3 actual, std::size_t expected, std::s
 }  // namespace detail
 
 inline auto error::format_message(const error& e) -> std::string {
-  auto type_to_string = [](resp3::type3 t) -> std::string {
-    return std::string(resp3::type_name(t));
+  auto type_to_string = [](resp3::kind k) -> std::string {
+    return std::string(resp3::kind_name(k));
   };
 
   auto path_to_string = [](const std::vector<path_element>& path) -> std::string {

@@ -25,7 +25,7 @@ TEST(resp3_encoder_test, encode_all_simple_types) {
   EXPECT_EQ(encode(neg_int), ":-123\r\n");
 
   // Double
-  message dbl{double_type{3.14}};
+  message dbl{double_number{3.14}};
   auto encoded = encode(dbl);
   EXPECT_EQ(encoded.substr(0, 1), ",");
   EXPECT_TRUE(encoded.find("3.14") != std::string::npos);
@@ -47,13 +47,13 @@ TEST(resp3_encoder_test, encode_all_simple_types) {
 }
 
 TEST(resp3_encoder_test, encode_double_special_values) {
-  message pos_inf{double_type{std::numeric_limits<double>::infinity()}};
+  message pos_inf{double_number{std::numeric_limits<double>::infinity()}};
   EXPECT_EQ(encode(pos_inf), ",inf\r\n");
 
-  message neg_inf{double_type{-std::numeric_limits<double>::infinity()}};
+  message neg_inf{double_number{-std::numeric_limits<double>::infinity()}};
   EXPECT_EQ(encode(neg_inf), ",-inf\r\n");
 
-  message nan_msg{double_type{std::numeric_limits<double>::quiet_NaN()}};
+  message nan_msg{double_number{std::numeric_limits<double>::quiet_NaN()}};
   EXPECT_EQ(encode(nan_msg), ",nan\r\n");
 }
 

@@ -8,12 +8,12 @@ namespace {
 TEST(type3s_test, simple_and_bulk_type_creation) {
   // Simple types
   message str{simple_string{"OK"}};
-  EXPECT_EQ(str.get_type(), type3::simple_string);
+  EXPECT_EQ(str.get_kind(), kind::simple_string);
   EXPECT_TRUE(str.is<simple_string>());
   EXPECT_EQ(str.as<simple_string>().data, "OK");
 
   message int_msg{integer{42}};
-  EXPECT_EQ(int_msg.get_type(), type3::integer);
+  EXPECT_EQ(int_msg.get_kind(), kind::integer);
   EXPECT_EQ(int_msg.as<integer>().value, 42);
 
   message null_msg{null{}};
@@ -21,7 +21,7 @@ TEST(type3s_test, simple_and_bulk_type_creation) {
 
   // Bulk types
   message bulk{bulk_string{"hello"}};
-  EXPECT_EQ(bulk.get_type(), type3::bulk_string);
+  EXPECT_EQ(bulk.get_kind(), kind::bulk_string);
   EXPECT_EQ(bulk.as<bulk_string>().data, "hello");
 }
 
@@ -32,7 +32,7 @@ TEST(type3s_test, aggregate_types_array_and_map) {
   arr.elements.push_back(message{simple_string{"two"}});
 
   message array_msg{std::move(arr)};
-  EXPECT_EQ(array_msg.get_type(), type3::array);
+  EXPECT_EQ(array_msg.get_kind(), kind::array);
   EXPECT_EQ(array_msg.as<array>().elements.size(), 2);
   EXPECT_EQ(array_msg.as<array>().elements[0].as<integer>().value, 1);
 
@@ -44,7 +44,7 @@ TEST(type3s_test, aggregate_types_array_and_map) {
   );
 
   message map_msg{std::move(m)};
-  EXPECT_EQ(map_msg.get_type(), type3::map);
+  EXPECT_EQ(map_msg.get_kind(), kind::map);
   EXPECT_EQ(map_msg.as<map>().entries.size(), 1);
   EXPECT_EQ(map_msg.as<map>().entries[0].second.as<integer>().value, 100);
 }
@@ -97,10 +97,10 @@ TEST(type3s_test, type_helper_methods) {
 }
 
 TEST(type3s_test, static_type_id_correctness) {
-  static_assert(simple_string::type_id == type3::simple_string);
-  static_assert(integer::type_id == type3::integer);
-  static_assert(array::type_id == type3::array);
-  static_assert(null::type_id == type3::null);
+  static_assert(simple_string::kind_id == kind::simple_string);
+  static_assert(integer::kind_id == kind::integer);
+  static_assert(array::kind_id == kind::array);
+  static_assert(null::kind_id == kind::null);
 }
 
 }  // namespace
