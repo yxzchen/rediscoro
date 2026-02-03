@@ -49,15 +49,22 @@ class parser {
     }
   };
 
+  struct need_more_t {
+    template <typename T>
+    [[nodiscard]] constexpr operator rediscoro::expected<parse_step<T>, rediscoro::protocol_errc>()
+      const noexcept {
+      return rediscoro::expected<parse_step<T>, rediscoro::protocol_errc>{parse_step<T>{}};
+    }
+  };
+
+  inline static constexpr need_more_t need_more{};
+
   template <typename T>
   [[nodiscard]] static auto ok_step(T v) -> parse_step<T> {
     return parse_step<T>{.status = parse_status::ok, .value = std::move(v)};
   }
 
-  template <typename T>
-  [[nodiscard]] static auto need_more_step() noexcept -> parse_step<T> {
-    return parse_step<T>{.status = parse_status::need_more, .value = {}};
-  }
+  // Prefer `return need_more;` at call sites (no template args needed).
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
   auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
