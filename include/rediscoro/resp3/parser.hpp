@@ -34,38 +34,6 @@ class parser {
  public:
   parser() = default;
 
-  enum class parse_status : std::uint8_t {
-    needs_more = 0,
-    ok,
-  };
-
-  template <typename T>
-  struct parse_step {
-    parse_status status{parse_status::needs_more};
-    T value{};
-
-    [[nodiscard]] auto needs_more() const noexcept -> bool {
-      return status == parse_status::needs_more;
-    }
-  };
-
-  struct need_more_t {
-    template <typename T>
-    [[nodiscard]] constexpr operator rediscoro::expected<parse_step<T>, rediscoro::protocol_errc>()
-      const noexcept {
-      return rediscoro::expected<parse_step<T>, rediscoro::protocol_errc>{parse_step<T>{}};
-    }
-  };
-
-  inline static constexpr need_more_t needs_more{};
-
-  template <typename T>
-  [[nodiscard]] static auto ok_step(T v) -> parse_step<T> {
-    return parse_step<T>{.status = parse_status::ok, .value = std::move(v)};
-  }
-
-  // Prefer `return needs_more;` at call sites (no template args needed).
-
   /// Zero-copy input API (caller writes into parser-owned buffer).
   auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
     return std::as_writable_bytes(buf_.prepare(min_size));
@@ -77,12 +45,12 @@ class parser {
   ///
   /// Returns:
   /// - success + root_index: parsing succeeded, returns root node index
-  /// - success + needs_more: buffer has insufficient data, need to continue reading (internal signal)
+  /// - success + nullopt: buffer has insufficient data, need to continue reading
   /// - protocol_errc: protocol format error
   ///
   /// IMPORTANT: After success, you must consume the result (tree()+root) and then call reclaim()
   /// before parsing the next message, otherwise the underlying buffer may move and invalidate views.
-  auto parse_one() -> expected<parse_step<std::uint32_t>, rediscoro::protocol_errc>;
+  auto parse_one() -> expected<std::optional<std::uint32_t>, rediscoro::protocol_errc>;
 
   /// Reclaim memory after consuming the latest parsed tree:
   /// - clears raw_tree
@@ -170,6 +138,26 @@ class parser {
     std::uint32_t node_index{0};
   };
 
+  enum class container_step : std::uint8_t {
+    started_container = 0,  // driver frame installed; keep parsing nested values
+    produced_node,          // container node is complete (len == 0 or -1)
+  };
+
+  struct container_result {
+    container_step step{container_step::started_container};
+    std::uint32_t node_index{0};
+  };
+
+  enum class attach_step : std::uint8_t {
+    continue_parsing = 0,  // attached to some parent; keep parsing
+    produced_root,         // reached root
+  };
+
+  struct attach_result {
+    attach_step step{attach_step::continue_parsing};
+    std::uint32_t root_index{0};
+  };
+
   buffer buf_{};
   raw_tree tree_{};
   std::vector<frame> stack_{};
@@ -179,14 +167,14 @@ class parser {
   pending_attributes pending_attrs_{};
 
   [[nodiscard]] auto parse_length_after_type(std::string_view data) const
-    -> expected<parse_step<length_header>, rediscoro::protocol_errc>;
-  [[nodiscard]] auto parse_value() -> expected<parse_step<value_result>, rediscoro::protocol_errc>;
+    -> expected<std::optional<length_header>, rediscoro::protocol_errc>;
+  [[nodiscard]] auto parse_value() -> expected<std::optional<value_result>, rediscoro::protocol_errc>;
   [[nodiscard]] auto start_container(frame& current, kind t, std::int64_t len)
-    -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc>;
+    -> expected<container_result, rediscoro::protocol_errc>;
   [[nodiscard]] auto start_attribute(std::int64_t len)
-    -> expected<parse_step<std::monostate>, rediscoro::protocol_errc>;
+    -> expected<std::monostate, rediscoro::protocol_errc>;
   [[nodiscard]] auto attach_to_parent(std::uint32_t child_idx)
-    -> expected<parse_step<std::optional<std::uint32_t>>, rediscoro::protocol_errc>;
+    -> expected<attach_result, rediscoro::protocol_errc>;
 };
 
 }  // namespace rediscoro::resp3

@@ -144,7 +144,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
             }
             co_return iocoro::unexpected(parsed.error());
           }
-          if (parsed->needs_more()) {
+          if (!parsed->has_value()) {
             break;
           }
 
@@ -152,7 +152,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
             co_return iocoro::unexpected(client_errc::unsolicited_message);
           }
 
-          auto const root = parsed->value;
+          auto const root = **parsed;
           auto msg = resp3::build_message(parser_.tree(), root);
           pipeline_.on_message(std::move(msg));
           parser_.reclaim();

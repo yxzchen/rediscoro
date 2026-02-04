@@ -53,7 +53,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       handle_error(parsed.error());
       co_return;
     }
-    if (parsed->needs_more()) {
+    if (!parsed->has_value()) {
       break;
     }
 
@@ -64,7 +64,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       co_return;
     }
 
-    auto const root = parsed->value;
+    auto const root = **parsed;
     auto msg = resp3::build_message(parser_.tree(), root);
     pipeline_.on_message(std::move(msg));
 
