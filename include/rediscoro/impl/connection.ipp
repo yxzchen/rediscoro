@@ -520,7 +520,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
             }
             co_return iocoro::unexpected(parsed.error());
           }
-          if (parsed->need_more()) {
+          if (parsed->needs_more()) {
             break;
           }
 
@@ -641,7 +641,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       handle_error(parsed.error());
       co_return;
     }
-    if (parsed->need_more()) {
+    if (parsed->needs_more()) {
       break;
     }
 

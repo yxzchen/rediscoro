@@ -59,7 +59,7 @@ inline auto parser::parse_length_after_type(std::string_view data) const
   -> expected<parse_step<length_header>, rediscoro::protocol_errc> {
   auto pos = detail::find_crlf(data.substr(1));
   if (pos == std::string_view::npos) {
-    return need_more;
+    return needs_more;
   }
 
   auto len_str = data.substr(1, pos);
@@ -155,7 +155,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
 
   auto data = buf_.data();
   if (data.empty()) {
-    return need_more;
+    return needs_more;
   }
 
   auto maybe_t = prefix_to_kind(data[0]);
@@ -169,8 +169,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!hdr) {
       return unexpected(hdr.error());
     }
-    if (hdr->need_more()) {
-      return need_more;
+    if (hdr->needs_more()) {
+      return needs_more;
     }
     auto const& lh = hdr->value;
     buf_.consume(lh.header_bytes);
@@ -178,8 +178,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!started) {
       return unexpected(started.error());
     }
-    if (started->need_more()) {
-      return need_more;
+    if (started->needs_more()) {
+      return needs_more;
     }
     return ok_step(value_result{.step = value_step::continue_parsing});
   }
@@ -191,8 +191,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!hdr) {
       return unexpected(hdr.error());
     }
-    if (hdr->need_more()) {
-      return need_more;
+    if (hdr->needs_more()) {
+      return needs_more;
     }
     auto const& lh = hdr->value;
     buf_.consume(lh.header_bytes);
@@ -202,8 +202,8 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
     if (!started) {
       return unexpected(started.error());
     }
-    if (started->need_more()) {
-      return need_more;
+    if (started->needs_more()) {
+      return needs_more;
     }
     auto const& opt = started->value;
     if (opt.has_value()) {
@@ -215,7 +215,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
   // Null: "_\r\n"
   if (*maybe_t == kind::null) {
     if (data.size() < 3) {
-      return need_more;
+      return needs_more;
     }
     if (data[1] != '\r' || data[2] != '\n') {
       return unexpected(protocol_errc::invalid_null);
@@ -230,7 +230,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
   // Boolean: "#t\r\n" / "#f\r\n"
   if (*maybe_t == kind::boolean) {
     if (data.size() < 4) {
-      return need_more;
+      return needs_more;
     }
     if (data[2] != '\r' || data[3] != '\n') {
       return unexpected(protocol_errc::invalid_boolean);
@@ -257,7 +257,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
       *maybe_t == kind::verbatim_string) {
     auto pos = detail::find_crlf(data.substr(1));
     if (pos == std::string_view::npos) {
-      return need_more;
+      return needs_more;
     }
     std::int64_t len{};
     if (!detail::parse_i64(data.substr(1, pos), len)) {
@@ -278,7 +278,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
 
     const auto need = static_cast<std::size_t>(header_bytes) + static_cast<std::size_t>(len) + 2;
     if (data.size() < need) {
-      return need_more;
+      return needs_more;
     }
 
     auto payload = data.substr(header_bytes, static_cast<std::size_t>(len));
@@ -296,7 +296,7 @@ inline auto parser::parse_value() -> expected<parse_step<value_result>, rediscor
   // Line-like: + - : , (
   auto pos = detail::find_crlf(data.substr(1));
   if (pos == std::string_view::npos) {
-    return need_more;
+    return needs_more;
   }
   auto line = data.substr(1, pos);
   auto consume_bytes = 1 + pos + 2;
@@ -456,8 +456,8 @@ inline auto parser::parse_one() -> expected<parse_step<std::uint32_t>, rediscoro
           failed_ = true;
           return unexpected(r.error());
         }
-        if (r->need_more()) {
-          return need_more;
+        if (r->needs_more()) {
+          return needs_more;
         }
         auto const& vr = r->value;
 
@@ -473,8 +473,8 @@ inline auto parser::parse_one() -> expected<parse_step<std::uint32_t>, rediscoro
           failed_ = true;
           return unexpected(done.error());
         }
-        if (done->need_more()) {
-          return need_more;
+        if (done->needs_more()) {
+          return needs_more;
         }
         auto const& opt = done->value;
         if (opt.has_value()) {
