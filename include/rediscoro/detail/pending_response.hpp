@@ -9,6 +9,7 @@
 #include <iocoro/awaitable.hpp>
 #include <iocoro/condition_event.hpp>
 
+#include <chrono>
 #include <optional>
 #include <utility>
 
@@ -64,6 +65,7 @@ class pending_response final : public response_sink {
     builder_.accept(std::move(msg));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
@@ -77,6 +79,7 @@ class pending_response final : public response_sink {
     builder_.accept(std::move(err));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
@@ -85,6 +88,35 @@ class pending_response final : public response_sink {
   iocoro::condition_event event_{};
   response_builder<Ts...> builder_{};
   std::optional<response<Ts...>> result_{};
+
+  template <std::size_t... Is>
+  static auto summarize(const response<Ts...>& r, std::index_sequence<Is...>) -> trace_summary {
+    trace_summary out{};
+    bool primary_set = false;
+
+    auto visit_slot = [&](const auto& slot) -> void {
+      if (slot) {
+        out.ok_count += 1;
+        return;
+      }
+
+      out.error_count += 1;
+      if (!primary_set) {
+        primary_set = true;
+        auto const& e = slot.error();
+        out.primary_error = e.code;
+        out.primary_error_detail = e.detail;
+      }
+    };
+
+    (visit_slot(r.template get<Is>()), ...);
+    return out;
+  }
+
+  auto emit_trace_finish_if_needed(const response<Ts...>& r) -> void {
+    auto const s = summarize(r, std::index_sequence_for<Ts...>{});
+    emit_trace_finish(s);
+  }
 };
 
 /// Pending response for a dynamic-size pipeline (homogeneous slots).
@@ -115,6 +147,7 @@ class pending_dynamic_response final : public response_sink {
     builder_.accept(std::move(msg));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
@@ -128,6 +161,7 @@ class pending_dynamic_response final : public response_sink {
     builder_.accept(std::move(err));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
@@ -136,6 +170,37 @@ class pending_dynamic_response final : public response_sink {
   iocoro::condition_event event_{};
   dynamic_response_builder<T> builder_;
   std::optional<dynamic_response<T>> result_{};
+
+  auto emit_trace_finish_if_needed(const dynamic_response<T>& r) -> void {
+    std::size_t ok_count = 0;
+    std::size_t error_count = 0;
+    std::error_code primary_error{};
+    std::string_view primary_error_detail{};
+    bool primary_set = false;
+
+    for (std::size_t i = 0; i < r.size(); ++i) {
+      auto const& slot = r[i];
+      if (slot) {
+        ok_count += 1;
+        continue;
+      }
+
+      error_count += 1;
+      if (!primary_set) {
+        primary_set = true;
+        auto const& e = slot.error();
+        primary_error = e.code;
+        primary_error_detail = e.detail;
+      }
+    }
+
+    emit_trace_finish(trace_summary{
+      .ok_count = ok_count,
+      .error_count = error_count,
+      .primary_error = primary_error,
+      .primary_error_detail = primary_error_detail,
+    });
+  }
 };
 
 }  // namespace rediscoro::detail

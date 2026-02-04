@@ -101,6 +101,27 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   }
 
   auto slot = std::make_shared<pending_dynamic_response<ignore_t>>(req.reply_count());
+
+  if (cfg_.trace_handshake && cfg_.trace_hooks.enabled()) {
+    auto const hooks = cfg_.trace_hooks;  // copy for stability
+    const auto start = std::chrono::steady_clock::now();
+    const request_trace_info info{
+      .id = next_request_id_++,
+      .kind = request_kind::handshake,
+      .command_count = req.command_count(),
+      .wire_bytes = req.wire().size(),
+    };
+
+    if (hooks.on_start != nullptr) {
+      request_trace_start evt{.info = info};
+      try {
+        hooks.on_start(hooks.user_data, evt);
+      } catch (...) {
+      }
+    }
+    slot->set_trace_context(hooks, info, start);
+  }
+
   pipeline_.push(std::move(req), slot);
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).

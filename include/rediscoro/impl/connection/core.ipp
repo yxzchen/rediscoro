@@ -153,29 +153,74 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   co_return;
 }
 
-inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink> sink) -> void {
+inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink> sink,
+                                     std::chrono::steady_clock::time_point start) -> void {
   REDISCORO_ASSERT(sink != nullptr);
+
+  auto const hooks = cfg_.trace_hooks;  // copy: stable for the sink and callbacks
+  const bool tracing = hooks.enabled();
+
+  request_trace_info trace_info{};
+  if (tracing) {
+    trace_info = request_trace_info{
+      .id = next_request_id_++,
+      .kind = request_kind::user,
+      .command_count = req.command_count(),
+      .wire_bytes = req.wire().size(),
+    };
+
+    if (hooks.on_start != nullptr) {
+      request_trace_start evt{.info = trace_info};
+      try {
+        hooks.on_start(hooks.user_data, evt);
+      } catch (...) {
+      }
+    }
+  }
+
+  auto reject = [&](error_info err) -> void {
+    if (tracing && hooks.on_finish != nullptr) {
+      request_trace_finish evt{
+        .info = trace_info,
+        .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - start),
+        .ok_count = 0,
+        .error_count = sink->expected_replies(),
+        .primary_error = err.code,
+        .primary_error_detail = err.detail,
+      };
+      try {
+        hooks.on_finish(hooks.user_data, evt);
+      } catch (...) {
+      }
+    }
+    sink->fail_all(std::move(err));
+  };
 
   // State gating: reject early if not ready.
   switch (state_) {
     case connection_state::INIT:
     case connection_state::CONNECTING: {
-      sink->fail_all(client_errc::not_connected);
+      reject(client_errc::not_connected);
       return;
     }
     case connection_state::FAILED:
     case connection_state::RECONNECTING: {
-      sink->fail_all(client_errc::connection_lost);
+      reject(client_errc::connection_lost);
       return;
     }
     case connection_state::CLOSING:
     case connection_state::CLOSED: {
-      sink->fail_all(client_errc::connection_closed);
+      reject(client_errc::connection_closed);
       return;
     }
     case connection_state::OPEN: {
       break;
     }
+  }
+
+  if (tracing) {
+    sink->set_trace_context(hooks, trace_info, start);
   }
 
   pipeline::time_point deadline = pipeline::time_point::max();

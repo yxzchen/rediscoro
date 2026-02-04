@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rediscoro/tracing.hpp>
+
 #include <chrono>
 #include <string>
 
@@ -69,6 +71,13 @@ struct config {
 
   // Reconnection behavior
   reconnection_policy reconnection{};
+
+  // Tracing hooks (request-level instrumentation).
+  request_trace_hooks trace_hooks{};
+
+  // Whether to emit tracing events for the initial handshake (HELLO/AUTH/SELECT/SETNAME).
+  // Default off to avoid noise.
+  bool trace_handshake{false};
 };
 
 }  // namespace rediscoro

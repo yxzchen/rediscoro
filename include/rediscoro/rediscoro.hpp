@@ -8,3 +8,4 @@
 #include <rediscoro/logger.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
+#include <rediscoro/tracing.hpp>

@@ -3,7 +3,9 @@
 #include <rediscoro/assert.hpp>
 #include <rediscoro/error_info.hpp>
 #include <rediscoro/resp3/message.hpp>
+#include <rediscoro/tracing.hpp>
 
+#include <chrono>
 #include <cstddef>
 
 namespace rediscoro::detail {
@@ -72,10 +74,81 @@ class response_sink {
   /// Check if delivery is complete (for diagnostics).
   [[nodiscard]] virtual bool is_complete() const noexcept = 0;
 
+  auto set_trace_context(request_trace_hooks hooks, request_trace_info info,
+                         std::chrono::steady_clock::time_point start) noexcept -> void {
+    trace_hooks_ = hooks;
+    trace_info_ = info;
+    trace_start_ = start;
+    trace_enabled_ = hooks.enabled();
+    trace_finished_ = false;
+  }
+
+  [[nodiscard]] auto has_trace_context() const noexcept -> bool { return trace_enabled_; }
+
  protected:
+  struct trace_summary {
+    std::size_t ok_count{0};
+    std::size_t error_count{0};
+    std::error_code primary_error{};
+    std::string_view primary_error_detail{};
+  };
+
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;
   virtual auto do_deliver_error(error_info err) -> void = 0;
+
+  [[nodiscard]] auto trace_hooks() const noexcept -> request_trace_hooks const& { return trace_hooks_; }
+  [[nodiscard]] auto trace_info() const noexcept -> request_trace_info const& { return trace_info_; }
+  [[nodiscard]] auto trace_start() const noexcept -> std::chrono::steady_clock::time_point {
+    return trace_start_;
+  }
+
+  [[nodiscard]] auto try_mark_trace_finished() noexcept -> bool {
+    if (!trace_enabled_) {
+      return false;
+    }
+    if (trace_finished_) {
+      return false;
+    }
+    trace_finished_ = true;
+    return true;
+  }
+
+  auto emit_trace_finish(trace_summary const& summary) noexcept -> void {
+    if (!has_trace_context()) {
+      return;
+    }
+    auto const& hooks = trace_hooks();
+    if (hooks.on_finish == nullptr) {
+      return;
+    }
+    if (!try_mark_trace_finished()) {
+      return;
+    }
+
+    request_trace_finish evt{
+      .info = trace_info(),
+      .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                      trace_start()),
+      .ok_count = summary.ok_count,
+      .error_count = summary.error_count,
+      .primary_error = summary.primary_error,
+      .primary_error_detail = summary.primary_error_detail,
+    };
+
+    // Callbacks are user-provided: do not allow exceptions to escape.
+    try {
+      hooks.on_finish(hooks.user_data, evt);
+    } catch (...) {
+    }
+  }
+
+ private:
+  request_trace_hooks trace_hooks_{};
+  request_trace_info trace_info_{};
+  std::chrono::steady_clock::time_point trace_start_{};
+  bool trace_enabled_{false};
+  bool trace_finished_{false};
 };
 
 }  // namespace rediscoro::detail

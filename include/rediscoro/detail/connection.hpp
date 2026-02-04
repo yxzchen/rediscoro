@@ -18,6 +18,7 @@
 #include <iocoro/ip/tcp.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -98,7 +99,8 @@ class connection : public std::enable_shared_from_this<connection> {
 
   /// Internal enqueue implementation (type-erased).
   /// MUST be called from connection strand.
-  auto enqueue_impl(request req, std::shared_ptr<response_sink> sink) -> void;
+  auto enqueue_impl(request req, std::shared_ptr<response_sink> sink,
+                    std::chrono::steady_clock::time_point start) -> void;
 
   /// Get current connection state (for diagnostics).
   [[nodiscard]] auto state() const noexcept -> connection_state { return state_; }
@@ -255,6 +257,9 @@ class connection : public std::enable_shared_from_this<connection> {
 
   // Reconnection state
   int reconnect_count_{0};  // Number of reconnection attempts (reset on success)
+
+  // Tracing / diagnostics
+  std::uint64_t next_request_id_{1};
 };
 
 }  // namespace rediscoro::detail
