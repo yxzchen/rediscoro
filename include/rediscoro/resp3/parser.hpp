@@ -128,34 +128,14 @@ class parser {
     }
   };
 
-  enum class value_step : std::uint8_t {
-    produced_node,    // node_index is valid
-    continue_parsing  // started container/attribute OR consumed something and should keep parsing
+  enum class step : std::uint8_t {
+    continue_parsing = 0,
+    produced,  // index is valid
   };
 
-  struct value_result {
-    value_step step{value_step::continue_parsing};
-    std::uint32_t node_index{0};
-  };
-
-  enum class container_step : std::uint8_t {
-    started_container = 0,  // driver frame installed; keep parsing nested values
-    produced_node,          // container node is complete (len == 0 or -1)
-  };
-
-  struct container_result {
-    container_step step{container_step::started_container};
-    std::uint32_t node_index{0};
-  };
-
-  enum class attach_step : std::uint8_t {
-    continue_parsing = 0,  // attached to some parent; keep parsing
-    produced_root,         // reached root
-  };
-
-  struct attach_result {
-    attach_step step{attach_step::continue_parsing};
-    std::uint32_t root_index{0};
+  struct step_index {
+    step step{step::continue_parsing};
+    std::uint32_t index{0};
   };
 
   buffer buf_{};
@@ -168,13 +148,13 @@ class parser {
 
   [[nodiscard]] auto parse_length_after_type(std::string_view data) const
     -> expected<std::optional<length_header>, rediscoro::protocol_errc>;
-  [[nodiscard]] auto parse_value() -> expected<std::optional<value_result>, rediscoro::protocol_errc>;
+  [[nodiscard]] auto parse_value() -> expected<std::optional<step_index>, rediscoro::protocol_errc>;
   [[nodiscard]] auto start_container(frame& current, kind t, std::int64_t len)
-    -> expected<container_result, rediscoro::protocol_errc>;
+    -> expected<step_index, rediscoro::protocol_errc>;
   [[nodiscard]] auto start_attribute(std::int64_t len)
     -> expected<std::monostate, rediscoro::protocol_errc>;
   [[nodiscard]] auto attach_to_parent(std::uint32_t child_idx)
-    -> expected<attach_result, rediscoro::protocol_errc>;
+    -> expected<step_index, rediscoro::protocol_errc>;
 };
 
 }  // namespace rediscoro::resp3
