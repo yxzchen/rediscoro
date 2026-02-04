@@ -259,4 +259,9 @@ class connection : public std::enable_shared_from_this<connection> {
 
 }  // namespace rediscoro::detail
 
-#include <rediscoro/impl/connection.ipp>
+#include <rediscoro/impl/connection/core.ipp>
+#include <rediscoro/impl/connection/actor_loops.ipp>
+#include <rediscoro/impl/connection/reconnect.ipp>
+#include <rediscoro/impl/connection/connect.ipp>
+#include <rediscoro/impl/connection/io.ipp>
+#include <rediscoro/impl/connection/enqueue.ipp>
