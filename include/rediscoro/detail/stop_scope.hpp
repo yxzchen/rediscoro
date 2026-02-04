@@ -12,7 +12,7 @@ class stop_scope {
  public:
   stop_scope() = default;
 
-  [[nodiscard]] auto token() const noexcept -> std::stop_token { return src_.get_token(); }
+  [[nodiscard]] auto get_token() const noexcept -> std::stop_token { return src_.get_token(); }
 
   auto request_stop() noexcept -> void { src_.request_stop(); }
 

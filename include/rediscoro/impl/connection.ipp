@@ -61,7 +61,7 @@ inline auto connection::run_actor() -> void {
   auto ex = executor_.strand().executor();
   auto self = shared_from_this();
   iocoro::co_spawn(
-    ex, stop_.token(),
+    ex, stop_.get_token(),
     [self, ex]() mutable -> iocoro::awaitable<void> {
       // Keep the connection alive until the actor completes.
       (void)self;
@@ -102,7 +102,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
     stop_.reset();
   }
 
-  if (stop_.token().stop_requested()) {
+  if (stop_.get_token().stop_requested()) {
     co_return unexpected(client_errc::operation_aborted);
   }
 
@@ -113,7 +113,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
   state_ = connection_state::CONNECTING;
 
   // Attempt connection. do_connect() returns unexpected(error) on failure.
-  auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.token(),
+  auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.get_token(),
                                                do_connect(), iocoro::use_awaitable);
   if (!connect_res) {
     // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
