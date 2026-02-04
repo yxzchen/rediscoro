@@ -60,4 +60,3 @@ struct request_trace_hooks {
 };
 
 }  // namespace rediscoro
-

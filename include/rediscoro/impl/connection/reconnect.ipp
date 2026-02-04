@@ -97,4 +97,3 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
 }
 
 }  // namespace rediscoro::detail
-

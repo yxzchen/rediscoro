@@ -149,4 +149,3 @@ inline auto connection::handle_error(error_info ec) -> void {
 }
 
 }  // namespace rediscoro::detail
-

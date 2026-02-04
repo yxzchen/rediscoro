@@ -245,4 +245,3 @@ inline auto connection::transition_to_closed() -> void {
 }
 
 }  // namespace rediscoro::detail
-

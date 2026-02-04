@@ -112,7 +112,9 @@ class connection : public std::enable_shared_from_this<connection> {
   /// - Runtime errors after `OPEN` (including request timeout / RESP3 parse error / peer close)
   ///   are recorded and drive `OPEN -> FAILED`.
   /// - Reconnection attempt failures are also recorded (user cannot observe them otherwise).
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<error_info> { return last_error_; }
+  [[nodiscard]] auto last_error() const noexcept -> std::optional<error_info> {
+    return last_error_;
+  }
 
  private:
   /// Start the background connection actor (internal use only).
@@ -264,9 +266,9 @@ class connection : public std::enable_shared_from_this<connection> {
 
 }  // namespace rediscoro::detail
 
-#include <rediscoro/impl/connection/core.ipp>
 #include <rediscoro/impl/connection/actor_loops.ipp>
-#include <rediscoro/impl/connection/reconnect.ipp>
 #include <rediscoro/impl/connection/connect.ipp>
-#include <rediscoro/impl/connection/io.ipp>
+#include <rediscoro/impl/connection/core.ipp>
 #include <rediscoro/impl/connection/enqueue.ipp>
+#include <rediscoro/impl/connection/io.ipp>
+#include <rediscoro/impl/connection/reconnect.ipp>

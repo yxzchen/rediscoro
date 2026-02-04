@@ -97,8 +97,12 @@ class response_sink {
   virtual auto do_deliver(resp3::message msg) -> void = 0;
   virtual auto do_deliver_error(error_info err) -> void = 0;
 
-  [[nodiscard]] auto trace_hooks() const noexcept -> request_trace_hooks const& { return trace_hooks_; }
-  [[nodiscard]] auto trace_info() const noexcept -> request_trace_info const& { return trace_info_; }
+  [[nodiscard]] auto trace_hooks() const noexcept -> request_trace_hooks const& {
+    return trace_hooks_;
+  }
+  [[nodiscard]] auto trace_info() const noexcept -> request_trace_info const& {
+    return trace_info_;
+  }
   [[nodiscard]] auto trace_start() const noexcept -> std::chrono::steady_clock::time_point {
     return trace_start_;
   }
@@ -128,8 +132,8 @@ class response_sink {
 
     request_trace_finish evt{
       .info = trace_info(),
-      .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
-                                                                      trace_start()),
+      .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - trace_start()),
       .ok_count = summary.ok_count,
       .error_count = summary.error_count,
       .primary_error = summary.primary_error,

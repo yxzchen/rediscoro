@@ -13,8 +13,8 @@ inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response
   auto slot = std::make_shared<pending_response<Ts...>>();
 
   const bool need_trace = cfg_.trace_hooks.enabled();
-  const auto start = need_trace ? std::chrono::steady_clock::now()
-                                : std::chrono::steady_clock::time_point{};
+  const auto start =
+    need_trace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
   // Thread-safety: enqueue() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
@@ -35,8 +35,8 @@ inline auto connection::enqueue_dynamic(request req)
   auto slot = std::make_shared<pending_dynamic_response<T>>(req.reply_count());
 
   const bool need_trace = cfg_.trace_hooks.enabled();
-  const auto start = need_trace ? std::chrono::steady_clock::now()
-                                : std::chrono::steady_clock::time_point{};
+  const auto start =
+    need_trace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
   // Thread-safety: enqueue_dynamic() may be called from any executor/thread.
   // All state_ / pipeline_ mutation must happen on the connection strand.
@@ -49,4 +49,3 @@ inline auto connection::enqueue_dynamic(request req)
 }
 
 }  // namespace rediscoro::detail
-

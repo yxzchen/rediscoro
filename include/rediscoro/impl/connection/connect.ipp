@@ -243,4 +243,3 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
 }
 
 }  // namespace rediscoro::detail
-

@@ -149,8 +149,7 @@ inline auto parser::start_attribute(std::int64_t len)
   return std::monostate{};
 }
 
-inline auto parser::parse_value()
-  -> expected<std::optional<step_index>, rediscoro::protocol_errc> {
+inline auto parser::parse_value() -> expected<std::optional<step_index>, rediscoro::protocol_errc> {
   REDISCORO_ASSERT(!stack_.empty());
   REDISCORO_ASSERT(stack_.back().state == frame_kind::value);
 

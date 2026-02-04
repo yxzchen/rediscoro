@@ -2,9 +2,9 @@
 
 #include <rediscoro/error.hpp>
 
-#include <system_error>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <type_traits>
 
 namespace rediscoro {
@@ -65,4 +65,3 @@ struct error_info {
 };
 
 }  // namespace rediscoro
-

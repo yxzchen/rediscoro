@@ -20,8 +20,8 @@ namespace rediscoro::detail {
 template <typename T>
 inline auto slot_from_message(resp3::message msg) -> response_slot<T> {
   if (msg.is<resp3::simple_error>()) {
-    return unexpected(error_info{server_errc::redis_error,
-                                 std::string{msg.as<resp3::simple_error>().message}});
+    return unexpected(
+      error_info{server_errc::redis_error, std::string{msg.as<resp3::simple_error>().message}});
   }
   if (msg.is<resp3::bulk_error>()) {
     return unexpected(

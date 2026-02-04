@@ -109,4 +109,3 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
 }
 
 }  // namespace rediscoro::detail
-

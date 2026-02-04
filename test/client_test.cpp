@@ -49,8 +49,8 @@ TEST(client_test, connect_to_http_server_reports_protocol_error) {
         e.code == rediscoro::client_errc::connect_failed ||
         e.code == rediscoro::client_errc::connect_timeout) {
       skipped = true;
-      skip_reason = "network not available to reach qq.com:80 (connect failed: " + e.to_string() +
-                    ")";
+      skip_reason =
+        "network not available to reach qq.com:80 (connect failed: " + e.to_string() + ")";
       co_return;
     }
 
