@@ -2,6 +2,7 @@
 
 #include <rediscoro/adapter/adapt.hpp>
 #include <rediscoro/assert.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/response.hpp>
@@ -9,16 +10,41 @@
 #include <array>
 #include <cstddef>
 #include <optional>
-#include <vector>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace rediscoro::detail {
 
+template <typename T>
+inline auto slot_from_message(resp3::message msg) -> response_slot<T> {
+  if (msg.is<resp3::simple_error>()) {
+    return unexpected(
+      error_info{server_errc::redis_error, std::string{msg.as<resp3::simple_error>().message}});
+  }
+  if (msg.is<resp3::bulk_error>()) {
+    return unexpected(
+      error_info{server_errc::redis_error, std::string{msg.as<resp3::bulk_error>().message}});
+  }
+
+  auto r = adapter::adapt<T>(msg);
+  if (!r) {
+    auto e = std::move(r.error());
+    error_info out{e.kind, e.to_string()};
+    return unexpected(std::move(out));
+  }
+  return std::move(*r);
+}
+
+template <typename T>
+inline auto slot_from_error(error_info err) -> response_slot<T> {
+  return unexpected(std::move(err));
+}
+
 template <typename... Ts>
 class response_builder {
-public:
+ public:
   static constexpr std::size_t static_size = sizeof...(Ts);
 
   response_builder() = default;
@@ -32,7 +58,7 @@ public:
     next_index_ += 1;
   }
 
-  void accept(rediscoro::error err) {
+  void accept(error_info err) {
     REDISCORO_ASSERT(next_index_ < static_size);
     err_dispatch_table()[next_index_](this, std::move(err));
     next_index_ += 1;
@@ -43,7 +69,7 @@ public:
     return response<Ts...>{take_results(std::index_sequence_for<Ts...>{})};
   }
 
-private:
+ private:
   std::size_t next_index_{0};
   std::tuple<std::optional<response_slot<Ts>>...> results_{};
 
@@ -59,33 +85,18 @@ private:
 
   template <std::size_t I, typename E>
   void set_error(E&& e) {
-    static_assert(std::is_constructible_v<response_error, E>);
-    set_slot<I>(unexpected(response_error{std::forward<E>(e)}));
+    static_assert(std::is_constructible_v<error_info, E>);
+    set_slot<I>(unexpected(std::forward<E>(e)));
   }
 
   template <std::size_t I>
   void set_from_message(resp3::message msg) {
     using T = nth_type<I>;
-
-    if (msg.is<resp3::simple_error>()) {
-      set_error<I>(redis_error{msg.as<resp3::simple_error>().message});
-      return;
-    }
-    if (msg.is<resp3::bulk_error>()) {
-      set_error<I>(redis_error{msg.as<resp3::bulk_error>().message});
-      return;
-    }
-
-    auto r = adapter::adapt<T>(msg);
-    if (!r) {
-      set_error<I>(std::move(r.error()));
-      return;
-    }
-    set_slot<I>(std::move(*r));
+    set_slot<I>(slot_from_message<T>(std::move(msg)));
   }
 
-  using msg_dispatch_fn = void(*)(response_builder*, resp3::message);
-  using err_dispatch_fn = void(*)(response_builder*, rediscoro::error);
+  using msg_dispatch_fn = void (*)(response_builder*, resp3::message);
+  using err_dispatch_fn = void (*)(response_builder*, error_info);
 
   template <std::size_t I>
   static void msg_dispatch(response_builder* self, resp3::message msg) {
@@ -93,17 +104,19 @@ private:
   }
 
   template <std::size_t I>
-  static void err_dispatch(response_builder* self, rediscoro::error err) {
+  static void err_dispatch(response_builder* self, error_info err) {
     self->set_error<I>(std::move(err));
   }
 
   template <std::size_t... Is>
-  static constexpr auto make_msg_table(std::index_sequence<Is...>) -> std::array<msg_dispatch_fn, static_size> {
+  static constexpr auto make_msg_table(std::index_sequence<Is...>)
+    -> std::array<msg_dispatch_fn, static_size> {
     return {&msg_dispatch<Is>...};
   }
 
   template <std::size_t... Is>
-  static constexpr auto make_err_table(std::index_sequence<Is...>) -> std::array<err_dispatch_fn, static_size> {
+  static constexpr auto make_err_table(std::index_sequence<Is...>)
+    -> std::array<err_dispatch_fn, static_size> {
     return {&err_dispatch<Is>...};
   }
 
@@ -126,9 +139,8 @@ private:
 
 template <typename T>
 class dynamic_response_builder {
-public:
-  explicit dynamic_response_builder(std::size_t expected_count)
-    : expected_(expected_count) {
+ public:
+  explicit dynamic_response_builder(std::size_t expected_count) : expected_(expected_count) {
     results_.reserve(expected_count);
   }
 
@@ -138,27 +150,12 @@ public:
 
   void accept(resp3::message msg) {
     REDISCORO_ASSERT(results_.size() < expected_);
-
-    if (msg.is<resp3::simple_error>()) {
-      results_.push_back(unexpected(response_error{redis_error{msg.as<resp3::simple_error>().message}}));
-      return;
-    }
-    if (msg.is<resp3::bulk_error>()) {
-      results_.push_back(unexpected(response_error{redis_error{msg.as<resp3::bulk_error>().message}}));
-      return;
-    }
-
-    auto r = adapter::adapt<T>(msg);
-    if (!r) {
-      results_.push_back(unexpected(response_error{std::move(r.error())}));
-      return;
-    }
-    results_.push_back(std::move(*r));
+    results_.push_back(slot_from_message<T>(std::move(msg)));
   }
 
-  void accept(rediscoro::error err) {
+  void accept(error_info err) {
     REDISCORO_ASSERT(results_.size() < expected_);
-    results_.push_back(unexpected(response_error{std::move(err)}));
+    results_.push_back(slot_from_error<T>(std::move(err)));
   }
 
   auto take_results() -> dynamic_response<T> {
@@ -166,11 +163,9 @@ public:
     return dynamic_response<T>{std::move(results_)};
   }
 
-private:
+ private:
   std::size_t expected_{0};
   std::vector<response_slot<T>> results_{};
 };
 
 }  // namespace rediscoro::detail
-
-

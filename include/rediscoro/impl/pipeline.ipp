@@ -4,15 +4,16 @@
 
 namespace rediscoro::detail {
 
-inline auto pipeline::push(request req, response_sink* sink) -> void {
+inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink) -> void {
   push(std::move(req), sink, time_point::max());
 }
 
-inline auto pipeline::push(request req, response_sink* sink, time_point deadline) -> void {
+inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink, time_point deadline)
+  -> void {
   REDISCORO_ASSERT(sink != nullptr);
   REDISCORO_ASSERT(req.reply_count() == sink->expected_replies());
 
-  pending_write_.push_back(pending_item{std::move(req), sink, 0, deadline});
+  pending_write_.push_back(pending_item{std::move(req), std::move(sink), 0, deadline});
 }
 
 inline bool pipeline::has_pending_write() const noexcept {
@@ -42,14 +43,14 @@ inline auto pipeline::on_write_done(std::size_t n) -> void {
 
   if (front.written == wire.size()) {
     // Entire request written: move to awaiting read queue.
-    awaiting_read_.push_back(awaiting_item{front.sink, front.deadline});
+    awaiting_read_.push_back(awaiting_item{std::move(front.sink), front.deadline});
     pending_write_.pop_front();
   }
 }
 
 inline auto pipeline::on_message(resp3::message msg) -> void {
   REDISCORO_ASSERT(!awaiting_read_.empty());
-  auto* sink = awaiting_read_.front().sink;
+  auto& sink = awaiting_read_.front().sink;
   REDISCORO_ASSERT(sink != nullptr);
 
   sink->deliver(std::move(msg));
@@ -58,31 +59,33 @@ inline auto pipeline::on_message(resp3::message msg) -> void {
   }
 }
 
-inline auto pipeline::on_error(error err) -> void {
+inline auto pipeline::on_error(error_info err) -> void {
   REDISCORO_ASSERT(!awaiting_read_.empty());
-  auto* sink = awaiting_read_.front().sink;
+  auto& sink = awaiting_read_.front().sink;
   REDISCORO_ASSERT(sink != nullptr);
 
-  sink->deliver_error(err);
+  sink->deliver_error(std::move(err));
   if (sink->is_complete()) {
     awaiting_read_.pop_front();
   }
 }
 
-inline auto pipeline::clear_all(rediscoro::error err) -> void {
+inline auto pipeline::clear_all(error_info err) -> void {
   // Pending writes: none of the replies will arrive; fail all expected replies.
-  for (auto& p : pending_write_) {
+  while (!pending_write_.empty()) {
+    auto& p = pending_write_.front();
     REDISCORO_ASSERT(p.sink != nullptr);
     p.sink->fail_all(err);
+    pending_write_.pop_front();
   }
-  pending_write_.clear();
 
   // Awaiting reads: fail all remaining replies.
-  for (auto const& a : awaiting_read_) {
+  while (!awaiting_read_.empty()) {
+    auto& a = awaiting_read_.front();
     REDISCORO_ASSERT(a.sink != nullptr);
     a.sink->fail_all(err);
+    awaiting_read_.pop_front();
   }
-  awaiting_read_.clear();
 }
 
 inline auto pipeline::next_deadline() const noexcept -> time_point {

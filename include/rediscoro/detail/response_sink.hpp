@@ -1,77 +1,38 @@
 #pragma once
 
 #include <rediscoro/assert.hpp>
-#include <rediscoro/error.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/resp3/message.hpp>
-#include <rediscoro/response.hpp>
+#include <rediscoro/tracing.hpp>
 
+#include <chrono>
 #include <cstddef>
 
 namespace rediscoro::detail {
 
 /// Abstract interface for delivering responses.
 ///
-/// Purpose (CRITICAL):
-/// - Type-erases the response delivery mechanism
-/// - Ensures pipeline NEVER knows about coroutines
-/// - Prevents pipeline from "accidentally" resuming user code
+/// Used by the pipeline to deliver results without knowing about coroutines.
 ///
-/// Design principle:
-/// - pipeline operates on response_sink* (abstract interface)
-/// - pending_response<T> implements response_sink
-/// - pipeline ONLY calls deliver() methods
-/// - All coroutine resumption happens inside pending_response
-///
-/// Why this matters:
-/// - Enforces "Pipeline never resumes coroutines" invariant at type level
-/// - Makes it impossible to accidentally inline user code on the connection strand
-/// - Clear separation: pipeline = scheduling, pending_response = continuation
-///
-/// Responsibility boundary (CRITICAL):
-/// Pipeline's responsibility:
-/// - NEVER call deliver() or deliver_error() more than once for the same expected reply
-/// - Check is_complete() before attempting delivery (defensive)
-/// - Remove sink from awaiting queue after delivery
-///
-/// Sink's responsibility:
-/// - ASSERT on second deliver() call (implementation bug detection)
-/// - Ignore second deliver() in release builds (defensive)
-/// - Set is_complete() = true after first delivery
-///
-/// Why strict single-delivery:
-/// - Multiple deliver() = logic error in pipeline
-/// - Could cause: wrong response delivered, pending_response never completes
-/// - MUST be caught during development (hence assert)
-///
-/// Thread safety:
-/// - deliver() methods called ONLY from connection strand
-/// - No cross-thread synchronization needed
-/// - Implementation (pending_response) handles executor dispatch via notify_event
+/// Contract (important):
+/// - Called only from the connection strand.
+/// - The pipeline delivers exactly `expected_replies()` replies (or errors) and never delivers
+///   after completion.
+/// - Deliver must not block and must not inline user code; completion/resume is handled by the
+///   concrete sink (e.g. `pending_response`) on the caller's executor.
 class response_sink {
-public:
+ public:
   virtual ~response_sink() = default;
 
   /// Expected number of replies for this sink.
   ///
   /// For a simple single command, this is 1.
   /// For multi-reply protocols, pipeline MUST provide an appropriate sink implementation.
-  [[nodiscard]] virtual std::size_t expected_replies() const noexcept {
-    return 1;
-  }
+  [[nodiscard]] virtual std::size_t expected_replies() const noexcept { return 1; }
 
   /// Deliver a successful RESP3 response.
   /// Called by pipeline when a message is received.
-  ///
-  /// Responsibilities of implementation:
-  /// 1. Adapt message to target type T
-  /// 2. Handle adaptation errors
-  /// 3. Store result
-  /// 4. Notify waiting coroutine (on its executor)
-  ///
-  /// MUST NOT:
-  /// - Block the calling thread
-  /// - Execute user code directly
-  /// - Resume coroutine inline
+  /// Must not block or resume coroutines inline.
   auto deliver(resp3::message msg) -> void {
     // Structural defense: a pipeline bug must be caught immediately.
     REDISCORO_ASSERT(!is_complete() && "deliver() called on a completed sink - pipeline bug!");
@@ -83,18 +44,11 @@ public:
 
   /// Deliver an error.
   /// Called by pipeline when parsing fails, connection closes, or other non-success events occur.
-  ///
-  /// Responsibilities of implementation:
-  /// 1. Store error
-  /// 2. Notify waiting coroutine (on its executor)
-  ///
-  /// MUST NOT:
-  /// - Block the calling thread
-  /// - Execute user code directly
-  /// - Resume coroutine inline
-  auto deliver_error(rediscoro::error err) -> void {
+  /// Must not block or resume coroutines inline.
+  auto deliver_error(error_info err) -> void {
     // Structural defense: a pipeline bug must be caught immediately.
-    REDISCORO_ASSERT(!is_complete() && "deliver_error() called on a completed sink - pipeline bug!");
+    REDISCORO_ASSERT(!is_complete() &&
+                     "deliver_error() called on a completed sink - pipeline bug!");
     if (is_complete()) {
       return;  // Defensive in release builds
     }
@@ -111,7 +65,7 @@ public:
   /// Semantics:
   /// - Repeatedly calls deliver_error(err) until is_complete() becomes true.
   /// - Defensive: if already complete, does nothing.
-  auto fail_all(rediscoro::error err) -> void {
+  auto fail_all(error_info err) -> void {
     while (!is_complete()) {
       deliver_error(err);
     }
@@ -120,10 +74,85 @@ public:
   /// Check if delivery is complete (for diagnostics).
   [[nodiscard]] virtual bool is_complete() const noexcept = 0;
 
-protected:
+  auto set_trace_context(request_trace_hooks hooks, request_trace_info info,
+                         std::chrono::steady_clock::time_point start) noexcept -> void {
+    trace_hooks_ = hooks;
+    trace_info_ = info;
+    trace_start_ = start;
+    trace_enabled_ = hooks.enabled();
+    trace_finished_ = false;
+  }
+
+  [[nodiscard]] auto has_trace_context() const noexcept -> bool { return trace_enabled_; }
+
+ protected:
+  struct trace_summary {
+    std::size_t ok_count{0};
+    std::size_t error_count{0};
+    std::error_code primary_error{};
+    std::string_view primary_error_detail{};
+  };
+
   /// Implementation hooks (called only via deliver()/deliver_error()).
   virtual auto do_deliver(resp3::message msg) -> void = 0;
-  virtual auto do_deliver_error(rediscoro::error err) -> void = 0;
+  virtual auto do_deliver_error(error_info err) -> void = 0;
+
+  [[nodiscard]] auto trace_hooks() const noexcept -> request_trace_hooks const& {
+    return trace_hooks_;
+  }
+  [[nodiscard]] auto trace_info() const noexcept -> request_trace_info const& {
+    return trace_info_;
+  }
+  [[nodiscard]] auto trace_start() const noexcept -> std::chrono::steady_clock::time_point {
+    return trace_start_;
+  }
+
+  [[nodiscard]] auto try_mark_trace_finished() noexcept -> bool {
+    if (!trace_enabled_) {
+      return false;
+    }
+    if (trace_finished_) {
+      return false;
+    }
+    trace_finished_ = true;
+    return true;
+  }
+
+  auto emit_trace_finish(trace_summary const& summary) noexcept -> void {
+    if (!has_trace_context()) {
+      return;
+    }
+    auto const& hooks = trace_hooks();
+    if (hooks.on_finish == nullptr) {
+      return;
+    }
+    if (!try_mark_trace_finished()) {
+      return;
+    }
+
+    request_trace_finish evt{
+      .info = trace_info(),
+      .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - trace_start()),
+      .ok_count = summary.ok_count,
+      .error_count = summary.error_count,
+      .primary_error = summary.primary_error,
+      .primary_error_detail = summary.primary_error_detail,
+    };
+
+    // Callbacks are user-provided: do not allow exceptions to escape.
+    try {
+      hooks.on_finish(hooks.user_data, evt);
+    } catch (...) {
+    }
+  }
+
+ private:
+  request_trace_hooks trace_hooks_{};
+  request_trace_info trace_info_{};
+  std::chrono::steady_clock::time_point trace_start_{};
+  bool trace_enabled_{false};
+  bool trace_finished_{false};
 };
 
 }  // namespace rediscoro::detail

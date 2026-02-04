@@ -2,6 +2,7 @@
 
 #include <rediscoro/resp3/message.hpp>
 
+#include <type_traits>
 #include <utility>
 
 namespace rediscoro::resp3 {
@@ -18,86 +19,81 @@ auto visit(Visitor&& visitor, const message& msg) -> decltype(auto) {
   return std::visit(std::forward<Visitor>(visitor), msg.value);
 }
 
-/// Recursive visitor that traverses the entire message tree
+namespace detail {
+
 template <typename Callback>
-class recursive_visitor {
- public:
-  Callback callback;
+auto walk_message(const message& msg, Callback& callback) -> void;
 
-  explicit recursive_visitor(Callback cb) : callback(std::move(cb)) {}
-
-  auto operator()(const simple_string& val) -> void { callback(val); }
-  auto operator()(const simple_error& val) -> void { callback(val); }
-  auto operator()(const integer& val) -> void { callback(val); }
-  auto operator()(const double_type& val) -> void { callback(val); }
-  auto operator()(const boolean& val) -> void { callback(val); }
-  auto operator()(const big_number& val) -> void { callback(val); }
-  auto operator()(const null& val) -> void { callback(val); }
-  auto operator()(const bulk_string& val) -> void { callback(val); }
-  auto operator()(const bulk_error& val) -> void { callback(val); }
-  auto operator()(const verbatim_string& val) -> void { callback(val); }
-
-  auto operator()(const array& val) -> void {
-    callback(val);
-    visit_elements(val.elements);
+template <typename Callback>
+auto walk_attribute(const attribute& attr, Callback& callback) -> void {
+  callback(attr);
+  for (const auto& [k, v] : attr.entries) {
+    walk_message(k, callback);
+    walk_message(v, callback);
   }
+}
 
-  auto operator()(const map& val) -> void {
-    callback(val);
-    visit_entries(val.entries);
-  }
+template <typename Callback>
+struct walker {
+  Callback* cb{};
 
-  auto operator()(const set& val) -> void {
-    callback(val);
-    visit_elements(val.elements);
-  }
+  auto operator()(const simple_string& v) -> void { (*cb)(v); }
+  auto operator()(const simple_error& v) -> void { (*cb)(v); }
+  auto operator()(const integer& v) -> void { (*cb)(v); }
+  auto operator()(const double_number& v) -> void { (*cb)(v); }
+  auto operator()(const boolean& v) -> void { (*cb)(v); }
+  auto operator()(const big_number& v) -> void { (*cb)(v); }
+  auto operator()(const null& v) -> void { (*cb)(v); }
+  auto operator()(const bulk_string& v) -> void { (*cb)(v); }
+  auto operator()(const bulk_error& v) -> void { (*cb)(v); }
+  auto operator()(const verbatim_string& v) -> void { (*cb)(v); }
 
-  auto operator()(const attribute& val) -> void {
-    callback(val);
-    visit_entries(val.entries);
-  }
-
-  auto operator()(const push& val) -> void {
-    callback(val);
-    visit_elements(val.elements);
-  }
-
-  // Helper: visit a single message and its attributes
-  auto visit_message(const message& msg) -> void {
-    visit(*this, msg);
-    if (msg.has_attributes()) {
-      (*this)(msg.get_attributes());
+  auto operator()(const array& v) -> void {
+    (*cb)(v);
+    for (const auto& e : v.elements) {
+      walk_message(e, *cb);
     }
   }
 
-private:
-  // Helper: visit a collection of messages
-  auto visit_elements(const auto& elements) -> void {
-    for (const auto& elem : elements) {
-      visit_message(elem);
+  auto operator()(const map& v) -> void {
+    (*cb)(v);
+    for (const auto& [k, val] : v.entries) {
+      walk_message(k, *cb);
+      walk_message(val, *cb);
     }
   }
 
-  // Helper: visit map/attribute entries
-  auto visit_entries(const auto& entries) -> void {
-    for (const auto& [key, value] : entries) {
-      visit_message(key);
-      visit_message(value);
+  auto operator()(const set& v) -> void {
+    (*cb)(v);
+    for (const auto& e : v.elements) {
+      walk_message(e, *cb);
+    }
+  }
+
+  auto operator()(const push& v) -> void {
+    (*cb)(v);
+    for (const auto& e : v.elements) {
+      walk_message(e, *cb);
     }
   }
 };
 
-/// Helper function to create an optimized recursive visitor
 template <typename Callback>
-auto make_recursive_visitor(Callback&& cb) {
-  return recursive_visitor<std::decay_t<Callback>>{std::forward<Callback>(cb)};
+auto walk_message(const message& msg, Callback& callback) -> void {
+  walker<Callback> w{.cb = &callback};
+  visit(w, msg);
+  if (msg.has_attributes()) {
+    walk_attribute(msg.get_attributes(), callback);
+  }
 }
+
+}  // namespace detail
 
 /// Walk through an entire message tree, calling the callback for each node
 template <typename Callback>
 auto walk(const message& msg, Callback&& callback) -> void {
-  auto visitor = make_recursive_visitor(std::forward<Callback>(callback));
-  visitor.visit_message(msg);
+  std::decay_t<Callback> cb{std::forward<Callback>(callback)};
+  detail::walk_message(msg, cb);
 }
 
 }  // namespace rediscoro::resp3

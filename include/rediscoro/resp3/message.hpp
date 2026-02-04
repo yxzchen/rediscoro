@@ -1,6 +1,6 @@
 #pragma once
 
-#include <rediscoro/resp3/type.hpp>
+#include <rediscoro/resp3/kind.hpp>
 #include <rediscoro/resp3/value.hpp>
 
 #include <concepts>
@@ -13,15 +13,15 @@ namespace rediscoro::resp3 {
 
 namespace detail {
 
-// Concept to verify that a type has a static type_id member
+// Concept to verify that a type has a static kind_id member
 template <typename T>
-concept has_type_id = requires {
-  { T::type_id } -> std::convertible_to<type3>;
+concept has_kind_id = requires {
+  { T::kind_id } -> std::convertible_to<kind>;
 };
 
-// Compile-time verification that all value types have type_id
+// Compile-time verification that all value types have kind_id
 template <typename... Ts>
-constexpr bool all_have_type_id = (has_type_id<Ts> && ...);
+constexpr bool all_have_kind_id = (has_kind_id<Ts> && ...);
 
 }  // namespace detail
 
@@ -42,7 +42,7 @@ struct message {
     simple_string,
     simple_error,
     integer,
-    double_type,
+    double_number,
     boolean,
     big_number,
     null,
@@ -59,12 +59,12 @@ struct message {
     push
   >;
 
-  // Compile-time check: ensure all variant alternatives have type_id
-  static_assert(detail::all_have_type_id<
-    simple_string, simple_error, integer, double_type, boolean, big_number, null,
+  // Compile-time check: ensure all variant alternatives have kind_id
+  static_assert(detail::all_have_kind_id<
+    simple_string, simple_error, integer, double_number, boolean, big_number, null,
     bulk_string, bulk_error, verbatim_string,
     array, map, set, push
-  >, "All RESP3 value types must have a static type_id member");
+  >, "All RESP3 value types must have a static kind_id member");
 
   // The actual value
   value_type value;
@@ -87,13 +87,13 @@ struct message {
   message(T&& val, attribute&& attributes)
     : value(std::forward<T>(val)), attrs(std::move(attributes)) {}
 
-  /// Get the type of this message
-  /// Uses std::visit to retrieve the type_id from the actual value type
+  /// Get the kind of this message
+  /// Uses std::visit to retrieve kind_id from the actual value type
   /// This ensures type safety and doesn't rely on variant index ordering
-  [[nodiscard]] auto get_type() const -> type3 {
-    return std::visit([](const auto& val) -> type3 {
+  [[nodiscard]] auto get_kind() const -> kind {
+    return std::visit([](const auto& val) -> kind {
       using T = std::decay_t<decltype(val)>;
-      return T::type_id;
+      return T::kind_id;
     }, value);
   }
 
@@ -163,7 +163,7 @@ struct message {
   /// Check if this is a simple type
   [[nodiscard]] bool is_simple() const {
     return is<simple_string>() || is<simple_error>() || is<integer>() ||
-           is<double_type>() || is<boolean>() || is<big_number>() || is<null>();
+           is<double_number>() || is<boolean>() || is<big_number>() || is<null>();
   }
 
   /// Check if this is a bulk type

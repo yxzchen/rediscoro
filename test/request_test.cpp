@@ -58,5 +58,3 @@ TEST(request, encode_binary_argument_with_nul) {
 }
 
 }  // namespace rediscoro
-
-

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <rediscoro/assert.hpp>
-#include <rediscoro/resp3/type.hpp>
+#include <rediscoro/resp3/kind.hpp>
 
 #include <charconv>
 #include <cstddef>
@@ -20,7 +20,7 @@ namespace rediscoro {
 /// - Input: command name + arguments (string / argv)
 /// - Output: RESP3-encoded command (array of bulk strings)
 class request {
-public:
+ public:
   request() = default;
 
   /// Construct a request containing exactly one command.
@@ -33,7 +33,7 @@ public:
   explicit request(std::span<const std::string_view> argv) { push(argv); }
 
   template <typename... Args>
-    requires (sizeof...(Args) > 0)
+    requires(sizeof...(Args) > 0)
   request(std::string_view cmd, Args&&... args) {
     push(cmd, std::forward<Args>(args)...);
   }
@@ -86,7 +86,7 @@ public:
     command_count_ += 1;
   }
 
-private:
+ private:
   std::string wire_{};
   std::size_t command_count_{0};
 
@@ -100,22 +100,20 @@ private:
   }
 
   void append_command_header(std::size_t argc) {
-    wire_.push_back(resp3::type_to_code(resp3::type3::array));
+    wire_.push_back(resp3::kind_to_prefix(resp3::kind::array));
     append_unsigned(argc);
     wire_.append("\r\n");
   }
 
   void append_bulk_string(std::string_view sv) {
-    wire_.push_back(resp3::type_to_code(resp3::type3::bulk_string));
+    wire_.push_back(resp3::kind_to_prefix(resp3::kind::bulk_string));
     append_unsigned(sv.size());
     wire_.append("\r\n");
     wire_.append(sv.data(), sv.size());
     wire_.append("\r\n");
   }
 
-  void append_arg(std::string_view sv) {
-    append_bulk_string(sv);
-  }
+  void append_arg(std::string_view sv) { append_bulk_string(sv); }
 
   void append_arg(const char* s) {
     if (s == nullptr) {
@@ -125,18 +123,19 @@ private:
     }
   }
 
-  void append_arg(const std::string& s) {
-    append_bulk_string(std::string_view{s});
-  }
+  void append_arg(const std::string& s) { append_bulk_string(std::string_view{s}); }
 
   template <typename T>
-    requires (std::is_integral_v<std::remove_cvref_t<T>> && !std::is_same_v<std::remove_cvref_t<T>, bool>)
+    requires(std::is_integral_v<std::remove_cvref_t<T>> &&
+             !std::is_same_v<std::remove_cvref_t<T>, bool>)
   void append_arg(T v) {
-    const auto tmp = std::to_string(v);
-    append_bulk_string(std::string_view{tmp});
+    char buf[64]{};
+    auto* first = buf;
+    auto* last = buf + sizeof(buf);
+    auto res = std::to_chars(first, last, v);
+    REDISCORO_ASSERT(res.ec == std::errc{});
+    append_bulk_string(std::string_view{first, static_cast<std::size_t>(res.ptr - first)});
   }
 };
 
 }  // namespace rediscoro
-
-

@@ -2,20 +2,20 @@
 
 #include <rediscoro/assert.hpp>
 
-#include <span>
-#include <vector>
-#include <cstddef>
-#include <string_view>
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <limits>
+#include <span>
+#include <string_view>
+#include <vector>
 
 namespace rediscoro::resp3 {
 
 /// Dynamic buffer for RESP3 parsing
 /// Manages a growable buffer with read/write positions
 class buffer {
-public:
+ public:
   buffer() : buffer(4096) {}
 
   explicit buffer(std::size_t initial_capacity) {
@@ -78,7 +78,7 @@ public:
     write_pos_ = remaining;
   }
 
-private:
+ private:
   std::vector<char> buffer_;
   std::size_t read_pos_ = 0;   // Position of next byte to read
   std::size_t write_pos_ = 0;  // Position of next byte to write

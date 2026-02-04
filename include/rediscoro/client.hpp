@@ -2,11 +2,13 @@
 
 #include <rediscoro/config.hpp>
 #include <rediscoro/detail/connection.hpp>
+#include <rediscoro/error_info.hpp>
+#include <rediscoro/expected.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/response.hpp>
 
+#include <iocoro/any_io_executor.hpp>
 #include <iocoro/awaitable.hpp>
-#include <iocoro/io_executor.hpp>
 
 #include <memory>
 #include <utility>
@@ -35,27 +37,24 @@ namespace rediscoro {
 ///   auto resp = co_await c.exec<std::string>("GET", "key");
 ///   co_await c.close();
 class client {
-public:
+ public:
   /// Construct a client with the given executor and configuration.
-  explicit client(iocoro::io_executor ex, config cfg)
-    : conn_(std::make_shared<detail::connection>(ex, std::move(cfg))) {
-  }
+  explicit client(iocoro::any_io_executor ex, config cfg)
+      : conn_(std::make_shared<detail::connection>(ex, std::move(cfg))) {}
 
   /// Connect to Redis server.
   /// Performs TCP connection, authentication, and database selection.
   ///
   /// Returns:
-  /// - std::error_code{} (empty) on success
-  /// - error_code with error details on failure
-  auto connect() -> iocoro::awaitable<std::error_code> {
+  /// - expected<void, error_info>{} on success
+  /// - unexpected(error_info) with error details on failure
+  auto connect() -> iocoro::awaitable<expected<void, error_info>> {
     co_return co_await conn_->connect();
   }
 
   /// Close the connection gracefully.
   /// Waits for pending requests to complete.
-  auto close() -> iocoro::awaitable<void> {
-    co_return co_await conn_->close();
-  }
+  auto close() -> iocoro::awaitable<void> { co_return co_await conn_->close(); }
 
   /// Execute a request and wait for response(s) (fixed-size, heterogenous).
   ///
@@ -89,11 +88,9 @@ public:
   }
 
   /// Get current connection state (for diagnostics).
-  [[nodiscard]] auto state() const noexcept -> detail::connection_state {
-    return conn_->state();
-  }
+  [[nodiscard]] auto state() const noexcept -> detail::connection_state { return conn_->state(); }
 
-private:
+ private:
   std::shared_ptr<detail::connection> conn_;
 };
 

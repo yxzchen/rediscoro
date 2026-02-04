@@ -25,7 +25,7 @@ TEST(resp3_encoder_test, encode_all_simple_types) {
   EXPECT_EQ(encode(neg_int), ":-123\r\n");
 
   // Double
-  message dbl{double_type{3.14}};
+  message dbl{double_number{3.14}};
   auto encoded = encode(dbl);
   EXPECT_EQ(encoded.substr(0, 1), ",");
   EXPECT_TRUE(encoded.find("3.14") != std::string::npos);
@@ -47,13 +47,13 @@ TEST(resp3_encoder_test, encode_all_simple_types) {
 }
 
 TEST(resp3_encoder_test, encode_double_special_values) {
-  message pos_inf{double_type{std::numeric_limits<double>::infinity()}};
+  message pos_inf{double_number{std::numeric_limits<double>::infinity()}};
   EXPECT_EQ(encode(pos_inf), ",inf\r\n");
 
-  message neg_inf{double_type{-std::numeric_limits<double>::infinity()}};
+  message neg_inf{double_number{-std::numeric_limits<double>::infinity()}};
   EXPECT_EQ(encode(neg_inf), ",-inf\r\n");
 
-  message nan_msg{double_type{std::numeric_limits<double>::quiet_NaN()}};
+  message nan_msg{double_number{std::numeric_limits<double>::quiet_NaN()}};
   EXPECT_EQ(encode(nan_msg), ",nan\r\n");
 }
 
@@ -103,14 +103,8 @@ TEST(resp3_encoder_test, encode_array_aggregate) {
 
 TEST(resp3_encoder_test, encode_map_with_ordered_entries) {
   map m;
-  m.entries.emplace_back(
-    message{simple_string{"key1"}},
-    message{simple_string{"value1"}}
-  );
-  m.entries.emplace_back(
-    message{simple_string{"key2"}},
-    message{integer{42}}
-  );
+  m.entries.emplace_back(message{simple_string{"key1"}}, message{simple_string{"value1"}});
+  m.entries.emplace_back(message{simple_string{"key2"}}, message{integer{42}});
 
   message map_msg{std::move(m)};
   EXPECT_EQ(encode(map_msg), "%2\r\n+key1\r\n+value1\r\n+key2\r\n:42\r\n");
@@ -157,10 +151,7 @@ TEST(resp3_encoder_test, encode_nested_arrays) {
 
 TEST(resp3_encoder_test, encode_message_with_attributes) {
   attribute attrs;
-  attrs.entries.emplace_back(
-    message{simple_string{"ttl"}},
-    message{integer{3600}}
-  );
+  attrs.entries.emplace_back(message{simple_string{"ttl"}}, message{integer{3600}});
 
   message msg{simple_string{"cached_value"}, std::move(attrs)};
   EXPECT_EQ(encode(msg), "|1\r\n+ttl\r\n:3600\r\n+cached_value\r\n");
@@ -169,20 +160,11 @@ TEST(resp3_encoder_test, encode_message_with_attributes) {
 TEST(resp3_encoder_test, encode_complex_redis_response) {
   // HGETALL response with attributes
   map m;
-  m.entries.emplace_back(
-    message{simple_string{"name"}},
-    message{bulk_string{"Alice"}}
-  );
-  m.entries.emplace_back(
-    message{simple_string{"age"}},
-    message{bulk_string{"30"}}
-  );
+  m.entries.emplace_back(message{simple_string{"name"}}, message{bulk_string{"Alice"}});
+  m.entries.emplace_back(message{simple_string{"age"}}, message{bulk_string{"30"}});
 
   attribute attrs;
-  attrs.entries.emplace_back(
-    message{simple_string{"db"}},
-    message{integer{0}}
-  );
+  attrs.entries.emplace_back(message{simple_string{"db"}}, message{integer{0}});
 
   message response{std::move(m), std::move(attrs)};
 

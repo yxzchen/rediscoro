@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include <rediscoro/resp3/buffer.hpp>
 #include <cstring>
+#include <rediscoro/resp3/buffer.hpp>
 
 using namespace rediscoro::resp3;
 

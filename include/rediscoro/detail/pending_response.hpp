@@ -1,13 +1,15 @@
 #pragma once
 
 #include <rediscoro/assert.hpp>
-#include <rediscoro/detail/notify_event.hpp>
 #include <rediscoro/detail/response_builder.hpp>
 #include <rediscoro/detail/response_sink.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/response.hpp>
 
 #include <iocoro/awaitable.hpp>
+#include <iocoro/condition_event.hpp>
 
+#include <chrono>
 #include <optional>
 #include <utility>
 
@@ -21,7 +23,7 @@ namespace rediscoro::detail {
 /// - deliver() and deliver_error() are called ONLY from connection strand
 /// - wait() is called from user's coroutine context (any executor)
 /// - No cross-executor synchronization needed for deliver
-/// - notify_event handles executor dispatch for wait() resumption
+/// - condition_event handles executor dispatch for wait() resumption
 ///
 /// Why this simplification is safe:
 /// - pipeline runs on connection strand
@@ -40,24 +42,20 @@ namespace rediscoro::detail {
 /// - deliver() MUST be called from connection strand
 template <typename... Ts>
 class pending_response final : public response_sink {
-public:
+ public:
   pending_response() = default;
 
-  [[nodiscard]] std::size_t expected_replies() const noexcept override {
-    return sizeof...(Ts);
-  }
+  [[nodiscard]] std::size_t expected_replies() const noexcept override { return sizeof...(Ts); }
 
-  [[nodiscard]] bool is_complete() const noexcept override {
-    return result_.has_value();
-  }
+  [[nodiscard]] bool is_complete() const noexcept override { return result_.has_value(); }
 
   auto wait() -> iocoro::awaitable<response<Ts...>> {
-    co_await event_.wait();
+    (void)co_await event_.async_wait();
     REDISCORO_ASSERT(result_.has_value());
     co_return std::move(*result_);
   }
 
-protected:
+ protected:
   void do_deliver(resp3::message msg) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
@@ -67,11 +65,12 @@ protected:
     builder_.accept(std::move(msg));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
 
-  void do_deliver_error(rediscoro::error err) override {
+  void do_deliver_error(error_info err) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;
@@ -80,38 +79,65 @@ protected:
     builder_.accept(std::move(err));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
 
-private:
-  notify_event event_{};
+ private:
+  iocoro::condition_event event_{};
   response_builder<Ts...> builder_{};
   std::optional<response<Ts...>> result_{};
+
+  template <std::size_t... Is>
+  static auto summarize(const response<Ts...>& r, std::index_sequence<Is...>) -> trace_summary {
+    trace_summary out{};
+    bool primary_set = false;
+
+    auto visit_slot = [&](const auto& slot) -> void {
+      if (slot) {
+        out.ok_count += 1;
+        return;
+      }
+
+      out.error_count += 1;
+      if (!primary_set) {
+        primary_set = true;
+        auto const& e = slot.error();
+        out.primary_error = e.code;
+        out.primary_error_detail = e.detail;
+      }
+    };
+
+    (visit_slot(r.template get<Is>()), ...);
+    return out;
+  }
+
+  auto emit_trace_finish_if_needed(const response<Ts...>& r) -> void {
+    auto const s = summarize(r, std::index_sequence_for<Ts...>{});
+    emit_trace_finish(s);
+  }
 };
 
 /// Pending response for a dynamic-size pipeline (homogeneous slots).
 template <typename T>
 class pending_dynamic_response final : public response_sink {
-public:
-  explicit pending_dynamic_response(std::size_t expected_count)
-    : builder_(expected_count) {}
+ public:
+  explicit pending_dynamic_response(std::size_t expected_count) : builder_(expected_count) {}
 
   [[nodiscard]] std::size_t expected_replies() const noexcept override {
     return builder_.expected_count();
   }
 
-  [[nodiscard]] bool is_complete() const noexcept override {
-    return result_.has_value();
-  }
+  [[nodiscard]] bool is_complete() const noexcept override { return result_.has_value(); }
 
   auto wait() -> iocoro::awaitable<dynamic_response<T>> {
-    co_await event_.wait();
+    (void)co_await event_.async_wait();
     REDISCORO_ASSERT(result_.has_value());
     co_return std::move(*result_);
   }
 
-protected:
+ protected:
   void do_deliver(resp3::message msg) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
@@ -121,11 +147,12 @@ protected:
     builder_.accept(std::move(msg));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
 
-  void do_deliver_error(rediscoro::error err) override {
+  void do_deliver_error(error_info err) override {
     REDISCORO_ASSERT(!result_.has_value());
     if (result_.has_value()) {
       return;
@@ -134,14 +161,46 @@ protected:
     builder_.accept(std::move(err));
     if (builder_.done()) {
       result_ = builder_.take_results();
+      emit_trace_finish_if_needed(*result_);
       event_.notify();
     }
   }
 
-private:
-  notify_event event_{};
+ private:
+  iocoro::condition_event event_{};
   dynamic_response_builder<T> builder_;
   std::optional<dynamic_response<T>> result_{};
+
+  auto emit_trace_finish_if_needed(const dynamic_response<T>& r) -> void {
+    std::size_t ok_count = 0;
+    std::size_t error_count = 0;
+    std::error_code primary_error{};
+    std::string_view primary_error_detail{};
+    bool primary_set = false;
+
+    for (std::size_t i = 0; i < r.size(); ++i) {
+      auto const& slot = r[i];
+      if (slot) {
+        ok_count += 1;
+        continue;
+      }
+
+      error_count += 1;
+      if (!primary_set) {
+        primary_set = true;
+        auto const& e = slot.error();
+        primary_error = e.code;
+        primary_error_detail = e.detail;
+      }
+    }
+
+    emit_trace_finish(trace_summary{
+      .ok_count = ok_count,
+      .error_count = error_count,
+      .primary_error = primary_error,
+      .primary_error_detail = primary_error_detail,
+    });
+  }
 };
 
 }  // namespace rediscoro::detail

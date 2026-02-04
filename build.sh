@@ -162,12 +162,29 @@ configure_project() {
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
         -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
     )
+
+    if [ "$TEST" = true ]; then
+        CMAKE_ARGS+=(-DREDISCORO_BUILD_TESTS=ON)
+    else
+        CMAKE_ARGS+=(-DREDISCORO_BUILD_TESTS=OFF)
+    fi
     
     # Add sanitizer options
     if [ -n "$SANITIZER" ]; then
         log_info "Enabling ${SANITIZER} sanitizer"
-        CMAKE_ARGS+=(-DCMAKE_CXX_FLAGS="-fsanitize=${SANITIZER} -fno-omit-frame-pointer")
+        # Prefer clang for ThreadSanitizer due to better platform support.
+        if [ "$SANITIZER" = "thread" ]; then
+            if command -v clang++ &> /dev/null && command -v clang &> /dev/null; then
+                CMAKE_ARGS+=(-DCMAKE_C_COMPILER=clang)
+                CMAKE_ARGS+=(-DCMAKE_CXX_COMPILER=clang++)
+            fi
+        fi
+        CMAKE_ARGS+=(-DCMAKE_CXX_FLAGS="-fsanitize=${SANITIZER} -fno-omit-frame-pointer -g")
         CMAKE_ARGS+=(-DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${SANITIZER}")
+    else
+        # Ensure we don't accidentally reuse sanitizer flags from an existing build directory.
+        CMAKE_ARGS+=(-DCMAKE_CXX_FLAGS=)
+        CMAKE_ARGS+=(-DCMAKE_EXE_LINKER_FLAGS=)
     fi
     
     # Verbose mode

@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <optional>
 #include <array>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -43,6 +43,15 @@ TEST(resp3_adapter, map_string_to_int) {
   EXPECT_EQ((*r).at("b"), 2);
 }
 
+TEST(resp3_adapter, map_value_error_includes_key_path) {
+  message m{map{{{message{simple_string{"a"}}, message{simple_string{"oops"}}}}}};
+  auto r = rediscoro::adapter::adapt<std::unordered_map<std::string, int>>(m);
+  ASSERT_FALSE(r.has_value());
+  ASSERT_FALSE(r.error().path.empty());
+  EXPECT_TRUE(std::holds_alternative<rediscoro::adapter::path_key>(r.error().path[0]));
+  EXPECT_EQ(std::get<rediscoro::adapter::path_key>(r.error().path[0]).key, "a");
+}
+
 TEST(resp3_adapter, ignore_always_ok) {
   message m{simple_error{"ERR"}};
   auto r = rediscoro::adapter::adapt<rediscoro::ignore_t>(m);
@@ -53,9 +62,7 @@ TEST(resp3_adapter, std_array_size_mismatch) {
   message m{array{{message{integer{1}}, message{integer{2}}}}};
   auto r = rediscoro::adapter::adapt<std::array<int, 3>>(m);
   ASSERT_FALSE(r.has_value());
-  EXPECT_EQ(r.error().kind, rediscoro::adapter::adapter_error_kind::size_mismatch);
+  EXPECT_EQ(r.error().kind, rediscoro::adapter_errc::size_mismatch);
 }
 
 }  // namespace rediscoro::resp3
-
-

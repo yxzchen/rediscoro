@@ -1,36 +1,18 @@
 #pragma once
 
-#include <rediscoro/resp3/buffer.hpp>
-#include <rediscoro/resp3/raw.hpp>
 #include <rediscoro/error.hpp>
 #include <rediscoro/expected.hpp>
+#include <rediscoro/resp3/buffer.hpp>
+#include <rediscoro/resp3/raw.hpp>
 
-#include <span>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
+#include <variant>
 #include <vector>
 
 namespace rediscoro::resp3 {
-
-enum class frame_kind : std::uint8_t {
-  value,
-  array,
-  map_key,
-  map_value,
-  attribute,
-};
-
-struct frame {
-  frame_kind kind{frame_kind::value};
-  type3 container_type{type3::null};
-
-  // For map/attribute: expected & produced count PAIRS (key/value), not nodes.
-  std::int64_t expected = 0;          // container len (pairs for map/attr)
-  std::uint32_t produced = 0;         // produced children (or pairs)
-  std::uint32_t node_index = 0;       // container node (for array/map/set/push)
-  std::uint32_t pending_key = 0;      // for map/attr
-  bool has_pending_key = false;       // for map/attr
-};
 
 /// RESP3 syntax parser: builds a zero-copy raw tree.
 ///
@@ -38,12 +20,18 @@ struct frame {
 /// - zero-copy: raw_node.text is string_view into `buffer` memory (must remain stable)
 /// - output: root node index into `tree().nodes`
 ///
+/// Algorithm sketch:
+/// - Maintains a stack of container frames (array/map/set/push/attribute).
+/// - As scalars/containers complete, appends raw nodes into `tree_` and links children via `links`.
+/// - Pending attributes are accumulated and attached to the next completed value only.
+///
 /// Contracts (important):
 /// - pending attributes apply to the next completed value only
 /// - after parse_one() returns a root, the caller must not compact/reset/reallocate the input
 ///   buffer until the returned raw_tree nodes are fully consumed (string_view lifetime)
+/// - after consuming `tree()+root`, call reclaim() before parsing the next message
 class parser {
-public:
+ public:
   parser() = default;
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
@@ -56,13 +44,13 @@ public:
   /// On success returns root node index into tree().nodes.
   ///
   /// Returns:
-  /// - success + node_index: parsing succeeded, returns root node index
-  /// - error::resp3_needs_more: buffer has insufficient data, need to continue reading
-  /// - error::resp3_*: protocol format error
+  /// - success + root_index: parsing succeeded, returns root node index
+  /// - success + nullopt: buffer has insufficient data, need to continue reading
+  /// - protocol_errc: protocol format error
   ///
   /// IMPORTANT: After success, you must consume the result (tree()+root) and then call reclaim()
   /// before parsing the next message, otherwise the underlying buffer may move and invalidate views.
-  auto parse_one() -> expected<std::uint32_t, rediscoro::error>;
+  auto parse_one() -> expected<std::optional<std::uint32_t>, rediscoro::protocol_errc>;
 
   /// Reclaim memory after consuming the latest parsed tree:
   /// - clears raw_tree
@@ -81,23 +69,94 @@ public:
     stack_.clear();
     failed_ = false;
     tree_ready_ = false;
-    pending_attr_count_ = 0;
-    pending_attr_first_ = 0;
+    pending_attrs_.reset();
   }
 
-private:
+ private:
+  enum class frame_kind : std::uint8_t {
+    value,
+    array,      // array/set/push elements
+    map_key,    // map key
+    map_value,  // map value
+    attribute,  // attribute key/value pairs
+  };
+
+  struct frame {
+    frame_kind state{frame_kind::value};
+    kind container_type{kind::null};
+
+    // For map/attribute: expected & produced count PAIRS (key/value), not nodes.
+    std::int64_t expected = 0;      // container len (pairs for map/attr)
+    std::uint32_t produced = 0;     // produced children (or pairs)
+    std::uint32_t node_index = 0;   // container node (for array/map/set/push)
+    std::uint32_t pending_key = 0;  // for map/attr
+    bool has_pending_key = false;   // for map/attr
+  };
+
+  struct length_header {
+    std::int64_t length{};
+    std::size_t header_bytes{};
+  };
+
+  struct pending_attributes {
+    std::uint32_t first{0};
+    std::uint32_t count{0};
+
+    [[nodiscard]] auto empty() const noexcept -> bool { return count == 0; }
+
+    auto reset() noexcept -> void {
+      first = 0;
+      count = 0;
+    }
+
+    auto push(raw_tree& tree, std::uint32_t kv_node) -> void {
+      if (count == 0) {
+        first = static_cast<std::uint32_t>(tree.links.size());
+      }
+      tree.links.push_back(kv_node);
+      count += 1;
+    }
+
+    auto attach(raw_tree& tree, std::uint32_t node_idx) -> void {
+      if (count == 0) {
+        return;
+      }
+      auto& n = tree.nodes.at(node_idx);
+      n.first_attr = first;
+      n.attr_count = count;
+      reset();
+    }
+  };
+
+  enum class step : std::uint8_t {
+    continue_parsing = 0,
+    produced,  // index is valid
+  };
+
+  struct step_index {
+    step state{step::continue_parsing};
+    std::uint32_t index{0};
+  };
+
   buffer buf_{};
   raw_tree tree_{};
   std::vector<frame> stack_{};
   bool failed_{false};
   bool tree_ready_{false};
 
-  std::uint32_t pending_attr_first_{0};
-  std::uint32_t pending_attr_count_{0};
+  pending_attributes pending_attrs_{};
+
+  [[nodiscard]] auto parse_length_after_type(std::string_view data) const
+    -> expected<std::optional<length_header>, rediscoro::protocol_errc>;
+  [[nodiscard]] auto parse_value() -> expected<std::optional<step_index>, rediscoro::protocol_errc>;
+  [[nodiscard]] auto start_container(frame& current, kind t, std::int64_t len)
+    -> expected<step_index, rediscoro::protocol_errc>;
+  [[nodiscard]] auto start_attribute(std::int64_t len)
+    -> expected<std::monostate, rediscoro::protocol_errc>;
+  [[nodiscard]] auto attach_to_parent(std::uint32_t child_idx)
+    -> expected<step_index, rediscoro::protocol_errc>;
 };
 
 }  // namespace rediscoro::resp3
 
 #include <rediscoro/resp3/impl/parser.ipp>
-
-

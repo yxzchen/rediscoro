@@ -1,13 +1,14 @@
 #pragma once
 
 #include <rediscoro/detail/response_sink.hpp>
-#include <rediscoro/error.hpp>
+#include <rediscoro/detail/ring_queue.hpp>
+#include <rediscoro/error_info.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/message.hpp>
 
 #include <chrono>
 #include <cstddef>
-#include <deque>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -36,7 +37,7 @@ namespace rediscoro::detail {
 /// - All methods MUST be called from the connection's strand
 /// - No internal synchronization (relies on strand serialization)
 class pipeline {
-public:
+ public:
   pipeline() = default;
 
   using clock = std::chrono::steady_clock;
@@ -50,12 +51,12 @@ public:
   /// - pipeline MUST NOT deliver more than sink->expected_replies() replies into a sink.
   /// - For a fixed-size sink (pending_response<Ts...>), req.reply_count() MUST equal sizeof...(Ts)
   ///   (enforced at connection::enqueue<Ts...> boundary).
-  auto push(request req, response_sink* sink) -> void;
+  auto push(request req, std::shared_ptr<response_sink> sink) -> void;
 
   /// Enqueue a request with a timeout deadline.
   ///
   /// deadline == time_point::max() means "no timeout".
-  auto push(request req, response_sink* sink, time_point deadline) -> void;
+  auto push(request req, std::shared_ptr<response_sink> sink, time_point deadline) -> void;
 
   /// Check if there are pending writes.
   [[nodiscard]] bool has_pending_write() const noexcept;
@@ -77,10 +78,10 @@ public:
 
   /// Dispatch a RESP3 parse error to the next pending response.
   /// Precondition: has_pending_read() == true
-  auto on_error(error err) -> void;
+  auto on_error(error_info err) -> void;
 
   /// Clear all pending requests (on connection close/error).
-  auto clear_all(rediscoro::error err) -> void;
+  auto clear_all(error_info err) -> void;
 
   /// Earliest deadline among all pending requests.
   /// Returns time_point::max() if there is no deadline.
@@ -94,24 +95,24 @@ public:
     return pending_write_.size() + awaiting_read_.size();
   }
 
-private:
+ private:
   struct pending_item {
     request req;
-    response_sink* sink;  // Abstract interface, no knowledge of coroutines
-    std::size_t written{0};  // bytes written so far
+    std::shared_ptr<response_sink> sink;  // Abstract interface, no knowledge of coroutines
+    std::size_t written{0};               // bytes written so far
     time_point deadline{time_point::max()};
   };
 
   struct awaiting_item {
-    response_sink* sink;  // Abstract interface
+    std::shared_ptr<response_sink> sink;  // Abstract interface
     time_point deadline{time_point::max()};
   };
 
   // Requests waiting to be written to socket
-  std::deque<pending_item> pending_write_{};
+  ring_queue<pending_item> pending_write_{};
 
   // Response sinks waiting for responses (one per sent request)
-  std::deque<awaiting_item> awaiting_read_{};
+  ring_queue<awaiting_item> awaiting_read_{};
 };
 
 }  // namespace rediscoro::detail

@@ -1,5 +1,5 @@
-#include <rediscoro/response.hpp>
 #include <rediscoro/detail/response_builder.hpp>
+#include <rediscoro/response.hpp>
 
 #include <gtest/gtest.h>
 
@@ -21,8 +21,8 @@ TEST(response, preserves_order_and_detects_redis_error) {
 
   auto& r1 = resp.get<1>();
   ASSERT_FALSE(r1.has_value());
-  EXPECT_TRUE(r1.error().is_redis_error());
-  EXPECT_EQ(r1.error().as_redis_error().message, "ERR wrongtype");
+  EXPECT_EQ(r1.error().code, rediscoro::server_errc::redis_error);
+  EXPECT_EQ(r1.error().detail, "ERR wrongtype");
 }
 
 TEST(response, adapt_as_returns_adapter_error) {
@@ -31,7 +31,8 @@ TEST(response, adapt_as_returns_adapter_error) {
   auto resp = b.take_results();
   auto& r = resp.get<0>();
   ASSERT_FALSE(r.has_value());
-  EXPECT_TRUE(r.error().is_adapter_error());
+  EXPECT_EQ(r.error().code.category().name(), std::string{"rediscoro.adapter"});
+  EXPECT_FALSE(r.error().detail.empty());
 }
 
 TEST(response_dynamic, fills_n_results_in_order) {
@@ -50,12 +51,10 @@ TEST(response_dynamic, fills_n_results_in_order) {
   EXPECT_EQ(*resp[0], "a");
 
   EXPECT_FALSE(resp[1].has_value());
-  EXPECT_TRUE(resp[1].error().is_redis_error());
+  EXPECT_EQ(resp[1].error().code, rediscoro::server_errc::redis_error);
 
   EXPECT_FALSE(resp[2].has_value());
-  EXPECT_TRUE(resp[2].error().is_adapter_error());
+  EXPECT_EQ(resp[2].error().code.category().name(), std::string{"rediscoro.adapter"});
 }
 
 }  // namespace rediscoro::resp3
-
-
