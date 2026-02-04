@@ -134,7 +134,7 @@ class parser {
   };
 
   struct step_index {
-    step step{step::continue_parsing};
+    step state{step::continue_parsing};
     std::uint32_t index{0};
   };
 
