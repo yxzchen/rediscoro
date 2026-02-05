@@ -103,11 +103,6 @@ find_package(rediscoro REQUIRED)
 target_link_libraries(your_target PRIVATE rediscoro::rediscoro)
 ```
 
-## Limitations
-
-- Unsolicited server messages (e.g. RESP3 `PUSH`) are currently treated as an error.
-- `io_context` execution is single-threaded (same as `iocoro`).
-
 ## License
 
 MIT License. See [`LICENSE`](LICENSE).
