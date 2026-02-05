@@ -7,6 +7,7 @@ include(CMakePackageConfigHelpers)
 option(REDISCORO_BUILD_TESTS "Build tests" OFF)
 option(REDISCORO_ENABLE_WARNINGS "Enable warning flags for rediscoro tests/examples" ${PROJECT_IS_TOP_LEVEL})
 option(REDISCORO_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(REDISCORO_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
 
 add_library(rediscoro INTERFACE)
 add_library(rediscoro::rediscoro ALIAS rediscoro)
@@ -46,7 +47,7 @@ if(NOT iocoro_FOUND)
     FetchContent_Declare(
         iocoro
         GIT_REPOSITORY https://github.com/yxzchen/iocoro.git
-        GIT_TAG dev
+        GIT_TAG master
     )
     FetchContent_MakeAvailable(iocoro)
 endif()
@@ -60,6 +61,10 @@ target_compile_options(rediscoro INTERFACE
 if(REDISCORO_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if(REDISCORO_BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif()
 
 install(TARGETS rediscoro EXPORT rediscoroTargets)
