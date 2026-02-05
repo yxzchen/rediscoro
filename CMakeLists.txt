@@ -47,7 +47,7 @@ if(NOT iocoro_FOUND)
     FetchContent_Declare(
         iocoro
         GIT_REPOSITORY https://github.com/yxzchen/iocoro.git
-        GIT_TAG dev
+        GIT_TAG master
     )
     FetchContent_MakeAvailable(iocoro)
 endif()
