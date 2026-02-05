@@ -135,9 +135,9 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
         auto w = co_await socket_.async_write_some(buf);
         if (!w) {
           if (w.error() == iocoro::error::operation_aborted) {
-            co_return iocoro::unexpected(client_errc::operation_aborted);
+            co_return unexpected(client_errc::operation_aborted);
           }
-          co_return iocoro::unexpected(client_errc::handshake_failed);
+          co_return unexpected(client_errc::handshake_failed);
         }
         pipeline_.on_write_done(*w);
       }
@@ -148,12 +148,12 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
         auto r = co_await socket_.async_read_some(writable);
         if (!r) {
           if (r.error() == iocoro::error::operation_aborted) {
-            co_return iocoro::unexpected(client_errc::operation_aborted);
+            co_return unexpected(client_errc::operation_aborted);
           }
-          co_return iocoro::unexpected(client_errc::handshake_failed);
+          co_return unexpected(client_errc::handshake_failed);
         }
         if (*r == 0) {
-          co_return iocoro::unexpected(client_errc::connection_reset);
+          co_return unexpected(client_errc::connection_reset);
         }
         parser_.commit(*r);
 
@@ -163,14 +163,14 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
             if (pipeline_.has_pending_read()) {
               pipeline_.on_error(parsed.error());
             }
-            co_return iocoro::unexpected(parsed.error());
+            co_return unexpected(parsed.error());
           }
           if (!parsed->has_value()) {
             break;
           }
 
           if (!pipeline_.has_pending_read()) {
-            co_return iocoro::unexpected(client_errc::unsolicited_message);
+            co_return unexpected(client_errc::unsolicited_message);
           }
 
           auto const root = **parsed;
@@ -185,7 +185,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
       }
 
       if (tok.stop_requested()) {
-        co_return iocoro::unexpected(client_errc::operation_aborted);
+        co_return unexpected(client_errc::operation_aborted);
       }
 
       co_return iocoro::ok();
