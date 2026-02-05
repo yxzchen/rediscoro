@@ -37,14 +37,14 @@ parser.
 #include <iostream>
 #include <string>
 
-auto main_task() -> iocoro::awaitable<void> {
-  iocoro::io_context ctx;
+auto ping_task() -> iocoro::awaitable<void> {
+  auto ex = co_await iocoro::this_coro::executor;
 
   rediscoro::config cfg{};
   cfg.host = "127.0.0.1";
   cfg.port = 6379;
 
-  rediscoro::client c{ctx.get_executor(), cfg};
+  rediscoro::client c{ex, cfg};
 
   auto r = co_await c.connect();
   if (!r) {
@@ -64,7 +64,7 @@ auto main_task() -> iocoro::awaitable<void> {
 
 int main() {
   iocoro::io_context ctx;
-  iocoro::co_spawn(ctx.get_executor(), main_task(), iocoro::detached);
+  iocoro::co_spawn(ctx.get_executor(), ping_task(), iocoro::detached);
   ctx.run();
   return 0;
 }
