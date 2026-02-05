@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [gcc, clang]
+        sanitizer: [none, asan, ubsan, tsan]
+        exclude:
+          # Prefer clang for TSan (better support, fewer false positives).
+          - toolchain: gcc
+            sanitizer: tsan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libgtest-dev
+          if [ "${{ matrix.toolchain }}" = "clang" ]; then
+            sudo apt-get install -y clang
+          else
+            sudo apt-get install -y g++
+          fi
+
+          # Ubuntu's libgtest-dev may ship sources; build and install the libs so find_package(GTest) works.
+          if [ -d /usr/src/gtest ]; then
+            cd /usr/src/gtest
+            sudo cmake -S . -B build
+            sudo cmake --build build -j
+            sudo cmake --install build
+          elif [ -d /usr/src/googletest ]; then
+            cd /usr/src/googletest
+            sudo cmake -S . -B build
+            sudo cmake --build build -j
+            sudo cmake --install build
+          fi
+
+      - name: Build and run tests
+        env:
+          CC: ${{ matrix.toolchain == 'clang' && 'clang' || 'gcc' }}
+          CXX: ${{ matrix.toolchain == 'clang' && 'clang++' || 'g++' }}
+        run: |
+          chmod +x ./build.sh
+          if [ "${{ matrix.sanitizer }}" = "asan" ]; then
+            ./build.sh -c -t --asan
+          elif [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
+            ./build.sh -c -t --ubsan
+          elif [ "${{ matrix.sanitizer }}" = "tsan" ]; then
+            ./build.sh -c -t --tsan
+          else
+            ./build.sh -c -t
+          fi
+
+  install-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config g++
+
+      - name: Build and install
+        run: |
+          chmod +x ./build.sh
+          ./build.sh -c -r
+          cmake --install build --prefix "$PWD/_install"
+
+      - name: Build consumer with find_package
+        run: |
+          mkdir -p /tmp/rediscoro-consumer
+          cat > /tmp/rediscoro-consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.15)
+          project(rediscoro_consumer LANGUAGES CXX)
+
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_CXX_EXTENSIONS OFF)
+
+          find_package(rediscoro REQUIRED)
+
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE rediscoro::rediscoro)
+          EOF
+
+          cat > /tmp/rediscoro-consumer/main.cpp <<'EOF'
+          #include <rediscoro/rediscoro.hpp>
+
+          #include <iocoro/iocoro.hpp>
+
+          #include <string>
+
+          auto task() -> iocoro::awaitable<void> {
+            iocoro::io_context ctx;
+
+            rediscoro::config cfg{};
+            cfg.host = "127.0.0.1";
+            cfg.port = 6379;
+            cfg.reconnection.enabled = false;
+
+            rediscoro::client c{ctx.get_executor(), cfg};
+
+            // NOTE: We don't require a Redis server in CI. This is a compile/link check.
+            (void)co_await c.connect();
+            co_await c.close();
+          }
+
+          int main() {
+            iocoro::io_context ctx;
+            iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+            ctx.run();
+            return 0;
+          }
+          EOF
+
+          cmake -S /tmp/rediscoro-consumer -B /tmp/rediscoro-consumer/build -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/_install"
+          cmake --build /tmp/rediscoro-consumer/build -j
+          /tmp/rediscoro-consumer/build/consumer
+
