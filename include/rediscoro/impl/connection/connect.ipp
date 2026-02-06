@@ -217,7 +217,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
       co_return fail_handshake(static_cast<client_errc>(ec.value()));
     }
 
-    co_return fail_handshake(client_errc::handshake_failed);
+    co_return fail_handshake({client_errc::handshake_failed, ec.message()});
   }
 
   // Validate all handshake replies: any error => handshake_failed.
