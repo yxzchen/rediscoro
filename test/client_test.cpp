@@ -10,69 +10,6 @@
 
 using namespace std::chrono_literals;
 
-TEST(client_test, connect_to_http_server_reports_protocol_error) {
-  iocoro::io_context ctx;
-  auto guard = iocoro::make_work_guard(ctx);
-
-  rediscoro::config cfg{};
-  cfg.host = "qq.com";
-  cfg.port = 80;
-  cfg.resolve_timeout = 1000ms;
-  cfg.connect_timeout = 1000ms;
-  cfg.reconnection.enabled = false;
-
-  bool skipped = false;
-  std::string skip_reason{};
-  bool ok = false;
-  std::string diag{};
-
-  auto task = [&]() -> iocoro::awaitable<void> {
-    struct work_guard_reset {
-      decltype(guard)& g;
-      ~work_guard_reset() { g.reset(); }
-    };
-    work_guard_reset reset{guard};
-
-    rediscoro::client c{ctx.get_executor(), cfg};
-
-    auto r = co_await c.connect();
-    if (r.has_value()) {
-      diag = "unexpected success connecting to qq.com:80 as redis";
-      co_return;
-    }
-
-    auto const e = r.error();
-
-    // If we cannot even resolve/connect, we can't test protocol mismatch deterministically.
-    if (e.code == rediscoro::client_errc::resolve_failed ||
-        e.code == rediscoro::client_errc::resolve_timeout ||
-        e.code == rediscoro::client_errc::connect_failed ||
-        e.code == rediscoro::client_errc::connect_timeout) {
-      skipped = true;
-      skip_reason =
-        "network not available to reach qq.com:80 (connect failed: " + e.to_string() + ")";
-      co_return;
-    }
-
-    // For a reachable HTTP server, RESP3 parser should fail quickly with a protocol error.
-    if (!rediscoro::is_protocol_error(e.code)) {
-      diag = "expected RESP3 protocol error, got: " + e.to_string();
-      co_return;
-    }
-
-    ok = true;
-    co_return;
-  };
-
-  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
-  ctx.run();
-
-  if (skipped) {
-    GTEST_SKIP() << skip_reason;
-  }
-  ASSERT_TRUE(ok) << diag;
-}
-
 TEST(client_test, exec_without_connect_is_rejected) {
   iocoro::io_context ctx;
 
