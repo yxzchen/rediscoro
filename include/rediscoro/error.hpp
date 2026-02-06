@@ -15,11 +15,8 @@ enum class client_errc {
   /// Operation cancelled by user (close() was called).
   operation_aborted = 1,
 
-  /// Connection not established yet (INIT or CONNECTING state).
-  not_connected,
-
-  /// Operation already in progress.
-  already_in_progress,
+  /// Connection is closed (CLOSING or CLOSED state).
+  connection_closed,
 
   /// DNS resolution failed.
   resolve_failed,
@@ -42,20 +39,23 @@ enum class client_errc {
   /// Handshake timed out.
   handshake_timeout,
 
+  /// Socket write error.
+  write_error,
+
+  /// Connection lost due to runtime error (FAILED state).
+  connection_lost,
+
   /// Server sent an unsolicited message (e.g. PUSH) or unexpected message arrived.
   unsolicited_message,
 
   /// Request timed out (connection-level policy; may trigger reconnect).
   request_timeout,
 
-  /// Connection is closed (CLOSING or CLOSED state).
-  connection_closed,
+  /// Connection not established yet (INIT or CONNECTING state).
+  not_connected,
 
-  /// Connection lost due to runtime error (FAILED state).
-  connection_lost,
-
-  /// Socket write error (distinguished from read errors for better diagnostics).
-  write_error,
+  /// Operation already in progress.
+  already_in_progress,
 
   /// Internal error (bug / invariant violation).
   internal_error,

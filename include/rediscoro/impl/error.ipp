@@ -12,10 +12,8 @@ class client_category_impl : public std::error_category {
     switch (static_cast<client_errc>(ev)) {
       case client_errc::operation_aborted:
         return "operation aborted";
-      case client_errc::not_connected:
-        return "not connected";
-      case client_errc::already_in_progress:
-        return "already in progress";
+      case client_errc::connection_closed:
+        return "connection closed";
       case client_errc::resolve_failed:
         return "resolve failed";
       case client_errc::resolve_timeout:
@@ -30,16 +28,18 @@ class client_category_impl : public std::error_category {
         return "handshake failed";
       case client_errc::handshake_timeout:
         return "handshake timeout";
+      case client_errc::write_error:
+        return "write error";
+      case client_errc::connection_lost:
+        return "connection lost";
       case client_errc::unsolicited_message:
         return "unsolicited message";
       case client_errc::request_timeout:
         return "request timeout";
-      case client_errc::connection_closed:
-        return "connection closed";
-      case client_errc::connection_lost:
-        return "connection lost";
-      case client_errc::write_error:
-        return "write error";
+      case client_errc::not_connected:
+        return "not connected";
+      case client_errc::already_in_progress:
+        return "already in progress";
       case client_errc::internal_error:
         return "internal error";
     }
@@ -205,24 +205,24 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::operation_aborted: {
         return error_action_hint::none;
       }
-      case client_errc::not_connected:
       case client_errc::connection_closed:
-      case client_errc::connection_lost:
-      case client_errc::write_error:
+      case client_errc::resolve_failed:
+      case client_errc::resolve_timeout:
+      case client_errc::connect_failed:
+      case client_errc::connect_timeout:
       case client_errc::connection_reset:
       case client_errc::handshake_failed:
       case client_errc::handshake_timeout:
-      case client_errc::request_timeout:
-      case client_errc::unsolicited_message: {
+      case client_errc::write_error:
+      case client_errc::connection_lost:
+      case client_errc::unsolicited_message:
+      case client_errc::request_timeout: {
         return error_action_hint::reconnect;
       }
       case client_errc::already_in_progress: {
         return error_action_hint::retry_request;
       }
-      case client_errc::resolve_failed:
-      case client_errc::resolve_timeout:
-      case client_errc::connect_failed:
-      case client_errc::connect_timeout: {
+      case client_errc::not_connected: {
         return error_action_hint::reconnect;
       }
       case client_errc::internal_error: {
@@ -243,20 +243,20 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::resolve_timeout:
       case client_errc::connect_timeout:
       case client_errc::handshake_timeout:
-      case client_errc::request_timeout:
+      case client_errc::write_error:
       case client_errc::connection_reset:
       case client_errc::connection_lost:
-      case client_errc::write_error: {
+      case client_errc::request_timeout: {
         return true;
       }
       case client_errc::operation_aborted:
-      case client_errc::not_connected:
-      case client_errc::already_in_progress:
+      case client_errc::connection_closed:
       case client_errc::resolve_failed:
       case client_errc::connect_failed:
       case client_errc::handshake_failed:
       case client_errc::unsolicited_message:
-      case client_errc::connection_closed:
+      case client_errc::not_connected:
+      case client_errc::already_in_progress:
       case client_errc::internal_error: {
         return false;
       }
@@ -280,22 +280,22 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
     const auto e = static_cast<client_errc>(ec.value());
     switch (e) {
       case client_errc::connection_reset:
-      case client_errc::connection_lost:
-      case client_errc::write_error:
       case client_errc::handshake_failed:
       case client_errc::handshake_timeout:
-      case client_errc::request_timeout:
-      case client_errc::unsolicited_message: {
+      case client_errc::write_error:
+      case client_errc::connection_lost:
+      case client_errc::unsolicited_message:
+      case client_errc::request_timeout: {
         return true;
       }
       case client_errc::operation_aborted:
-      case client_errc::not_connected:
-      case client_errc::already_in_progress:
+      case client_errc::connection_closed:
       case client_errc::resolve_failed:
       case client_errc::resolve_timeout:
       case client_errc::connect_failed:
       case client_errc::connect_timeout:
-      case client_errc::connection_closed:
+      case client_errc::not_connected:
+      case client_errc::already_in_progress:
       case client_errc::internal_error: {
         return false;
       }
