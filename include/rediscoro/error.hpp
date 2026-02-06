@@ -117,26 +117,11 @@ auto make_error_code(protocol_errc e) -> std::error_code;
 auto make_error_code(server_errc e) -> std::error_code;
 auto make_error_code(adapter_errc e) -> std::error_code;
 
-[[nodiscard]] auto is_timeout(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_client_error(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_protocol_error(std::error_code ec) noexcept -> bool;
+
+[[nodiscard]] auto is_timeout(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_retryable(std::error_code ec) noexcept -> bool;
-
-enum class error_action_hint {
-  none = 0,
-  /// Retry the request without reconnect (rare).
-  retry_request,
-  /// Reconnect the connection (and then retry at a higher level if desired).
-  reconnect,
-  /// Fix request / input / expected type mismatch.
-  fix_input,
-  /// Indicates a bug or invariant violation (should be reported).
-  bug,
-};
-
-[[nodiscard]] auto action_hint(std::error_code ec) noexcept -> error_action_hint;
-[[nodiscard]] auto is_transient(std::error_code ec) noexcept -> bool;
-[[nodiscard]] auto is_reconnect_required(std::error_code ec) noexcept -> bool;
 
 }  // namespace rediscoro
 

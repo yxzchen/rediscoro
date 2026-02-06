@@ -150,17 +150,6 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
   return {static_cast<int>(e), detail::adapter_category()};
 }
 
-[[nodiscard]] inline auto is_timeout(std::error_code ec) noexcept -> bool {
-  if (ec.category() == detail::client_category()) {
-    const auto e = static_cast<client_errc>(ec.value());
-    if (e == client_errc::resolve_timeout || e == client_errc::connect_timeout ||
-        e == client_errc::handshake_timeout || e == client_errc::request_timeout) {
-      return true;
-    }
-  }
-  return false;
-}
-
 [[nodiscard]] inline auto is_client_error(std::error_code ec) noexcept -> bool {
   return ec.category() == detail::client_category();
 }
@@ -169,137 +158,30 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
   return ec.category() == detail::protocol_category();
 }
 
+/// Returns true if the error is a timeout-related error.
+[[nodiscard]] inline auto is_timeout(std::error_code ec) noexcept -> bool {
+  if (ec.category() == detail::client_category()) {
+    const auto e = static_cast<client_errc>(ec.value());
+    return e == client_errc::resolve_timeout || e == client_errc::connect_timeout ||
+           e == client_errc::handshake_timeout || e == client_errc::request_timeout;
+  }
+  return false;
+}
+
+/// Returns true if the error may be recoverable by retrying (with or without reconnect).
+/// - Connection/IO errors: retry after reconnect
+/// - Protocol errors: retry after reconnect
+/// - Server errors: usually not retryable without fixing the request
+/// - Adapter errors: not retryable (input type mismatch)
 [[nodiscard]] inline auto is_retryable(std::error_code ec) noexcept -> bool {
   if (ec.category() == detail::client_category()) {
     const auto e = static_cast<client_errc>(ec.value());
-    if (e == client_errc::connection_lost || e == client_errc::write_error ||
-        e == client_errc::connection_reset || e == client_errc::request_timeout ||
-        e == client_errc::handshake_failed || e == client_errc::unsolicited_message) {
-      return true;
-    }
-    return false;
+    return e == client_errc::connection_lost || e == client_errc::write_error ||
+           e == client_errc::connection_reset || e == client_errc::request_timeout ||
+           e == client_errc::handshake_failed || e == client_errc::unsolicited_message;
   }
   if (ec.category() == detail::protocol_category()) {
-    return true;  // protocol errors are retryable via reconnect (policy-dependent)
-  }
-  return false;
-}
-
-[[nodiscard]] inline auto action_hint(std::error_code ec) noexcept -> error_action_hint {
-  if (!ec) {
-    return error_action_hint::none;
-  }
-  if (ec.category() == detail::protocol_category()) {
-    return error_action_hint::reconnect;
-  }
-  if (ec.category() == detail::adapter_category()) {
-    return error_action_hint::fix_input;
-  }
-  if (ec.category() == detail::server_category()) {
-    // Server error replies are usually request/data dependent.
-    return error_action_hint::fix_input;
-  }
-  if (ec.category() == detail::client_category()) {
-    const auto e = static_cast<client_errc>(ec.value());
-    switch (e) {
-      case client_errc::operation_aborted: {
-        return error_action_hint::none;
-      }
-      case client_errc::connection_closed:
-      case client_errc::resolve_failed:
-      case client_errc::resolve_timeout:
-      case client_errc::connect_failed:
-      case client_errc::connect_timeout:
-      case client_errc::connection_reset:
-      case client_errc::handshake_failed:
-      case client_errc::handshake_timeout:
-      case client_errc::write_error:
-      case client_errc::connection_lost:
-      case client_errc::unsolicited_message:
-      case client_errc::request_timeout: {
-        return error_action_hint::reconnect;
-      }
-      case client_errc::already_in_progress: {
-        return error_action_hint::retry_request;
-      }
-      case client_errc::not_connected: {
-        return error_action_hint::reconnect;
-      }
-      case client_errc::internal_error: {
-        return error_action_hint::bug;
-      }
-    }
-  }
-  return error_action_hint::none;
-}
-
-[[nodiscard]] inline auto is_transient(std::error_code ec) noexcept -> bool {
-  if (!ec) {
-    return false;
-  }
-  if (ec.category() == detail::client_category()) {
-    const auto e = static_cast<client_errc>(ec.value());
-    switch (e) {
-      case client_errc::resolve_timeout:
-      case client_errc::connect_timeout:
-      case client_errc::handshake_timeout:
-      case client_errc::write_error:
-      case client_errc::connection_reset:
-      case client_errc::connection_lost:
-      case client_errc::request_timeout: {
-        return true;
-      }
-      case client_errc::operation_aborted:
-      case client_errc::connection_closed:
-      case client_errc::resolve_failed:
-      case client_errc::connect_failed:
-      case client_errc::handshake_failed:
-      case client_errc::unsolicited_message:
-      case client_errc::not_connected:
-      case client_errc::already_in_progress:
-      case client_errc::internal_error: {
-        return false;
-      }
-    }
-  }
-  // Protocol errors are usually fatal to the current connection but transient across reconnect.
-  if (ec.category() == detail::protocol_category()) {
-    return true;
-  }
-  return false;
-}
-
-[[nodiscard]] inline auto is_reconnect_required(std::error_code ec) noexcept -> bool {
-  if (!ec) {
-    return false;
-  }
-  if (ec.category() == detail::protocol_category()) {
-    return true;
-  }
-  if (ec.category() == detail::client_category()) {
-    const auto e = static_cast<client_errc>(ec.value());
-    switch (e) {
-      case client_errc::connection_reset:
-      case client_errc::handshake_failed:
-      case client_errc::handshake_timeout:
-      case client_errc::write_error:
-      case client_errc::connection_lost:
-      case client_errc::unsolicited_message:
-      case client_errc::request_timeout: {
-        return true;
-      }
-      case client_errc::operation_aborted:
-      case client_errc::connection_closed:
-      case client_errc::resolve_failed:
-      case client_errc::resolve_timeout:
-      case client_errc::connect_failed:
-      case client_errc::connect_timeout:
-      case client_errc::not_connected:
-      case client_errc::already_in_progress:
-      case client_errc::internal_error: {
-        return false;
-      }
-    }
+    return true;  // protocol errors are recoverable via reconnect
   }
   return false;
 }
