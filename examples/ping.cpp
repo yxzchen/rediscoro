@@ -5,7 +5,9 @@
 #include <iostream>
 #include <string>
 
-auto ping_task(iocoro::any_io_executor ex) -> iocoro::awaitable<void> {
+auto ping_task() -> iocoro::awaitable<void> {
+  auto ex = co_await iocoro::this_coro::executor;
+
   rediscoro::config cfg{};
   cfg.host = "127.0.0.1";
   cfg.port = 6379;
@@ -31,7 +33,7 @@ auto ping_task(iocoro::any_io_executor ex) -> iocoro::awaitable<void> {
 
 int main() {
   iocoro::io_context ctx;
-  iocoro::co_spawn(ctx.get_executor(), ping_task(ctx.get_executor()), iocoro::detached);
+  iocoro::co_spawn(ctx.get_executor(), ping_task(), iocoro::detached);
   ctx.run();
   return 0;
 }
