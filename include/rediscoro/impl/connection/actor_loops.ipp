@@ -79,7 +79,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
       continue;
     }
 
-    if (state_ == connection_state::OPEN && cfg_.request_timeout > std::chrono::milliseconds{0}) {
+    if (state_ == connection_state::OPEN && cfg_.request_timeout.has_value()) {
       if (pipeline_.has_expired()) {
         handle_error(client_errc::request_timeout);
         continue;

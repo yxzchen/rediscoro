@@ -58,7 +58,7 @@ TEST(client_test, resolve_timeout_zero_is_reported) {
     work_guard_reset reset{guard};
 
     rediscoro::config cfg{};
-    // Deterministic: resolve_timeout <= 0 makes with_timeout immediately time out.
+    // Deterministic: resolve_timeout = 0ms makes with_timeout immediately time out.
     cfg.host = "qq.com";
     cfg.port = 80;
     cfg.resolve_timeout = 0ms;
@@ -102,8 +102,9 @@ TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
     rediscoro::config cfg{};
     cfg.host = "10.255.255.1";
     cfg.port = 6379;
-    cfg.resolve_timeout = 500ms;
     cfg.connect_timeout = 50ms;
+    cfg.resolve_timeout = 50ms;
+    cfg.request_timeout = 50ms;
     cfg.reconnection.enabled = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};

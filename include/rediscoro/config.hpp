@@ -3,6 +3,7 @@
 #include <rediscoro/tracing.hpp>
 
 #include <chrono>
+#include <optional>
 #include <string>
 
 namespace rediscoro {
@@ -52,16 +53,21 @@ struct config {
   std::string host = "localhost";
   int port = 6379;
 
-  // Timeouts
+  // Timeouts (optional - nullopt means no timeout)
   /// DNS/host resolution timeout (getaddrinfo on a background thread).
   ///
   /// Notes:
   /// - iocoro resolver does NOT support cancellation; a timed-out resolve may still finish
   ///   in the background (result will be ignored).
   /// - close()/cancel can wake connect() promptly, but cannot stop the underlying getaddrinfo.
-  std::chrono::milliseconds resolve_timeout{5000};
-  std::chrono::milliseconds connect_timeout{5000};
-  std::chrono::milliseconds request_timeout{5000};
+  std::optional<std::chrono::milliseconds> resolve_timeout{5000};
+
+  /// TCP connection timeout.
+  std::optional<std::chrono::milliseconds> connect_timeout{5000};
+
+  /// Request timeout (per-request deadline).
+  /// If nullopt, no timeout is applied (indefinite wait).
+  std::optional<std::chrono::milliseconds> request_timeout{5000};
 
   // Authentication & setup
   std::string username{};
