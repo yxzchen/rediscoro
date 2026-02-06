@@ -99,8 +99,7 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
 
     auto r = co_await socket_.async_write_some(buf);
     if (!r) {
-      // Socket IO error - treat as connection lost
-      handle_error(client_errc::connection_lost);
+      handle_error(client_errc::write_error);
       co_return;
     }
 

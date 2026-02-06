@@ -54,6 +54,9 @@ enum class client_errc {
   /// Connection lost due to runtime error (FAILED state).
   connection_lost,
 
+  /// Socket write error (distinguished from read errors for better diagnostics).
+  write_error,
+
   /// Internal error (bug / invariant violation).
   internal_error,
 };

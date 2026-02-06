@@ -38,6 +38,8 @@ class client_category_impl : public std::error_category {
         return "connection closed";
       case client_errc::connection_lost:
         return "connection lost";
+      case client_errc::write_error:
+        return "write error";
       case client_errc::internal_error:
         return "internal error";
     }
@@ -170,9 +172,9 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
 [[nodiscard]] inline auto is_retryable(std::error_code ec) noexcept -> bool {
   if (ec.category() == detail::client_category()) {
     const auto e = static_cast<client_errc>(ec.value());
-    if (e == client_errc::connection_lost || e == client_errc::connection_reset ||
-        e == client_errc::request_timeout || e == client_errc::handshake_failed ||
-        e == client_errc::unsolicited_message) {
+    if (e == client_errc::connection_lost || e == client_errc::write_error ||
+        e == client_errc::connection_reset || e == client_errc::request_timeout ||
+        e == client_errc::handshake_failed || e == client_errc::unsolicited_message) {
       return true;
     }
     return false;
@@ -206,6 +208,7 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::not_connected:
       case client_errc::connection_closed:
       case client_errc::connection_lost:
+      case client_errc::write_error:
       case client_errc::connection_reset:
       case client_errc::handshake_failed:
       case client_errc::handshake_timeout:
@@ -242,7 +245,8 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::handshake_timeout:
       case client_errc::request_timeout:
       case client_errc::connection_reset:
-      case client_errc::connection_lost: {
+      case client_errc::connection_lost:
+      case client_errc::write_error: {
         return true;
       }
       case client_errc::operation_aborted:
@@ -277,6 +281,7 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
     switch (e) {
       case client_errc::connection_reset:
       case client_errc::connection_lost:
+      case client_errc::write_error:
       case client_errc::handshake_failed:
       case client_errc::handshake_timeout:
       case client_errc::request_timeout:
