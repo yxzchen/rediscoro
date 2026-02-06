@@ -33,6 +33,24 @@ enum class client_errc {
   /// TCP connect timed out.
   connect_timeout,
 
+  /// Connection refused by peer (IOCoro: connection_refused).
+  connection_refused,
+
+  /// Connection timed out at OS level (IOCoro: connection_timed_out).
+  connection_timed_out,
+
+  /// Connection aborted by peer or OS (IOCoro: connection_aborted).
+  connection_aborted,
+
+  /// Network unreachable (IOCoro: network_unreachable).
+  network_unreachable,
+
+  /// Host unreachable (IOCoro: host_unreachable).
+  host_unreachable,
+
+  /// Address already in use (IOCoro: address_in_use).
+  address_in_use,
+
   /// Connection reset / peer closed.
   connection_reset,
 

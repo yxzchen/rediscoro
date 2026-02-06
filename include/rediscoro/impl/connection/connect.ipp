@@ -75,7 +75,8 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     } else if (connect_ec == iocoro::error::operation_aborted) {
       co_return unexpected(client_errc::operation_aborted);
     } else {
-      co_return unexpected(client_errc::connect_failed);
+      error_info out{client_errc::connect_failed, connect_ec.message()};
+      co_return unexpected(out);
     }
   }
 
@@ -125,6 +126,10 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   pipeline_.push(std::move(req), slot);
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
+  // Handshake timeout reuses request_timeout (0 means no timeout).
+  auto handshake_timeout = cfg_.request_timeout > std::chrono::milliseconds{0}
+                            ? cfg_.request_timeout
+                            : cfg_.connect_timeout;
   auto handshake_res = co_await iocoro::with_timeout(
     [&]() -> iocoro::awaitable<iocoro::result<void>> {
       // Phase-1: flush the full handshake request first.
@@ -190,7 +195,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
 
       co_return iocoro::ok();
     }(),
-    cfg_.connect_timeout);
+    handshake_timeout);
 
   if (!handshake_res) {
     auto fail_handshake = [&](error_info e) -> expected<void, error_info> {
@@ -220,16 +225,24 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   // Defensive: handshake_res == ok() implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
-    auto e = client_errc::handshake_failed;
+    error_info e{client_errc::handshake_failed, "handshake slot incomplete"};
     pipeline_.clear_all(e);
     co_return unexpected(e);
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i]) {
-      auto e = client_errc::handshake_failed;
-      pipeline_.clear_all(e);
-      co_return unexpected(e);
+      auto const& err = results[i].error();
+
+      // If server error (AUTH/SELECT failed), preserve the detailed error.
+      if (err.code.category() == server_category()) {
+        co_return unexpected(err);
+      }
+
+      // For other errors, use handshake_failed but include the original error detail.
+      error_info out{client_errc::handshake_failed, err.to_string()};
+      pipeline_.clear_all(out);
+      co_return unexpected(out);
     }
   }
 
