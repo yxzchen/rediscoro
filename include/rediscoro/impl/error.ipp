@@ -24,18 +24,6 @@ class client_category_impl : public std::error_category {
         return "connect failed";
       case client_errc::connect_timeout:
         return "connect timeout";
-      case client_errc::connection_refused:
-        return "connection refused";
-      case client_errc::connection_timed_out:
-        return "connection timed out";
-      case client_errc::connection_aborted:
-        return "connection aborted";
-      case client_errc::network_unreachable:
-        return "network unreachable";
-      case client_errc::host_unreachable:
-        return "host unreachable";
-      case client_errc::address_in_use:
-        return "address in use";
       case client_errc::connection_reset:
         return "connection reset";
       case client_errc::handshake_failed:
@@ -164,8 +152,7 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
   if (ec.category() == detail::client_category()) {
     const auto e = static_cast<client_errc>(ec.value());
     if (e == client_errc::resolve_timeout || e == client_errc::connect_timeout ||
-        e == client_errc::connection_timed_out || e == client_errc::handshake_timeout ||
-        e == client_errc::request_timeout) {
+        e == client_errc::handshake_timeout || e == client_errc::request_timeout) {
       return true;
     }
   }
@@ -185,14 +172,8 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
     const auto e = static_cast<client_errc>(ec.value());
     if (e == client_errc::connection_lost || e == client_errc::connection_reset ||
         e == client_errc::request_timeout || e == client_errc::handshake_failed ||
-        e == client_errc::unsolicited_message || e == client_errc::connection_timed_out ||
-        e == client_errc::network_unreachable || e == client_errc::host_unreachable) {
+        e == client_errc::unsolicited_message) {
       return true;
-    }
-    // connection_refused is usually a configuration issue, not retryable
-    if (e == client_errc::connection_refused || e == client_errc::connection_aborted ||
-        e == client_errc::address_in_use) {
-      return false;
     }
     return false;
   }
@@ -229,10 +210,7 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::handshake_failed:
       case client_errc::handshake_timeout:
       case client_errc::request_timeout:
-      case client_errc::unsolicited_message:
-      case client_errc::connection_timed_out:
-      case client_errc::network_unreachable:
-      case client_errc::host_unreachable: {
+      case client_errc::unsolicited_message: {
         return error_action_hint::reconnect;
       }
       case client_errc::already_in_progress: {
@@ -241,10 +219,7 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::resolve_failed:
       case client_errc::resolve_timeout:
       case client_errc::connect_failed:
-      case client_errc::connect_timeout:
-      case client_errc::connection_refused:
-      case client_errc::connection_aborted:
-      case client_errc::address_in_use: {
+      case client_errc::connect_timeout: {
         return error_action_hint::reconnect;
       }
       case client_errc::internal_error: {
@@ -264,13 +239,10 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
     switch (e) {
       case client_errc::resolve_timeout:
       case client_errc::connect_timeout:
-      case client_errc::connection_timed_out:
       case client_errc::handshake_timeout:
       case client_errc::request_timeout:
       case client_errc::connection_reset:
-      case client_errc::connection_lost:
-      case client_errc::network_unreachable:
-      case client_errc::host_unreachable: {
+      case client_errc::connection_lost: {
         return true;
       }
       case client_errc::operation_aborted:
@@ -278,9 +250,6 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::already_in_progress:
       case client_errc::resolve_failed:
       case client_errc::connect_failed:
-      case client_errc::connection_refused:
-      case client_errc::connection_aborted:
-      case client_errc::address_in_use:
       case client_errc::handshake_failed:
       case client_errc::unsolicited_message:
       case client_errc::connection_closed:
@@ -311,10 +280,7 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::handshake_failed:
       case client_errc::handshake_timeout:
       case client_errc::request_timeout:
-      case client_errc::unsolicited_message:
-      case client_errc::connection_timed_out:
-      case client_errc::network_unreachable:
-      case client_errc::host_unreachable: {
+      case client_errc::unsolicited_message: {
         return true;
       }
       case client_errc::operation_aborted:
@@ -324,9 +290,6 @@ inline auto make_error_code(adapter_errc e) -> std::error_code {
       case client_errc::resolve_timeout:
       case client_errc::connect_failed:
       case client_errc::connect_timeout:
-      case client_errc::connection_refused:
-      case client_errc::connection_aborted:
-      case client_errc::address_in_use:
       case client_errc::connection_closed:
       case client_errc::internal_error: {
         return false;
