@@ -31,8 +31,11 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   // - Cancellation is best-effort via stop_token. It cannot interrupt an in-flight getaddrinfo()
   //   but can prevent delivering results to the awaiting coroutine.
   iocoro::ip::tcp::resolver resolver{};
-  auto res = co_await iocoro::with_timeout(
-    resolver.async_resolve(cfg_.host, std::to_string(cfg_.port)), cfg_.resolve_timeout);
+  auto resolve_res = resolver.async_resolve(cfg_.host, std::to_string(cfg_.port));
+  if (cfg_.resolve_timeout.has_value()) {
+    resolve_res = iocoro::with_timeout(std::move(resolve_res), *cfg_.resolve_timeout);
+  }
+  auto res = co_await std::move(resolve_res);
   if (!res) {
     if (res.error() == iocoro::error::timed_out) {
       co_return unexpected(client_errc::resolve_timeout);
@@ -59,8 +62,11 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
       (void)socket_.close();
     }
 
-    auto connect_res =
-      co_await iocoro::with_timeout(socket_.async_connect(ep), cfg_.connect_timeout);
+    auto connect_op = socket_.async_connect(ep);
+    if (cfg_.connect_timeout.has_value()) {
+      connect_op = iocoro::with_timeout(std::move(connect_op), *cfg_.connect_timeout);
+    }
+    auto connect_res = co_await std::move(connect_op);
     if (connect_res) {
       connect_ec = {};
       break;
@@ -75,7 +81,8 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     } else if (connect_ec == iocoro::error::operation_aborted) {
       co_return unexpected(client_errc::operation_aborted);
     } else {
-      co_return unexpected(client_errc::connect_failed);
+      error_info out{client_errc::connect_failed, connect_ec.message()};
+      co_return unexpected(out);
     }
   }
 
@@ -125,72 +132,81 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   pipeline_.push(std::move(req), slot);
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
-  auto handshake_res = co_await iocoro::with_timeout(
-    [&]() -> iocoro::awaitable<iocoro::result<void>> {
-      // Phase-1: flush the full handshake request first.
-      // Handshake generates no additional writes after the initial request is fully sent.
-      while (!tok.stop_requested() && pipeline_.has_pending_write()) {
-        auto view = pipeline_.next_write_buffer();
-        auto buf = std::as_bytes(std::span{view.data(), view.size()});
-        auto w = co_await socket_.async_write_some(buf);
-        if (!w) {
-          if (w.error() == iocoro::error::operation_aborted) {
-            co_return iocoro::unexpected(client_errc::operation_aborted);
-          }
-          co_return iocoro::unexpected(client_errc::handshake_failed);
+  auto do_handshake = [&]() -> iocoro::awaitable<iocoro::result<void>> {
+    // Phase-1: flush the full handshake request first.
+    // Handshake generates no additional writes after the initial request is fully sent.
+    while (!tok.stop_requested() && pipeline_.has_pending_write()) {
+      auto view = pipeline_.next_write_buffer();
+      auto buf = std::as_bytes(std::span{view.data(), view.size()});
+      auto w = co_await socket_.async_write_some(buf);
+      if (!w) {
+        if (w.error() == iocoro::error::operation_aborted) {
+          co_return unexpected(client_errc::operation_aborted);
         }
-        pipeline_.on_write_done(*w);
+        co_return unexpected(client_errc::handshake_failed);
       }
+      pipeline_.on_write_done(*w);
+    }
 
-      // Phase-2: read/parse until the handshake sink completes.
-      while (!tok.stop_requested() && !slot->is_complete()) {
-        auto writable = parser_.prepare();
-        auto r = co_await socket_.async_read_some(writable);
-        if (!r) {
-          if (r.error() == iocoro::error::operation_aborted) {
-            co_return iocoro::unexpected(client_errc::operation_aborted);
-          }
-          co_return iocoro::unexpected(client_errc::handshake_failed);
+    // Phase-2: read/parse until the handshake sink completes.
+    while (!tok.stop_requested() && !slot->is_complete()) {
+      auto writable = parser_.prepare();
+      auto r = co_await socket_.async_read_some(writable);
+      if (!r) {
+        if (r.error() == iocoro::error::operation_aborted) {
+          co_return unexpected(client_errc::operation_aborted);
         }
-        if (*r == 0) {
-          co_return iocoro::unexpected(client_errc::connection_reset);
+        co_return unexpected(client_errc::handshake_failed);
+      }
+      if (*r == 0) {
+        co_return unexpected(client_errc::connection_reset);
+      }
+      parser_.commit(*r);
+
+      for (;;) {
+        auto parsed = parser_.parse_one();
+        if (!parsed) {
+          if (pipeline_.has_pending_read()) {
+            pipeline_.on_error(parsed.error());
+          }
+          co_return unexpected(parsed.error());
         }
-        parser_.commit(*r);
+        if (!parsed->has_value()) {
+          break;
+        }
 
-        for (;;) {
-          auto parsed = parser_.parse_one();
-          if (!parsed) {
-            if (pipeline_.has_pending_read()) {
-              pipeline_.on_error(parsed.error());
-            }
-            co_return iocoro::unexpected(parsed.error());
-          }
-          if (!parsed->has_value()) {
-            break;
-          }
+        if (!pipeline_.has_pending_read()) {
+          co_return unexpected(client_errc::unsolicited_message);
+        }
 
-          if (!pipeline_.has_pending_read()) {
-            co_return iocoro::unexpected(client_errc::unsolicited_message);
-          }
+        auto const root = **parsed;
+        auto msg = resp3::build_message(parser_.tree(), root);
+        pipeline_.on_message(std::move(msg));
+        parser_.reclaim();
 
-          auto const root = **parsed;
-          auto msg = resp3::build_message(parser_.tree(), root);
-          pipeline_.on_message(std::move(msg));
-          parser_.reclaim();
-
-          if (slot->is_complete()) {
-            break;
-          }
+        if (slot->is_complete()) {
+          break;
         }
       }
+    }
 
-      if (tok.stop_requested()) {
-        co_return iocoro::unexpected(client_errc::operation_aborted);
-      }
+    if (tok.stop_requested()) {
+      co_return unexpected(client_errc::operation_aborted);
+    }
 
-      co_return iocoro::ok();
-    }(),
-    cfg_.connect_timeout);
+    co_return iocoro::ok();
+  };
+
+  // Handshake timeout: prefer request_timeout if set, otherwise use connect_timeout.
+  // If both are nullopt, no timeout is applied.
+  iocoro::result<void> handshake_res;
+  if (cfg_.request_timeout.has_value()) {
+    handshake_res = co_await iocoro::with_timeout(do_handshake(), *cfg_.request_timeout);
+  } else if (cfg_.connect_timeout.has_value()) {
+    handshake_res = co_await iocoro::with_timeout(do_handshake(), *cfg_.connect_timeout);
+  } else {
+    handshake_res = co_await do_handshake();
+  }
 
   if (!handshake_res) {
     auto fail_handshake = [&](error_info e) -> expected<void, error_info> {
@@ -212,7 +228,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
       co_return fail_handshake(static_cast<client_errc>(ec.value()));
     }
 
-    co_return fail_handshake(client_errc::handshake_failed);
+    co_return fail_handshake({client_errc::handshake_failed, ec.message()});
   }
 
   // Validate all handshake replies: any error => handshake_failed.
@@ -220,16 +236,24 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   // Defensive: handshake_res == ok() implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
-    auto e = client_errc::handshake_failed;
+    error_info e{client_errc::handshake_failed, "handshake slot incomplete"};
     pipeline_.clear_all(e);
     co_return unexpected(e);
   }
   auto results = co_await slot->wait();
   for (std::size_t i = 0; i < results.size(); ++i) {
     if (!results[i]) {
-      auto e = client_errc::handshake_failed;
-      pipeline_.clear_all(e);
-      co_return unexpected(e);
+      auto const& err = results[i].error();
+
+      // If server error (AUTH/SELECT failed), preserve the detailed error.
+      if (err.code.category() == server_category()) {
+        co_return unexpected(err);
+      }
+
+      // For other errors, use handshake_failed but include the original error detail.
+      error_info out{client_errc::handshake_failed, err.to_string()};
+      pipeline_.clear_all(out);
+      co_return unexpected(out);
     }
   }
 

@@ -224,8 +224,8 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
   }
 
   pipeline::time_point deadline = pipeline::time_point::max();
-  if (cfg_.request_timeout > std::chrono::milliseconds{0}) {
-    deadline = pipeline::clock::now() + cfg_.request_timeout;
+  if (cfg_.request_timeout.has_value()) {
+    deadline = pipeline::clock::now() + *cfg_.request_timeout;
   }
   pipeline_.push(std::move(req), std::move(sink), deadline);
   write_wakeup_.notify();

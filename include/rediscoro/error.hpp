@@ -15,11 +15,8 @@ enum class client_errc {
   /// Operation cancelled by user (close() was called).
   operation_aborted = 1,
 
-  /// Connection not established yet (INIT or CONNECTING state).
-  not_connected,
-
-  /// Operation already in progress.
-  already_in_progress,
+  /// Connection is closed (CLOSING or CLOSED state).
+  connection_closed,
 
   /// DNS resolution failed.
   resolve_failed,
@@ -42,17 +39,23 @@ enum class client_errc {
   /// Handshake timed out.
   handshake_timeout,
 
+  /// Socket write error.
+  write_error,
+
+  /// Connection lost due to runtime error (FAILED state).
+  connection_lost,
+
   /// Server sent an unsolicited message (e.g. PUSH) or unexpected message arrived.
   unsolicited_message,
 
   /// Request timed out (connection-level policy; may trigger reconnect).
   request_timeout,
 
-  /// Connection is closed (CLOSING or CLOSED state).
-  connection_closed,
+  /// Connection not established yet (INIT or CONNECTING state).
+  not_connected,
 
-  /// Connection lost due to runtime error (FAILED state).
-  connection_lost,
+  /// Operation already in progress.
+  already_in_progress,
 
   /// Internal error (bug / invariant violation).
   internal_error,
@@ -114,26 +117,11 @@ auto make_error_code(protocol_errc e) -> std::error_code;
 auto make_error_code(server_errc e) -> std::error_code;
 auto make_error_code(adapter_errc e) -> std::error_code;
 
-[[nodiscard]] auto is_timeout(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_client_error(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_protocol_error(std::error_code ec) noexcept -> bool;
+
+[[nodiscard]] auto is_timeout(std::error_code ec) noexcept -> bool;
 [[nodiscard]] auto is_retryable(std::error_code ec) noexcept -> bool;
-
-enum class error_action_hint {
-  none = 0,
-  /// Retry the request without reconnect (rare).
-  retry_request,
-  /// Reconnect the connection (and then retry at a higher level if desired).
-  reconnect,
-  /// Fix request / input / expected type mismatch.
-  fix_input,
-  /// Indicates a bug or invariant violation (should be reported).
-  bug,
-};
-
-[[nodiscard]] auto action_hint(std::error_code ec) noexcept -> error_action_hint;
-[[nodiscard]] auto is_transient(std::error_code ec) noexcept -> bool;
-[[nodiscard]] auto is_reconnect_required(std::error_code ec) noexcept -> bool;
 
 }  // namespace rediscoro
 
