@@ -75,15 +75,15 @@ See [`examples/`](examples/) for a buildable example.
 ## Build & test
 
 ```bash
-./build.sh -t
+./scripts/build.sh -t
 ```
 
 Sanitizers (Debug):
 
 ```bash
-./build.sh -t --asan
-./build.sh -t --ubsan
-./build.sh -t --tsan
+./scripts/build.sh -t --asan
+./scripts/build.sh -t --ubsan
+./scripts/build.sh -t --tsan
 ```
 
 ## Install and use with CMake (`find_package`)
