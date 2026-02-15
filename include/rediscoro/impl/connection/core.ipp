@@ -62,7 +62,7 @@ inline auto connection::run_actor() -> void {
         self->actor_running_ = false;
         if (!r) {
           // No-exception policy: record a best-effort diagnostic and proceed with deterministic cleanup.
-          self->last_error_ = client_errc::connection_lost;
+          self->set_last_error(client_errc::connection_lost);
         }
         if (self->state_ != connection_state::CLOSED) {
           self->transition_to_closed();
@@ -86,7 +86,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
   if (state_ == connection_state::CLOSED) {
     // Retry support: reset lifecycle state.
     state_ = connection_state::INIT;
-    last_error_.reset();
+    clear_last_error();
     reconnect_count_ = 0;
     stop_.reset();
   }

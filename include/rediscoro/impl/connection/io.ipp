@@ -136,9 +136,10 @@ inline auto connection::handle_error(error_info ec) -> void {
 
   // OPEN runtime error -> FAILED.
   // Record error for diagnostics (user cannot obtain it directly).
-  last_error_ = ec;
+  auto const err = ec;
+  set_last_error(std::move(ec));
   state_ = connection_state::FAILED;
-  pipeline_.clear_all(ec);
+  pipeline_.clear_all(err);
   if (socket_.is_open()) {
     (void)socket_.close();
   }

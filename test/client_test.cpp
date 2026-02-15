@@ -6,7 +6,10 @@
 #include <iocoro/iocoro.hpp>
 
 #include <chrono>
+#include <atomic>
 #include <string>
+#include <thread>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -232,4 +235,66 @@ TEST(client_test, ping_set_get_roundtrip) {
     GTEST_SKIP() << skip_reason;
   }
   ASSERT_TRUE(ok) << diag;
+}
+
+TEST(client_test, concurrent_exec_submission_and_snapshot_reads_are_thread_safe) {
+  iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
+
+  rediscoro::config cfg{};
+  cfg.host = "127.0.0.1";
+  cfg.port = 6379;
+  cfg.reconnection.enabled = false;
+
+  rediscoro::client c{ctx.get_executor(), cfg};
+
+  constexpr int kSubmitThreads = 4;
+  constexpr int kRequestsPerThread = 100;
+  constexpr int kTotal = kSubmitThreads * kRequestsPerThread;
+
+  std::atomic<int> completed{0};
+  std::atomic<int> rejected{0};
+
+  std::thread runner([&] { (void)ctx.run(); });
+
+  std::vector<std::thread> producers;
+  producers.reserve(kSubmitThreads);
+  for (int t = 0; t < kSubmitThreads; ++t) {
+    producers.emplace_back([&, t] {
+      for (int i = 0; i < kRequestsPerThread; ++i) {
+        iocoro::co_spawn(
+          ctx.get_executor(),
+          [&]() -> iocoro::awaitable<void> {
+            auto resp = co_await c.exec<std::string>("PING");
+            auto& slot = resp.get<0>();
+            if (!slot && slot.error().code == rediscoro::client_errc::not_connected) {
+              rejected.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            const auto done = completed.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (done == kTotal) {
+              guard.reset();
+            }
+            co_return;
+          }(),
+          iocoro::detached);
+
+        // Snapshot diagnostics are safe from any thread.
+        (void)c.state();
+        (void)c.is_connected();
+        (void)c.last_error();
+      }
+    });
+  }
+
+  for (auto& th : producers) {
+    th.join();
+  }
+  runner.join();
+
+  ASSERT_EQ(completed.load(std::memory_order_relaxed), kTotal);
+  ASSERT_EQ(rejected.load(std::memory_order_relaxed), kTotal);
+  ASSERT_EQ(c.state(), rediscoro::detail::connection_state::INIT);
+  ASSERT_FALSE(c.is_connected());
+  ASSERT_FALSE(c.last_error().has_value());
 }
