@@ -200,7 +200,8 @@ inline auto parser::parse_value() -> expected<std::optional<step_index>, redisco
       return unexpected(started.error());
     }
     if (started->state == step::produced) {
-      return std::optional<step_index>{step_index{.state = step::produced, .index = started->index}};
+      return std::optional<step_index>{
+        step_index{.state = step::produced, .index = started->index}};
     }
     return std::optional<step_index>{step_index{.state = step::continue_parsing}};
   }
