@@ -77,7 +77,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libgtest-dev
+          sudo apt-get install -y cmake ninja-build pkg-config libgtest-dev redis-server
           if [ "${{ matrix.toolchain }}" = "clang" ]; then
             sudo apt-get install -y clang
           else
@@ -95,6 +95,13 @@ jobs:
             sudo cmake --build build -j
             sudo cmake --install build
           fi
+
+      - name: Start local Redis
+        run: |
+          if ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+            sudo redis-server --daemonize yes --bind 127.0.0.1 --port 6379 --save "" --appendonly no
+          fi
+          redis-cli -h 127.0.0.1 -p 6379 ping
 
       - name: Build and run tests
         env:
@@ -121,7 +128,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config g++
+          sudo apt-get install -y cmake ninja-build pkg-config g++ redis-server
+
+      - name: Start local Redis
+        run: |
+          if ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+            sudo redis-server --daemonize yes --bind 127.0.0.1 --port 6379 --save "" --appendonly no
+          fi
+          redis-cli -h 127.0.0.1 -p 6379 ping
 
       - name: Build and install
         run: |
@@ -186,7 +200,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config g++ libgtest-dev gcovr python3
+          sudo apt-get install -y cmake ninja-build pkg-config g++ libgtest-dev gcovr python3 redis-server
 
           if [ -d /usr/src/gtest ]; then
             cd /usr/src/gtest
@@ -199,6 +213,13 @@ jobs:
             sudo cmake --build build -j
             sudo cmake --install build
           fi
+
+      - name: Start local Redis
+        run: |
+          if ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+            sudo redis-server --daemonize yes --bind 127.0.0.1 --port 6379 --save "" --appendonly no
+          fi
+          redis-cli -h 127.0.0.1 -p 6379 ping
 
       - name: Build, test, and collect coverage
         run: |

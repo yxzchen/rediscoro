@@ -13,6 +13,22 @@
 
 using namespace std::chrono_literals;
 
+namespace {
+
+auto submit_ping_expect_not_connected(rediscoro::client* client_ptr,
+                                      std::atomic<int>* completed_ptr,
+                                      std::atomic<int>* rejected_ptr) -> iocoro::awaitable<void> {
+  auto resp = co_await client_ptr->exec<std::string>("PING");
+  auto& slot = resp.get<0>();
+  if (!slot && slot.error().code == rediscoro::client_errc::not_connected) {
+    rejected_ptr->fetch_add(1, std::memory_order_relaxed);
+  }
+  completed_ptr->fetch_add(1, std::memory_order_relaxed);
+  co_return;
+}
+
+}  // namespace
+
 TEST(client_test, exec_without_connect_is_rejected) {
   iocoro::io_context ctx;
 
@@ -318,24 +334,18 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
   std::vector<std::thread> producers;
   producers.reserve(kSubmitThreads);
   for (int t = 0; t < kSubmitThreads; ++t) {
-    producers.emplace_back([&, t] {
+    (void)t;
+    producers.emplace_back([&] {
+      auto ex = ctx.get_executor();
+      auto* client_ptr = &c;
+      auto* completed_ptr = &completed;
+      auto* rejected_ptr = &rejected;
       for (int i = 0; i < kRequestsPerThread; ++i) {
-        iocoro::co_spawn(
-          ctx.get_executor(),
-          [&]() -> iocoro::awaitable<void> {
-            auto resp = co_await c.exec<std::string>("PING");
-            auto& slot = resp.get<0>();
-            if (!slot && slot.error().code == rediscoro::client_errc::not_connected) {
-              rejected.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            const auto done = completed.fetch_add(1, std::memory_order_relaxed) + 1;
-            if (done == kTotal) {
-              guard.reset();
-            }
-            co_return;
-          }(),
-          iocoro::detached);
+        ex.post([ex, client_ptr, completed_ptr, rejected_ptr]() mutable {
+          iocoro::co_spawn(
+            ex, submit_ping_expect_not_connected(client_ptr, completed_ptr, rejected_ptr),
+            iocoro::detached);
+        });
 
         (void)c.is_connected();
       }
@@ -345,6 +355,13 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
   for (auto& th : producers) {
     th.join();
   }
+
+  const auto deadline = std::chrono::steady_clock::now() + 3s;
+  while (completed.load(std::memory_order_relaxed) < kTotal &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  guard.reset();
   runner.join();
 
   ASSERT_EQ(completed.load(std::memory_order_relaxed), kTotal);

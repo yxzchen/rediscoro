@@ -160,15 +160,6 @@ TEST(client_trace_test, user_request_trace_start_finish_success) {
 }
 
 TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
-  fake_server server({
-    {
-      fake_server::action::read(),
-      fake_server::action::write("+OK\r\n"),
-      fake_server::action::read(),
-      fake_server::action::write("-ERR simulated-failure\r\n"),
-    },
-  });
-
   iocoro::io_context ctx;
   auto guard = iocoro::make_work_guard(ctx);
 
@@ -183,7 +174,7 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
     };
     work_guard_reset reset{guard};
 
-    auto cfg = make_cfg(server.port(), &recorder);
+    auto cfg = make_cfg(6379, &recorder);
     cfg.trace_handshake = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};
@@ -193,7 +184,7 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
       co_return;
     }
 
-    auto resp = co_await c.exec<std::string>("PING");
+    auto resp = co_await c.exec<std::string>("THIS_COMMAND_DOES_NOT_EXIST_REDISCORO");
     auto& slot = resp.get<0>();
     if (slot.has_value()) {
       diag = "expected server error";
@@ -219,8 +210,8 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
       diag = "primary_error mismatch";
       co_return;
     }
-    if (finishes[0].primary_error_detail.find("simulated-failure") == std::string::npos) {
-      diag = "primary_error_detail missing server detail";
+    if (finishes[0].primary_error_detail.empty()) {
+      diag = "primary_error_detail should not be empty";
       co_return;
     }
 
@@ -231,7 +222,6 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
   iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
   ctx.run();
 
-  ASSERT_TRUE(server.failure_message().empty()) << server.failure_message();
   ASSERT_TRUE(ok) << diag;
 }
 

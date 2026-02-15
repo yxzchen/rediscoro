@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -319,15 +320,6 @@ TEST(client_lifecycle_test, runtime_disconnect_triggers_reconnect_then_connected
 }
 
 TEST(client_lifecycle_test, runtime_disconnect_with_reconnect_disabled_ends_in_closed) {
-  fake_server server({
-    {
-      fake_server::action::read(),
-      fake_server::action::write("+OK\r\n"),
-      fake_server::action::read(),
-      fake_server::action::close_client(),
-    },
-  });
-
   iocoro::io_context ctx;
   auto guard = iocoro::make_work_guard(ctx);
 
@@ -342,25 +334,62 @@ TEST(client_lifecycle_test, runtime_disconnect_with_reconnect_disabled_ends_in_c
     };
     work_guard_reset reset{guard};
 
-    auto cfg = make_cfg(server.port(), &recorder);
+    auto cfg = make_cfg(6379, &recorder);
     cfg.reconnection.enabled = false;
 
-    rediscoro::client c{ctx.get_executor(), cfg};
-    auto cr = co_await c.connect();
+    rediscoro::client victim{ctx.get_executor(), cfg};
+    auto cr = co_await victim.connect();
     if (!cr) {
       diag = "connect failed: " + cr.error().to_string();
       co_return;
     }
 
-    auto first = co_await c.exec<std::string>("PING");
-    if (first.get<0>().has_value()) {
-      diag = "expected first PING to fail due to injected disconnect";
+    auto id_resp = co_await victim.exec<std::int64_t>("CLIENT", "ID");
+    auto& id_slot = id_resp.get<0>();
+    if (!id_slot) {
+      diag = "CLIENT ID failed: " + id_slot.error().to_string();
+      co_return;
+    }
+    const std::int64_t victim_id = *id_slot;
+
+    rediscoro::config admin_cfg = cfg;
+    admin_cfg.connection_hooks = {};
+    rediscoro::client admin{ctx.get_executor(), admin_cfg};
+    auto acr = co_await admin.connect();
+    if (!acr) {
+      diag = "admin connect failed: " + acr.error().to_string();
+      co_return;
+    }
+
+    auto kill_resp = co_await admin.exec<std::int64_t>("CLIENT", "KILL", "ID", victim_id);
+    auto& kill_slot = kill_resp.get<0>();
+    if (!kill_slot) {
+      diag = "CLIENT KILL failed: " + kill_slot.error().to_string();
+      co_return;
+    }
+    if (*kill_slot < 1) {
+      diag = "CLIENT KILL did not close victim connection";
+      co_return;
+    }
+    co_await admin.close();
+
+    bool first_failed = false;
+    for (int i = 0; i < 3; ++i) {
+      auto first = co_await victim.exec<std::string>("PING");
+      if (!first.get<0>().has_value()) {
+        first_failed = true;
+        break;
+      }
+      co_await iocoro::co_sleep(50ms);
+    }
+    if (!first_failed) {
+      diag = "expected PING to fail after CLIENT KILL";
       co_return;
     }
 
     co_await iocoro::co_sleep(60ms);
 
-    auto second = co_await c.exec<std::string>("PING");
+    auto second = co_await victim.exec<std::string>("PING");
     if (second.get<0>().has_value()) {
       diag = "expected second PING to fail with reconnect disabled";
       co_return;
@@ -376,8 +405,6 @@ TEST(client_lifecycle_test, runtime_disconnect_with_reconnect_disabled_ends_in_c
       co_return;
     }
 
-    co_await c.close();
-
     ok = true;
     co_return;
   };
@@ -385,7 +412,6 @@ TEST(client_lifecycle_test, runtime_disconnect_with_reconnect_disabled_ends_in_c
   iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
   ctx.run();
 
-  ASSERT_TRUE(server.failure_message().empty()) << server.failure_message();
   ASSERT_TRUE(ok) << diag;
 }
 
