@@ -18,14 +18,34 @@
 #include <iocoro/ip/tcp.hpp>
 
 #include <chrono>
+#include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace rediscoro::detail {
+
+class atomic_connection_state {
+ public:
+  explicit atomic_connection_state(connection_state initial = connection_state::INIT) noexcept
+      : value_(initial) {}
+
+  auto operator=(connection_state next) noexcept -> atomic_connection_state& {
+    value_.store(next, std::memory_order_release);
+    return *this;
+  }
+
+  [[nodiscard]] operator connection_state() const noexcept {
+    return value_.load(std::memory_order_acquire);
+  }
+
+ private:
+  std::atomic<connection_state> value_{connection_state::INIT};
+};
 
 /// Core Redis connection actor.
 ///
@@ -113,6 +133,7 @@ class connection : public std::enable_shared_from_this<connection> {
   ///   are recorded and drive `OPEN -> FAILED`.
   /// - Reconnection attempt failures are also recorded (user cannot observe them otherwise).
   [[nodiscard]] auto last_error() const noexcept -> std::optional<error_info> {
+    std::scoped_lock lk{last_error_mtx_};
     return last_error_;
   }
 
@@ -220,6 +241,16 @@ class connection : public std::enable_shared_from_this<connection> {
   /// Transition to CLOSED state and cleanup.
   auto transition_to_closed() -> void;
 
+  auto set_last_error(error_info err) -> void {
+    std::scoped_lock lk{last_error_mtx_};
+    last_error_ = std::move(err);
+  }
+
+  auto clear_last_error() -> void {
+    std::scoped_lock lk{last_error_mtx_};
+    last_error_.reset();
+  }
+
  private:
   // Configuration
   config cfg_;
@@ -231,9 +262,11 @@ class connection : public std::enable_shared_from_this<connection> {
   iocoro::ip::tcp::socket socket_;
 
   // State machine
-  connection_state state_{connection_state::INIT};
-
+  atomic_connection_state state_{connection_state::INIT};
   std::optional<error_info> last_error_{};
+
+  // Protects last_error_ for cross-thread diagnostics.
+  mutable std::mutex last_error_mtx_{};
 
   // Request/response pipeline
   pipeline pipeline_;

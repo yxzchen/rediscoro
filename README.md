@@ -106,4 +106,3 @@ target_link_libraries(your_target PRIVATE rediscoro::rediscoro)
 ## License
 
 MIT License. See [`LICENSE`](LICENSE).
-
