@@ -87,9 +87,6 @@ class client {
     return conn_->state() == detail::connection_state::OPEN;
   }
 
-  /// Get current connection state (for diagnostics).
-  [[nodiscard]] auto state() const noexcept -> detail::connection_state { return conn_->state(); }
-
  private:
   std::shared_ptr<detail::connection> conn_;
 };

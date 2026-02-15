@@ -337,8 +337,6 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
           }(),
           iocoro::detached);
 
-        // Snapshot diagnostics are safe from any thread.
-        (void)c.state();
         (void)c.is_connected();
       }
     });
@@ -351,6 +349,5 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
 
   ASSERT_EQ(completed.load(std::memory_order_relaxed), kTotal);
   ASSERT_EQ(rejected.load(std::memory_order_relaxed), kTotal);
-  ASSERT_EQ(c.state(), rediscoro::detail::connection_state::INIT);
   ASSERT_FALSE(c.is_connected());
 }

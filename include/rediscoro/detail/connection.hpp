@@ -27,24 +27,6 @@
 
 namespace rediscoro::detail {
 
-class atomic_connection_state {
- public:
-  explicit atomic_connection_state(connection_state initial = connection_state::INIT) noexcept
-      : value_(initial) {}
-
-  auto operator=(connection_state next) noexcept -> atomic_connection_state& {
-    value_.store(next, std::memory_order_release);
-    return *this;
-  }
-
-  [[nodiscard]] operator connection_state() const noexcept {
-    return value_.load(std::memory_order_acquire);
-  }
-
- private:
-  std::atomic<connection_state> value_{connection_state::INIT};
-};
-
 /// Core Redis connection actor.
 ///
 /// High-level model:
@@ -241,7 +223,7 @@ class connection : public std::enable_shared_from_this<connection> {
   iocoro::ip::tcp::socket socket_;
 
   // State machine
-  atomic_connection_state state_{connection_state::INIT};
+  connection_state state_{connection_state::INIT};
   std::uint64_t generation_{0};  // Increments on each successful OPEN transition.
 
   // Request/response pipeline
