@@ -7,6 +7,8 @@ include(CMakePackageConfigHelpers)
 option(REDISCORO_BUILD_TESTS "Build tests" OFF)
 option(REDISCORO_ENABLE_WARNINGS "Enable warning flags for rediscoro tests/examples" ${PROJECT_IS_TOP_LEVEL})
 option(REDISCORO_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(REDISCORO_ENABLE_COVERAGE "Enable gcov-compatible coverage instrumentation" OFF)
+option(REDISCORO_ENABLE_CLANG_TIDY "Enable clang-tidy during compilation" OFF)
 option(REDISCORO_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
 
 add_library(rediscoro INTERFACE)
@@ -28,6 +30,9 @@ if(REDISCORO_ENABLE_WARNINGS)
 endif()
 
 if(REDISCORO_ENABLE_ASAN)
+    if(REDISCORO_ENABLE_COVERAGE)
+        message(FATAL_ERROR "REDISCORO_ENABLE_ASAN and REDISCORO_ENABLE_COVERAGE cannot be enabled together")
+    endif()
     target_compile_options(rediscoro INTERFACE
         -g
         -fno-omit-frame-pointer
@@ -37,6 +42,31 @@ if(REDISCORO_ENABLE_ASAN)
         -fsanitize=address
     )
     message(STATUS "rediscoro: AddressSanitizer is ENABLED")
+endif()
+
+if(REDISCORO_ENABLE_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(rediscoro INTERFACE
+            -O0
+            -g
+            --coverage
+        )
+        target_link_options(rediscoro INTERFACE
+            --coverage
+        )
+        message(STATUS "rediscoro: Coverage instrumentation is ENABLED")
+    else()
+        message(FATAL_ERROR "REDISCORO_ENABLE_COVERAGE requires GCC/Clang-compatible compiler")
+    endif()
+endif()
+
+if(REDISCORO_ENABLE_CLANG_TIDY)
+    find_program(REDISCORO_CLANG_TIDY_EXE NAMES clang-tidy clang-tidy-18 clang-tidy-17)
+    if(NOT REDISCORO_CLANG_TIDY_EXE)
+        message(FATAL_ERROR "REDISCORO_ENABLE_CLANG_TIDY=ON but clang-tidy was not found")
+    endif()
+    set(CMAKE_CXX_CLANG_TIDY "${REDISCORO_CLANG_TIDY_EXE};--use-color;--quiet")
+    message(STATUS "rediscoro: clang-tidy is ENABLED (${REDISCORO_CLANG_TIDY_EXE})")
 endif()
 
 include(FetchContent)
@@ -85,7 +115,7 @@ configure_package_config_file(
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/rediscoroConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
-    COMPATIBILITY SameMajorVersion
+    COMPATIBILITY ExactVersion
 )
 
 install(FILES
