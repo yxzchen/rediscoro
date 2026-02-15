@@ -28,7 +28,7 @@ struct path_field {
 
 using path_element = std::variant<path_index, path_key, path_field>;
 
-struct error {
+struct error {  // NOLINT(clang-analyzer-core.uninitialized.Assign)
   rediscoro::adapter_errc kind{};
   resp3::kind actual_type{};
   std::vector<resp3::kind> expected_types{};  // empty means "unknown / not applicable"

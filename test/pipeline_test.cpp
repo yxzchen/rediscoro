@@ -7,8 +7,10 @@
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/message.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
+#include <thread>
 
 namespace {
 
@@ -100,6 +102,59 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   p.clear_all(rediscoro::client_errc::connection_closed);
   EXPECT_TRUE(sink->is_complete());
   EXPECT_EQ(sink->err_count(), 2u);
+  EXPECT_FALSE(p.has_pending_write());
+  EXPECT_FALSE(p.has_pending_read());
+}
+
+TEST(pipeline_test, deadline_order_and_expiration) {
+  rediscoro::detail::pipeline p;
+  auto s1 = std::make_shared<counting_sink>(1);
+  auto s2 = std::make_shared<counting_sink>(1);
+
+  rediscoro::request req1{"PING"};
+  rediscoro::request req2{"PING"};
+
+  const auto d1 = rediscoro::detail::pipeline::clock::now() + std::chrono::milliseconds(200);
+  const auto d2 = rediscoro::detail::pipeline::clock::now() + std::chrono::milliseconds(20);
+
+  // FIFO write queue semantics: next_deadline() is based on the queue front.
+  p.push(req1, s1, d1);
+  p.push(req2, s2, d2);
+  EXPECT_EQ(p.next_deadline(), d1);
+
+  // After req1 is fully written, req2 is now the pending-write front.
+  p.on_write_done(req1.wire().size());
+  EXPECT_EQ(p.next_deadline(), d2);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  EXPECT_TRUE(p.has_expired());
+}
+
+TEST(pipeline_test, clear_all_mixed_pending_and_awaiting) {
+  rediscoro::detail::pipeline p;
+
+  rediscoro::request req1{"PING"};
+  rediscoro::request req2;
+  req2.push("PING");
+  req2.push("PING");
+
+  auto s1 = std::make_shared<counting_sink>(1);
+  auto s2 = std::make_shared<counting_sink>(2);
+
+  p.push(req1, s1);
+  p.push(req2, s2);
+
+  // Move req1 to awaiting_read; req2 remains pending_write.
+  p.on_write_done(req1.wire().size());
+  ASSERT_TRUE(p.has_pending_read());
+  ASSERT_TRUE(p.has_pending_write());
+
+  p.clear_all(rediscoro::client_errc::connection_closed);
+
+  EXPECT_TRUE(s1->is_complete());
+  EXPECT_TRUE(s2->is_complete());
+  EXPECT_EQ(s1->err_count(), 1u);
+  EXPECT_EQ(s2->err_count(), 2u);
   EXPECT_FALSE(p.has_pending_write());
   EXPECT_FALSE(p.has_pending_read());
 }
