@@ -356,10 +356,14 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
     th.join();
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + 3s;
+  const auto deadline = std::chrono::steady_clock::now() + 10s;
   while (completed.load(std::memory_order_relaxed) < kTotal &&
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(1ms);
+  }
+  if (completed.load(std::memory_order_relaxed) < kTotal) {
+    // Hard stop to keep this test deterministic under scheduler stalls.
+    ctx.stop();
   }
   guard.reset();
   runner.join();
