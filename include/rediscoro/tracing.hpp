@@ -1,6 +1,5 @@
 #pragma once
 
-#include <rediscoro/detail/connection_state.hpp>
 #include <rediscoro/error_info.hpp>
 
 #include <chrono>
@@ -71,7 +70,6 @@ enum class connection_event_kind : std::uint8_t {
 /// Connection event payload.
 struct connection_event {
   connection_event_kind kind{connection_event_kind::connected};
-  detail::connection_state state{detail::connection_state::INIT};
 
   // Monotonic successful-connect generation counter (increments on each OPEN transition).
   std::uint64_t generation{0};

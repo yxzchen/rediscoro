@@ -240,7 +240,6 @@ inline auto connection::emit_connection_event(connection_event evt) noexcept -> 
   }
 
   evt.generation = generation_;
-  evt.state = state_;
   evt.reconnect_count = reconnect_count_;
 
   try {
