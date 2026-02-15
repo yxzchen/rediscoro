@@ -237,7 +237,65 @@ TEST(client_test, ping_set_get_roundtrip) {
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_test, concurrent_exec_submission_and_snapshot_reads_are_thread_safe) {
+TEST(client_test, initial_connect_failure_emits_disconnected_event) {
+  iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
+
+  struct event_probe {
+    std::atomic<int> total_count{0};
+    std::atomic<int> disconnected_count{0};
+    static void on_event(void* user_data, rediscoro::connection_event const& ev) {
+      auto* self = static_cast<event_probe*>(user_data);
+      self->total_count.fetch_add(1, std::memory_order_relaxed);
+      if (ev.kind == rediscoro::connection_event_kind::disconnected) {
+        self->disconnected_count.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+  };
+
+  event_probe probe{};
+
+  bool ok = false;
+  std::string diag{};
+
+  auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
+    rediscoro::config cfg{};
+    cfg.host = "qq.com";
+    cfg.port = 80;
+    cfg.resolve_timeout = 0ms;
+    cfg.reconnection.enabled = true;
+    cfg.connection_hooks = {
+      .user_data = &probe,
+      .on_event = &event_probe::on_event,
+    };
+
+    rediscoro::client c{ctx.get_executor(), cfg};
+    auto r = co_await c.connect();
+    if (r.has_value()) {
+      diag = "expected connect failure";
+      co_return;
+    }
+    if (probe.disconnected_count.load(std::memory_order_relaxed) <= 0) {
+      diag = "expected disconnected event on initial connect failure";
+      co_return;
+    }
+    ok = true;
+    co_return;
+  };
+
+  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+  ctx.run();
+
+  ASSERT_TRUE(ok) << diag;
+}
+
+TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
   iocoro::io_context ctx;
   auto guard = iocoro::make_work_guard(ctx);
 
@@ -282,7 +340,6 @@ TEST(client_test, concurrent_exec_submission_and_snapshot_reads_are_thread_safe)
         // Snapshot diagnostics are safe from any thread.
         (void)c.state();
         (void)c.is_connected();
-        (void)c.last_error();
       }
     });
   }
@@ -296,5 +353,4 @@ TEST(client_test, concurrent_exec_submission_and_snapshot_reads_are_thread_safe)
   ASSERT_EQ(rejected.load(std::memory_order_relaxed), kTotal);
   ASSERT_EQ(c.state(), rediscoro::detail::connection_state::INIT);
   ASSERT_FALSE(c.is_connected());
-  ASSERT_FALSE(c.last_error().has_value());
 }

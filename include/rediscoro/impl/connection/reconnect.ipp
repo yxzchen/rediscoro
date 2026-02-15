@@ -77,10 +77,13 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     auto reconnect_res = co_await do_connect();
     if (!reconnect_res) {
       // Failed attempt: transition back to FAILED and schedule next delay.
-      // Store the reconnection error for diagnostics (user cannot obtain it directly).
       state_ = connection_state::FAILED;
-      set_last_error(reconnect_res.error());
       reconnect_count_ += 1;
+      auto const err = reconnect_res.error();
+      emit_connection_event(connection_event{
+        .kind = connection_event_kind::disconnected,
+        .error = err,
+      });
       continue;
     }
 
@@ -88,7 +91,6 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     REDISCORO_ASSERT(state_ == connection_state::OPEN);
 
     reconnect_count_ = 0;
-    clear_last_error();  // Clear error on successful reconnect
     read_wakeup_.notify();
     write_wakeup_.notify();
     control_wakeup_.notify();

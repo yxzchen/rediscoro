@@ -21,8 +21,6 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -125,18 +123,6 @@ class connection : public std::enable_shared_from_this<connection> {
   /// Get current connection state (for diagnostics).
   [[nodiscard]] auto state() const noexcept -> connection_state { return state_; }
 
-  /// Get the last runtime connection error (for diagnostics only).
-  ///
-  /// Semantics (aligned with the implementation):
-  /// - Initial `connect()` failures are returned directly and are not recorded here.
-  /// - Runtime errors after `OPEN` (including request timeout / RESP3 parse error / peer close)
-  ///   are recorded and drive `OPEN -> FAILED`.
-  /// - Reconnection attempt failures are also recorded (user cannot observe them otherwise).
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<error_info> {
-    std::scoped_lock lk{last_error_mtx_};
-    return last_error_;
-  }
-
  private:
   /// Start the background connection actor (internal use only).
   ///
@@ -218,7 +204,8 @@ class connection : public std::enable_shared_from_this<connection> {
   ///
   /// Behavior (runtime-only):
   /// - Idempotent guard: ignores errors while already `FAILED`/`RECONNECTING`/`CLOSING`/`CLOSED`.
-  /// - Transitions `OPEN -> FAILED`, records `last_error_`, clears the pipeline, and closes socket.
+  /// - Transitions `OPEN -> FAILED`, emits a disconnected event, clears the pipeline, and closes
+  ///   socket.
   /// - Reconnection (or deterministic shutdown when disabled) is driven by `control_loop()`.
   ///
   /// Thread-safety: MUST be called from connection strand only
@@ -229,8 +216,8 @@ class connection : public std::enable_shared_from_this<connection> {
   /// Called by `control_loop()` when `state_ == FAILED` and reconnection is enabled:
   /// - Applies immediate attempts + exponential backoff (capped).
   /// - Attempts `do_connect()` under `RECONNECTING`.
-  /// - On failure: transitions back to `FAILED`, records `last_error_`, increments attempt count.
-  /// - On success: `do_connect()` sets `OPEN`; attempt counter and `last_error_` are reset.
+  /// - On failure: transitions back to `FAILED`, emits disconnected, increments attempt count.
+  /// - On success: `do_connect()` sets `OPEN`; attempt counter is reset and connected emitted.
   /// - If close/cancel is requested, returns promptly and lets shutdown proceed.
   auto do_reconnect() -> iocoro::awaitable<void>;
 
@@ -241,15 +228,7 @@ class connection : public std::enable_shared_from_this<connection> {
   /// Transition to CLOSED state and cleanup.
   auto transition_to_closed() -> void;
 
-  auto set_last_error(error_info err) -> void {
-    std::scoped_lock lk{last_error_mtx_};
-    last_error_ = std::move(err);
-  }
-
-  auto clear_last_error() -> void {
-    std::scoped_lock lk{last_error_mtx_};
-    last_error_.reset();
-  }
+  auto emit_connection_event(connection_event evt) noexcept -> void;
 
  private:
   // Configuration
@@ -263,10 +242,7 @@ class connection : public std::enable_shared_from_this<connection> {
 
   // State machine
   atomic_connection_state state_{connection_state::INIT};
-  std::optional<error_info> last_error_{};
-
-  // Protects last_error_ for cross-thread diagnostics.
-  mutable std::mutex last_error_mtx_{};
+  std::uint64_t generation_{0};  // Increments on each successful OPEN transition.
 
   // Request/response pipeline
   pipeline pipeline_;

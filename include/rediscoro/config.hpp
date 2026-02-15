@@ -81,6 +81,9 @@ struct config {
   // Tracing hooks (request-level instrumentation).
   request_trace_hooks trace_hooks{};
 
+  // Connection lifecycle hooks (connected/disconnected/closed instrumentation).
+  connection_event_hooks connection_hooks{};
+
   // Whether to emit tracing events for the initial handshake (HELLO/AUTH/SELECT/SETNAME).
   // Default off to avoid noise.
   bool trace_handshake{false};

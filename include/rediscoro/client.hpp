@@ -11,7 +11,6 @@
 #include <iocoro/awaitable.hpp>
 
 #include <memory>
-#include <optional>
 #include <utility>
 
 namespace rediscoro {
@@ -90,11 +89,6 @@ class client {
 
   /// Get current connection state (for diagnostics).
   [[nodiscard]] auto state() const noexcept -> detail::connection_state { return conn_->state(); }
-
-  /// Get the last runtime connection error (for diagnostics).
-  [[nodiscard]] auto last_error() const noexcept -> std::optional<error_info> {
-    return conn_->last_error();
-  }
 
  private:
   std::shared_ptr<detail::connection> conn_;

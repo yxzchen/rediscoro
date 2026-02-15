@@ -1,9 +1,11 @@
 #pragma once
 
+#include <rediscoro/detail/connection_state.hpp>
+#include <rediscoro/error_info.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
 #include <system_error>
 
 namespace rediscoro {
@@ -57,6 +59,42 @@ struct request_trace_hooks {
   [[nodiscard]] constexpr bool enabled() const noexcept {
     return on_start != nullptr || on_finish != nullptr;
   }
+};
+
+/// Connection-level lifecycle events for observability.
+enum class connection_event_kind : std::uint8_t {
+  connected = 1,
+  disconnected,
+  closed,
+};
+
+/// Connection event payload.
+struct connection_event {
+  connection_event_kind kind{connection_event_kind::connected};
+  detail::connection_state state{detail::connection_state::INIT};
+
+  // Monotonic successful-connect generation counter (increments on each OPEN transition).
+  std::uint64_t generation{0};
+
+  // Reconnection attempt counter used by backoff policy (0 for regular connected).
+  int reconnect_count{0};
+
+  // Error details for failure-related events.
+  error_info error{};
+};
+
+/// Lightweight connection lifecycle hooks.
+///
+/// Threading / performance contract:
+/// - Callback is invoked on the connection strand.
+/// - Implementations MUST be non-blocking and MUST NOT throw.
+struct connection_event_hooks {
+  using on_event_fn = void (*)(void*, connection_event const&);
+
+  void* user_data{};
+  on_event_fn on_event{};
+
+  [[nodiscard]] constexpr bool enabled() const noexcept { return on_event != nullptr; }
 };
 
 }  // namespace rediscoro

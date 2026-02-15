@@ -129,16 +129,17 @@ inline auto connection::handle_error(error_info ec) -> void {
   REDISCORO_ASSERT(state_ == connection_state::OPEN,
                    "handle_error must not be used for CONNECTING/INIT errors");
   if (state_ != connection_state::OPEN) {
-    // Non-OPEN state errors are not recorded in last_error_ (handled elsewhere).
     control_wakeup_.notify();
     return;
   }
 
   // OPEN runtime error -> FAILED.
-  // Record error for diagnostics (user cannot obtain it directly).
   auto const err = ec;
-  set_last_error(std::move(ec));
   state_ = connection_state::FAILED;
+  emit_connection_event(connection_event{
+    .kind = connection_event_kind::disconnected,
+    .error = err,
+  });
   pipeline_.clear_all(err);
   if (socket_.is_open()) {
     (void)socket_.close();

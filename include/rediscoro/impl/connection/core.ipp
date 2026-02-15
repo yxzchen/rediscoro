@@ -60,10 +60,7 @@ inline auto connection::run_actor() -> void {
       // Ensure lifecycle mutations are serialized on the connection strand.
       ex.post([self = std::move(self), r = std::move(r)]() mutable {
         self->actor_running_ = false;
-        if (!r) {
-          // No-exception policy: record a best-effort diagnostic and proceed with deterministic cleanup.
-          self->set_last_error(client_errc::connection_lost);
-        }
+        (void)r;
         if (self->state_ != connection_state::CLOSED) {
           self->transition_to_closed();
         }
@@ -86,7 +83,6 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
   if (state_ == connection_state::CLOSED) {
     // Retry support: reset lifecycle state.
     state_ = connection_state::INIT;
-    clear_last_error();
     reconnect_count_ = 0;
     stop_.reset();
   }
@@ -105,6 +101,10 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
   auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.get_token(),
                                                do_connect(), iocoro::use_awaitable);
   if (!connect_res) {
+    emit_connection_event(connection_event{
+      .kind = connection_event_kind::disconnected,
+      .error = connect_res.error(),
+    });
     // Initial connect failure MUST NOT enter FAILED state (FAILED is reserved for runtime errors).
     // Cleanup is unified via close() (joins the actor).
     co_await close();
@@ -233,6 +233,22 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
   control_wakeup_.notify();
 }
 
+inline auto connection::emit_connection_event(connection_event evt) noexcept -> void {
+  auto const hooks = cfg_.connection_hooks;
+  if (!hooks.enabled()) {
+    return;
+  }
+
+  evt.generation = generation_;
+  evt.state = state_;
+  evt.reconnect_count = reconnect_count_;
+
+  try {
+    hooks.on_event(hooks.user_data, evt);
+  } catch (...) {
+  }
+}
+
 inline auto connection::transition_to_closed() -> void {
   // Deterministic cleanup (idempotent).
   state_ = connection_state::CLOSED;
@@ -242,6 +258,8 @@ inline auto connection::transition_to_closed() -> void {
   if (socket_.is_open()) {
     (void)socket_.close();
   }
+
+  emit_connection_event(connection_event{.kind = connection_event_kind::closed});
 }
 
 }  // namespace rediscoro::detail
