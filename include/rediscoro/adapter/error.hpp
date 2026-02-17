@@ -90,6 +90,18 @@ inline auto make_value_out_of_range(resp3::kind k) -> error {
   };
 }
 
+inline auto make_duplicate_key() -> error {
+  return error{
+    .kind = rediscoro::adapter_errc::duplicate_key,
+    .actual_type = resp3::kind::map,
+    .expected_types = {resp3::kind::map},
+    .path = {},
+    .expected_size = std::nullopt,
+    .got_size = std::nullopt,
+    .cached_message = std::nullopt,
+  };
+}
+
 inline auto make_size_mismatch(resp3::kind actual, std::size_t expected, std::size_t got) -> error {
   return error{
     .kind = rediscoro::adapter_errc::size_mismatch,
@@ -168,6 +180,9 @@ inline auto error::format_message(const error& e) -> std::string {
         return path + ": value out of range for " + type_to_string(e.expected_types[0]);
       }
       return path + ": value out of range";
+    }
+    case rediscoro::adapter_errc::duplicate_key: {
+      return path + ": duplicate key";
     }
     case rediscoro::adapter_errc::size_mismatch: {
       if (e.expected_size.has_value() && e.got_size.has_value()) {

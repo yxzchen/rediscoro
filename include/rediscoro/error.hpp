@@ -114,6 +114,8 @@ enum class adapter_errc {
   unexpected_null,
   /// Adaptation failed due to out-of-range numeric conversion.
   value_out_of_range,
+  /// Adaptation failed due to duplicate keys in map target.
+  duplicate_key,
   /// Adaptation failed due to size mismatch (array / container).
   size_mismatch,
 };

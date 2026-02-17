@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 using namespace rediscoro::resp3;
 
@@ -200,6 +201,39 @@ TEST(resp3_encoder_test, encode_to_appends_to_buffer) {
   enc.encode_to(buffer, msg2);
 
   EXPECT_EQ(buffer, "+hello\r\n:42\r\n");
+}
+
+TEST(resp3_encoder_test, simple_string_rejects_cr_or_lf) {
+  message with_cr{simple_string{"bad\rvalue"}};
+  EXPECT_THROW((void)encode(with_cr), std::invalid_argument);
+
+  message with_lf{simple_string{"bad\nvalue"}};
+  EXPECT_THROW((void)encode(with_lf), std::invalid_argument);
+}
+
+TEST(resp3_encoder_test, simple_error_and_big_number_reject_cr_or_lf) {
+  message err{simple_error{"ERR bad\nline"}};
+  EXPECT_THROW((void)encode(err), std::invalid_argument);
+
+  message big{big_number{"123\r456"}};
+  EXPECT_THROW((void)encode(big), std::invalid_argument);
+}
+
+TEST(resp3_encoder_test, verbatim_encoding_must_be_strict_three_bytes_without_separators) {
+  verbatim_string short_encoding;
+  short_encoding.encoding = "tx";
+  short_encoding.data = "hello";
+  EXPECT_THROW((void)encode(message{std::move(short_encoding)}), std::invalid_argument);
+
+  verbatim_string with_colon;
+  with_colon.encoding = "t:t";
+  with_colon.data = "hello";
+  EXPECT_THROW((void)encode(message{std::move(with_colon)}), std::invalid_argument);
+
+  verbatim_string with_lf;
+  with_lf.encoding = "t\nt";
+  with_lf.data = "hello";
+  EXPECT_THROW((void)encode(message{std::move(with_lf)}), std::invalid_argument);
 }
 
 }  // namespace

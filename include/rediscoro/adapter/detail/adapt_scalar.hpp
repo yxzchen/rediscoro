@@ -47,11 +47,26 @@ auto adapt_scalar(const resp3::message& msg) -> expected<T, error> {
       return unexpected(make_type_mismatch(msg.get_kind(), {resp3::kind::integer}));
     }
     const auto v = msg.as<resp3::integer>().value;
-    if (v < static_cast<std::int64_t>((std::numeric_limits<U>::min)()) ||
-        v > static_cast<std::int64_t>((std::numeric_limits<U>::max)())) {
-      return unexpected(make_value_out_of_range(resp3::kind::integer));
+    if constexpr (std::is_unsigned_v<U>) {
+      if (v < 0) {
+        return unexpected(make_value_out_of_range(resp3::kind::integer));
+      }
+      const auto uv = static_cast<std::uint64_t>(v);
+      if constexpr (sizeof(U) < sizeof(std::uint64_t)) {
+        if (uv > static_cast<std::uint64_t>((std::numeric_limits<U>::max)())) {
+          return unexpected(make_value_out_of_range(resp3::kind::integer));
+        }
+      }
+      return static_cast<U>(uv);
+    } else {
+      if constexpr (sizeof(U) < sizeof(std::int64_t)) {
+        if (v < static_cast<std::int64_t>((std::numeric_limits<U>::min)()) ||
+            v > static_cast<std::int64_t>((std::numeric_limits<U>::max)())) {
+          return unexpected(make_value_out_of_range(resp3::kind::integer));
+        }
+      }
+      return static_cast<U>(v);
     }
-    return static_cast<U>(v);
   } else if constexpr (bool_like<U>) {
     if (msg.is<resp3::null>()) {
       return unexpected(make_unexpected_null({resp3::kind::boolean}));

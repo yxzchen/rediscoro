@@ -109,6 +109,8 @@ class adapter_category_impl : public std::error_category {
         return "unexpected null";
       case adapter_errc::value_out_of_range:
         return "value out of range";
+      case adapter_errc::duplicate_key:
+        return "duplicate key";
       case adapter_errc::size_mismatch:
         return "size mismatch";
     }

@@ -33,6 +33,29 @@ auto adapt_map(const resp3::message& msg) -> expected<T, error> {
   }
 
   U out{};
+  auto has_duplicate_key = [&out](const K& key) -> bool {
+    if constexpr (requires(const U& m, const K& k) { m.contains(k); }) {
+      return out.contains(key);
+    } else if constexpr (requires(const U& m, const K& k) {
+                           m.find(k);
+                           m.end();
+                         }) {
+      return out.find(key) != out.end();
+    } else {
+      return false;
+    }
+  };
+  auto make_duplicate_key_error = [](std::size_t i, const K& key) -> error {
+    auto e = detail::make_duplicate_key();
+    if constexpr (std::is_same_v<remove_cvref_t<K>, std::string>) {
+      e.prepend_path(path_key{key});
+    } else {
+      e.prepend_path(path_field{"key"});
+      e.prepend_path(path_index{i});
+    }
+    return e;
+  };
+
   const auto& entries = msg.as<resp3::map>().entries;
   for (std::size_t i = 0; i < entries.size(); ++i) {
     const auto& [km, vm] = entries[i];
@@ -43,18 +66,42 @@ auto adapt_map(const resp3::message& msg) -> expected<T, error> {
       e.prepend_path(path_index{i});
       return unexpected(std::move(e));
     }
+    K key = std::move(*rk);
+    if (has_duplicate_key(key)) {
+      return unexpected(make_duplicate_key_error(i, key));
+    }
+
     auto rv = adapt<V>(vm);
     if (!rv) {
       auto e = std::move(rv.error());
       if constexpr (std::is_same_v<remove_cvref_t<K>, std::string>) {
-        e.prepend_path(path_key{*rk});
+        e.prepend_path(path_key{key});
       } else {
         e.prepend_path(path_field{"value"});
         e.prepend_path(path_index{i});
       }
       return unexpected(std::move(e));
     }
-    out.emplace(std::move(*rk), std::move(*rv));
+    if constexpr (requires(U& m, K&& k, V&& v) { m.emplace(std::move(k), std::move(v)).second; }) {
+      std::optional<std::string> key_for_error{};
+      if constexpr (std::is_same_v<remove_cvref_t<K>, std::string>) {
+        key_for_error = key;
+      }
+      auto inserted = out.emplace(std::move(key), std::move(*rv)).second;
+      if (!inserted) {
+        if constexpr (std::is_same_v<remove_cvref_t<K>, std::string>) {
+          auto e = detail::make_duplicate_key();
+          e.prepend_path(path_key{std::move(*key_for_error)});
+          return unexpected(std::move(e));
+        }
+        auto e = detail::make_duplicate_key();
+        e.prepend_path(path_field{"key"});
+        e.prepend_path(path_index{i});
+        return unexpected(std::move(e));
+      }
+    } else {
+      out.emplace(std::move(key), std::move(*rv));
+    }
   }
   return out;
 }

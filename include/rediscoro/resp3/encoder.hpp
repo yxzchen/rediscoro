@@ -8,7 +8,9 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace rediscoro::resp3 {
 
@@ -33,12 +35,14 @@ class encoder {
 
   // Visitor interface
   auto operator()(const simple_string& val) -> void {
+    validate_no_crlf("simple_string", val.data);
     append_prefix(kind::simple_string);
     buffer_ += val.data;
     append_crlf();
   }
 
   auto operator()(const simple_error& val) -> void {
+    validate_no_crlf("simple_error", val.message);
     append_prefix(kind::simple_error);
     buffer_ += val.message;
     append_crlf();
@@ -59,6 +63,7 @@ class encoder {
   }
 
   auto operator()(const big_number& val) -> void {
+    validate_no_crlf("big_number", val.value);
     append_prefix(kind::big_number);
     buffer_ += val.value;
     append_crlf();
@@ -88,6 +93,7 @@ class encoder {
   auto operator()(const verbatim_string& val) -> void {
     // Format: =<length>\r\n<encoding>:<data>\r\n
     // encoding is 3 bytes
+    validate_verbatim_encoding(val.encoding);
     auto total_len = val.encoding.size() + 1 + val.data.size();  // encoding + ':' + data
     append_prefix(kind::verbatim_string);
     append_size(total_len);
@@ -141,6 +147,28 @@ class encoder {
 
  private:
   std::string buffer_;
+
+  [[nodiscard]] static auto has_crlf(std::string_view s) -> bool {
+    return s.find_first_of("\r\n") != std::string_view::npos;
+  }
+
+  static auto validate_no_crlf(std::string_view type, std::string_view payload) -> void {
+    if (has_crlf(payload)) {
+      throw std::invalid_argument{"resp3::encoder: " + std::string(type) +
+                                  " payload must not contain CR or LF"};
+    }
+  }
+
+  static auto validate_verbatim_encoding(std::string_view encoding) -> void {
+    if (encoding.size() != 3) {
+      throw std::invalid_argument{
+        "resp3::encoder: verbatim_string encoding must be exactly 3 bytes"};
+    }
+    if (encoding.find(':') != std::string_view::npos || has_crlf(encoding)) {
+      throw std::invalid_argument{
+        "resp3::encoder: verbatim_string encoding must not contain ':', CR, or LF"};
+    }
+  }
 
   auto append_prefix(kind k) -> void { buffer_.push_back(kind_to_prefix(k)); }
 

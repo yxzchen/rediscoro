@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <initializer_list>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -117,10 +118,9 @@ class request {
 
   void append_arg(const char* s) {
     if (s == nullptr) {
-      append_bulk_string(std::string_view{});
-    } else {
-      append_bulk_string(std::string_view{s});
+      throw std::invalid_argument{"request::append_arg(const char*): null pointer"};
     }
+    append_bulk_string(std::string_view{s});
   }
 
   void append_arg(const std::string& s) { append_bulk_string(std::string_view{s}); }
