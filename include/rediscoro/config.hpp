@@ -77,6 +77,11 @@ struct config {
   std::uint32_t max_resp_container_len = 1'000'000U;
   std::size_t max_resp_line_bytes = 64ULL * 1024ULL;  // 64 KiB
 
+  // Pipeline backpressure limits (enabled by default).
+  // Exceeding either limit causes fast-fail with client_errc::queue_full.
+  std::size_t max_pipeline_requests = 16'384U;
+  std::size_t max_pipeline_pending_write_bytes = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
+
   // Authentication & setup
   std::string username{};
   std::string password{};

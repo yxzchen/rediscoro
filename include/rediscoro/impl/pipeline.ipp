@@ -4,16 +4,27 @@
 
 namespace rediscoro::detail {
 
-inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink) -> void {
-  push(std::move(req), sink, time_point::max());
+inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink) -> bool {
+  return push(std::move(req), sink, time_point::max());
 }
 
 inline auto pipeline::push(request req, std::shared_ptr<response_sink> sink,
-                           time_point deadline) -> void {
+                           time_point deadline) -> bool {
   REDISCORO_ASSERT(sink != nullptr);
   REDISCORO_ASSERT(req.reply_count() == sink->expected_replies());
 
+  const auto wire_bytes = req.wire().size();
+  if (pending_count() >= limits_.max_requests) {
+    return false;
+  }
+  if (wire_bytes > limits_.max_pending_write_bytes ||
+      pending_write_bytes_ > (limits_.max_pending_write_bytes - wire_bytes)) {
+    return false;
+  }
+
+  pending_write_bytes_ += wire_bytes;
   pending_write_.push_back(pending_item{std::move(req), std::move(sink), 0, deadline});
+  return true;
 }
 
 inline bool pipeline::has_pending_write() const noexcept {
@@ -38,8 +49,10 @@ inline auto pipeline::on_write_done(std::size_t n) -> void {
   const auto& wire = front.req.wire();
   REDISCORO_ASSERT(front.written <= wire.size());
   REDISCORO_ASSERT(n <= (wire.size() - front.written));
+  REDISCORO_ASSERT(n <= pending_write_bytes_);
 
   front.written += n;
+  pending_write_bytes_ -= n;
 
   if (front.written == wire.size()) {
     // Entire request written: move to awaiting read queue.
@@ -78,6 +91,7 @@ inline auto pipeline::clear_all(error_info err) -> void {
     p.sink->fail_all(err);
     pending_write_.pop_front();
   }
+  pending_write_bytes_ = 0;
 
   // Awaiting reads: fail all remaining replies.
   while (!awaiting_read_.empty()) {

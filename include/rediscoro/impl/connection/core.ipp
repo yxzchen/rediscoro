@@ -16,7 +16,10 @@ inline connection::connection(iocoro::any_io_executor ex, config cfg)
     : cfg_(std::move(cfg)),
       executor_(ex),
       socket_(executor_.get_io_executor()),
-      pipeline_(),
+      pipeline_(pipeline::limits{
+        .max_requests = cfg_.max_pipeline_requests,
+        .max_pending_write_bytes = cfg_.max_pipeline_pending_write_bytes,
+      }),
       parser_(resp3::parser::limits{
         .max_resp_bulk_bytes = cfg_.max_resp_bulk_bytes,
         .max_resp_container_len = cfg_.max_resp_container_len,
@@ -227,15 +230,17 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
     }
   }
 
-  if (tracing) {
-    sink->set_trace_context(hooks, trace_info, start);
-  }
-
   pipeline::time_point deadline = pipeline::time_point::max();
   if (cfg_.request_timeout.has_value()) {
     deadline = pipeline::clock::now() + *cfg_.request_timeout;
   }
-  pipeline_.push(std::move(req), std::move(sink), deadline);
+  if (!pipeline_.push(std::move(req), sink, deadline)) {
+    reject(client_errc::queue_full);
+    return;
+  }
+  if (tracing) {
+    sink->set_trace_context(hooks, trace_info, start);
+  }
   write_wakeup_.notify();
   // request_timeout scheduling / wake control_loop when first request arrives
   control_wakeup_.notify();

@@ -57,6 +57,9 @@ enum class client_errc {
   /// Operation already in progress.
   already_in_progress,
 
+  /// Local request queue hit backpressure limits.
+  queue_full,
+
   /// Internal error (bug / invariant violation).
   internal_error,
 };

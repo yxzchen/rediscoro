@@ -107,7 +107,13 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     req.push("CLIENT", "SETNAME", cfg_.client_name);
   }
 
+  const auto handshake_command_count = req.command_count();
+  const auto handshake_wire_bytes = req.wire().size();
   auto slot = std::make_shared<pending_dynamic_response<ignore_t>>(req.reply_count());
+
+  if (!pipeline_.push(std::move(req), slot)) {
+    co_return unexpected(client_errc::queue_full);
+  }
 
   if (cfg_.trace_handshake && cfg_.trace_hooks.enabled()) {
     auto const hooks = cfg_.trace_hooks;  // copy for stability
@@ -115,8 +121,8 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     const request_trace_info info{
       .id = next_request_id_++,
       .kind = request_kind::handshake,
-      .command_count = req.command_count(),
-      .wire_bytes = req.wire().size(),
+      .command_count = handshake_command_count,
+      .wire_bytes = handshake_wire_bytes,
     };
 
     if (hooks.on_start != nullptr) {
@@ -128,8 +134,6 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     }
     slot->set_trace_context(hooks, info, start);
   }
-
-  pipeline_.push(std::move(req), slot);
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
   auto do_handshake = [&]() -> iocoro::awaitable<iocoro::result<void>> {

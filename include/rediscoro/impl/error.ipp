@@ -40,6 +40,8 @@ class client_category_impl : public std::error_category {
         return "not connected";
       case client_errc::already_in_progress:
         return "already in progress";
+      case client_errc::queue_full:
+        return "queue full";
       case client_errc::internal_error:
         return "internal error";
     }

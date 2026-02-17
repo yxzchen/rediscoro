@@ -47,7 +47,7 @@ TEST(pipeline_test, partial_write_and_next_write_buffer) {
   const auto wire = req.wire();
   ASSERT_FALSE(wire.empty());
 
-  p.push(req, sink);
+  ASSERT_TRUE(p.push(req, sink));
   ASSERT_TRUE(p.has_pending_write());
 
   auto b1 = p.next_write_buffer();
@@ -71,7 +71,7 @@ TEST(pipeline_test, multi_reply_dispatch_completes_sink) {
   ASSERT_EQ(req.reply_count(), 2u);
 
   auto sink = std::make_shared<counting_sink>(2);
-  p.push(req, sink);
+  ASSERT_TRUE(p.push(req, sink));
 
   // Pretend socket wrote everything.
   const auto wire = req.wire();
@@ -96,7 +96,7 @@ TEST(pipeline_test, clear_all_fills_errors_for_pending_and_awaiting) {
   req.push("PING");
   auto sink = std::make_shared<counting_sink>(2);
 
-  p.push(req, sink);
+  ASSERT_TRUE(p.push(req, sink));
 
   // Before any write/read, clear_all should deliver 2 errors.
   p.clear_all(rediscoro::client_errc::connection_closed);
@@ -118,8 +118,8 @@ TEST(pipeline_test, deadline_order_and_expiration) {
   const auto d2 = rediscoro::detail::pipeline::clock::now() + std::chrono::milliseconds(20);
 
   // FIFO write queue semantics: next_deadline() is based on the queue front.
-  p.push(req1, s1, d1);
-  p.push(req2, s2, d2);
+  ASSERT_TRUE(p.push(req1, s1, d1));
+  ASSERT_TRUE(p.push(req2, s2, d2));
   EXPECT_EQ(p.next_deadline(), d1);
 
   // After req1 is fully written, req2 is now the pending-write front.
@@ -141,8 +141,8 @@ TEST(pipeline_test, clear_all_mixed_pending_and_awaiting) {
   auto s1 = std::make_shared<counting_sink>(1);
   auto s2 = std::make_shared<counting_sink>(2);
 
-  p.push(req1, s1);
-  p.push(req2, s2);
+  ASSERT_TRUE(p.push(req1, s1));
+  ASSERT_TRUE(p.push(req2, s2));
 
   // Move req1 to awaiting_read; req2 remains pending_write.
   p.on_write_done(req1.wire().size());
@@ -157,4 +157,78 @@ TEST(pipeline_test, clear_all_mixed_pending_and_awaiting) {
   EXPECT_EQ(s2->err_count(), 2u);
   EXPECT_FALSE(p.has_pending_write());
   EXPECT_FALSE(p.has_pending_read());
+}
+
+TEST(pipeline_test, request_limit_rejects_push) {
+  rediscoro::detail::pipeline p{rediscoro::detail::pipeline::limits{
+    .max_requests = 1,
+    .max_pending_write_bytes = 1024,
+  }};
+  rediscoro::request req{"PING"};
+
+  auto s1 = std::make_shared<counting_sink>(1);
+  auto s2 = std::make_shared<counting_sink>(1);
+
+  EXPECT_TRUE(p.push(req, s1));
+  EXPECT_FALSE(p.push(req, s2));
+  EXPECT_EQ(p.pending_count(), 1u);
+}
+
+TEST(pipeline_test, pending_write_bytes_limit_rejects_push) {
+  rediscoro::request req{"PING"};
+  const auto max_bytes = req.wire().size();
+  ASSERT_GT(max_bytes, 0u);
+
+  rediscoro::detail::pipeline p{rediscoro::detail::pipeline::limits{
+    .max_requests = 8,
+    .max_pending_write_bytes = max_bytes,
+  }};
+
+  auto s1 = std::make_shared<counting_sink>(1);
+  auto s2 = std::make_shared<counting_sink>(1);
+
+  EXPECT_TRUE(p.push(req, s1));
+  EXPECT_EQ(p.pending_write_bytes(), max_bytes);
+  EXPECT_FALSE(p.push(req, s2));
+  EXPECT_EQ(p.pending_write_bytes(), max_bytes);
+}
+
+TEST(pipeline_test, pending_write_bytes_reclaimed_after_write_done_and_clear_all) {
+  rediscoro::request req{"PING"};
+  const auto max_bytes = req.wire().size();
+  ASSERT_GT(max_bytes, 1u);
+
+  {
+    rediscoro::detail::pipeline p{rediscoro::detail::pipeline::limits{
+      .max_requests = 8,
+      .max_pending_write_bytes = max_bytes,
+    }};
+    auto s1 = std::make_shared<counting_sink>(1);
+    auto s2 = std::make_shared<counting_sink>(1);
+
+    ASSERT_TRUE(p.push(req, s1));
+    ASSERT_EQ(p.pending_write_bytes(), max_bytes);
+    ASSERT_FALSE(p.push(req, s2));
+
+    p.on_write_done(max_bytes);
+    EXPECT_EQ(p.pending_write_bytes(), 0u);
+    EXPECT_TRUE(p.push(req, s2));
+  }
+
+  {
+    rediscoro::detail::pipeline p{rediscoro::detail::pipeline::limits{
+      .max_requests = 8,
+      .max_pending_write_bytes = max_bytes,
+    }};
+    auto s1 = std::make_shared<counting_sink>(1);
+    auto s2 = std::make_shared<counting_sink>(1);
+
+    ASSERT_TRUE(p.push(req, s1));
+    p.on_write_done(1);
+    ASSERT_EQ(p.pending_write_bytes(), max_bytes - 1);
+
+    p.clear_all(rediscoro::client_errc::connection_closed);
+    EXPECT_EQ(p.pending_write_bytes(), 0u);
+    EXPECT_TRUE(p.push(req, s2));
+  }
 }

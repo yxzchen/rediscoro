@@ -38,7 +38,13 @@ namespace rediscoro::detail {
 /// - No internal synchronization (relies on strand serialization)
 class pipeline {
  public:
+  struct limits {
+    std::size_t max_requests = 16'384U;
+    std::size_t max_pending_write_bytes = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
+  };
+
   pipeline() = default;
+  explicit pipeline(limits lims) : limits_(lims) {}
 
   using clock = std::chrono::steady_clock;
   using time_point = clock::time_point;
@@ -51,12 +57,14 @@ class pipeline {
   /// - pipeline MUST NOT deliver more than sink->expected_replies() replies into a sink.
   /// - For a fixed-size sink (pending_response<Ts...>), req.reply_count() MUST equal sizeof...(Ts)
   ///   (enforced at connection::enqueue<Ts...> boundary).
-  auto push(request req, std::shared_ptr<response_sink> sink) -> void;
+  /// Returns false if queue limits are exceeded.
+  auto push(request req, std::shared_ptr<response_sink> sink) -> bool;
 
   /// Enqueue a request with a timeout deadline.
   ///
   /// deadline == time_point::max() means "no timeout".
-  auto push(request req, std::shared_ptr<response_sink> sink, time_point deadline) -> void;
+  /// Returns false if queue limits are exceeded.
+  auto push(request req, std::shared_ptr<response_sink> sink, time_point deadline) -> bool;
 
   /// Check if there are pending writes.
   [[nodiscard]] bool has_pending_write() const noexcept;
@@ -95,6 +103,9 @@ class pipeline {
     return pending_write_.size() + awaiting_read_.size();
   }
 
+  /// Get pending (not-yet-written) wire bytes.
+  [[nodiscard]] std::size_t pending_write_bytes() const noexcept { return pending_write_bytes_; }
+
  private:
   struct pending_item {
     request req;
@@ -113,6 +124,9 @@ class pipeline {
 
   // Response sinks waiting for responses (one per sent request)
   ring_queue<awaiting_item> awaiting_read_{};
+
+  limits limits_{};
+  std::size_t pending_write_bytes_{0};
 };
 
 }  // namespace rediscoro::detail

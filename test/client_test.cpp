@@ -157,6 +157,68 @@ TEST(client_test, timeout_error_is_reported_for_unresponsive_peer) {
   ASSERT_TRUE(ok) << diag;
 }
 
+TEST(client_test, connect_fails_with_queue_full_when_handshake_push_rejected) {
+  iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
+
+  bool skipped = false;
+  std::string skip_reason{};
+  bool ok = false;
+  std::string diag{};
+
+  auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
+    rediscoro::config cfg{};
+    cfg.host = "127.0.0.1";
+    cfg.port = 6379;
+    cfg.resolve_timeout = 500ms;
+    cfg.connect_timeout = 500ms;
+    cfg.reconnection.enabled = false;
+    cfg.max_pipeline_requests = 0;
+    cfg.max_pipeline_pending_write_bytes = 0;
+
+    rediscoro::client c{ctx.get_executor(), cfg};
+    auto r = co_await c.connect();
+    if (r.has_value()) {
+      diag = "expected queue_full on handshake enqueue, got success";
+      co_return;
+    }
+
+    if (r.error().code == rediscoro::client_errc::queue_full) {
+      ok = true;
+      co_return;
+    }
+
+    if (r.error().code == rediscoro::client_errc::resolve_timeout ||
+        r.error().code == rediscoro::client_errc::connect_timeout ||
+        r.error().code == rediscoro::client_errc::connect_failed ||
+        r.error().code == rediscoro::client_errc::resolve_failed ||
+        r.error().code == rediscoro::client_errc::connection_reset ||
+        r.error().code == rediscoro::client_errc::operation_aborted) {
+      skipped = true;
+      skip_reason =
+        "redis not available for handshake queue_full test (" + r.error().to_string() + ")";
+      co_return;
+    }
+
+    diag = "expected queue_full, got: " + r.error().to_string();
+    co_return;
+  };
+
+  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+  ctx.run();
+
+  if (skipped) {
+    GTEST_SKIP() << skip_reason;
+  }
+  ASSERT_TRUE(ok) << diag;
+}
+
 TEST(client_test, ping_set_get_roundtrip) {
   iocoro::io_context ctx;
   auto guard = iocoro::make_work_guard(ctx);
@@ -237,6 +299,65 @@ TEST(client_test, ping_set_get_roundtrip) {
         diag = "expected GET value " + value + ", got: " + *slot;
         co_return;
       }
+    }
+
+    co_await c.close();
+    ok = true;
+    co_return;
+  };
+
+  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+  ctx.run();
+
+  if (skipped) {
+    GTEST_SKIP() << skip_reason;
+  }
+  ASSERT_TRUE(ok) << diag;
+}
+
+TEST(client_test, oversized_request_is_rejected_with_queue_full) {
+  iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
+
+  bool skipped = false;
+  std::string skip_reason{};
+  bool ok = false;
+  std::string diag{};
+
+  auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
+    rediscoro::config cfg{};
+    cfg.host = "127.0.0.1";
+    cfg.port = 6379;
+    cfg.resolve_timeout = 500ms;
+    cfg.connect_timeout = 500ms;
+    cfg.reconnection.enabled = false;
+    cfg.max_pipeline_requests = 32;
+    cfg.max_pipeline_pending_write_bytes = 256;
+
+    rediscoro::client c{ctx.get_executor(), cfg};
+    auto conn = co_await c.connect();
+    if (!conn.has_value()) {
+      skipped = true;
+      skip_reason = "redis not available at 127.0.0.1:6379 (" + conn.error().to_string() + ")";
+      co_return;
+    }
+
+    std::string payload(1024, 'x');
+    auto resp = co_await c.exec<std::string>("ECHO", payload);
+    auto& slot = resp.get<0>();
+    if (slot.has_value()) {
+      diag = "expected queue_full error for oversized request";
+      co_return;
+    }
+    if (slot.error().code != rediscoro::client_errc::queue_full) {
+      diag = "expected queue_full, got: " + slot.error().to_string();
+      co_return;
     }
 
     co_await c.close();
