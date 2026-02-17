@@ -108,6 +108,66 @@ TEST(resp3_parser_test, parse_array_nested) {
   p.reclaim();
 }
 
+TEST(resp3_parser_test, parse_integer_minus_one_is_not_null) {
+  parser p;
+  append(p, ":-1\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->has_value());
+
+  auto msg = build_message(p.tree(), **r);
+  ASSERT_TRUE(msg.is<integer>());
+  EXPECT_EQ(msg.as<integer>().value, -1);
+  EXPECT_FALSE(msg.is_null());
+  p.reclaim();
+}
+
+TEST(resp3_parser_test, parse_typed_null_bulk_string) {
+  parser p;
+  append(p, "$-1\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->has_value());
+
+  auto msg = build_message(p.tree(), **r);
+  ASSERT_TRUE(msg.is<null>());
+  EXPECT_TRUE(msg.is_typed_null());
+  EXPECT_TRUE(msg.is_typed_null(kind::bulk_string));
+  p.reclaim();
+}
+
+TEST(resp3_parser_test, parse_typed_null_array) {
+  parser p;
+  append(p, "*-1\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->has_value());
+
+  auto msg = build_message(p.tree(), **r);
+  ASSERT_TRUE(msg.is<null>());
+  EXPECT_TRUE(msg.is_typed_null());
+  EXPECT_TRUE(msg.is_typed_null(kind::array));
+  p.reclaim();
+}
+
+TEST(resp3_parser_test, parse_typed_null_map) {
+  parser p;
+  append(p, "%-1\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_TRUE(r);
+  ASSERT_TRUE(r->has_value());
+
+  auto msg = build_message(p.tree(), **r);
+  ASSERT_TRUE(msg.is<null>());
+  EXPECT_TRUE(msg.is_typed_null());
+  EXPECT_TRUE(msg.is_typed_null(kind::map));
+  p.reclaim();
+}
+
 TEST(resp3_parser_test, parse_message_with_attributes) {
   parser p;
   append(p, "|1\r\n+key\r\n+val\r\n+OK\r\n");
@@ -216,6 +276,36 @@ TEST(resp3_parser_test, protocol_error_on_bulk_string_bad_trailer) {
   auto r = p.parse_one();
   ASSERT_FALSE(r);
   EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_bulk_trailer);
+  EXPECT_TRUE(p.failed());
+}
+
+TEST(resp3_parser_test, protocol_error_on_oversized_container_length) {
+  parser p;
+  append(p, "*4294967296\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
+  EXPECT_TRUE(p.failed());
+}
+
+TEST(resp3_parser_test, protocol_error_on_oversized_map_pairs_length) {
+  parser p;
+  append(p, "%2147483648\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
+  EXPECT_TRUE(p.failed());
+}
+
+TEST(resp3_parser_test, protocol_error_on_malformed_verbatim_payload) {
+  parser p;
+  append(p, "=3\r\ntxt\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_verbatim);
   EXPECT_TRUE(p.failed());
 }
 

@@ -51,6 +51,12 @@ struct big_number {
 /// Null value (_)
 struct null {
   static constexpr kind kind_id = kind::null;
+  // Generic null uses kind::null ("_\r\n"); typed-null uses the original kind
+  // (e.g. kind::bulk_string for "$-1\r\n", kind::array for "*-1\r\n").
+  kind source = kind::null;
+
+  [[nodiscard]] auto is_typed() const noexcept -> bool { return source != kind::null; }
+  [[nodiscard]] auto is_typed(kind t) const noexcept -> bool { return source == t; }
 };
 
 /// Bulk string value ($)

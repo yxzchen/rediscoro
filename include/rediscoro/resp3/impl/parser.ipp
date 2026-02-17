@@ -53,6 +53,34 @@ namespace detail {
   return res.ptr == last;
 }
 
+[[nodiscard]] inline auto max_u32_i64() -> std::int64_t {
+  return static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max());
+}
+
+[[nodiscard]] inline auto is_representable_length(kind t, std::int64_t len) -> bool {
+  if (len < 0) {
+    return false;
+  }
+
+  const auto max_u32 = max_u32_i64();
+  switch (t) {
+    case kind::array:
+    case kind::set:
+    case kind::push:
+      return len <= max_u32;
+    case kind::map:
+    case kind::attribute:
+      // map/attribute lengths are pair counts, but links store key/value nodes.
+      return len <= (max_u32 / 2);
+    default:
+      return false;
+  }
+}
+
+[[nodiscard]] inline auto is_valid_verbatim_payload(std::string_view payload) -> bool {
+  return payload.size() >= 4 && payload[3] == ':';
+}
+
 }  // namespace detail
 
 inline auto parser::parse_length_after_type(std::string_view data) const
@@ -88,6 +116,11 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     return step_index{.state = step::produced, .index = idx};
   }
 
+  if (!detail::is_representable_length(t, len)) {
+    return unexpected(protocol_errc::invalid_length);
+  }
+  const auto expected_len = static_cast<std::uint32_t>(len);
+
   auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
   tree_.nodes.push_back(raw_node{
     .type = t,
@@ -107,8 +140,8 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     current = frame{
       .state = frame_kind::map_key,
       .container_type = t,
-      .expected = len,  // pairs
-      .produced = 0,    // pairs produced
+      .expected = expected_len,  // pairs
+      .produced = 0,             // pairs produced
       .node_index = idx,
       .pending_key = 0,
       .has_pending_key = false,
@@ -117,8 +150,8 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
     current = frame{
       .state = frame_kind::array,  // used for array/set/push
       .container_type = t,
-      .expected = len,  // elements
-      .produced = 0,    // elements produced
+      .expected = expected_len,  // elements
+      .produced = 0,             // elements produced
       .node_index = idx,
       .pending_key = 0,
       .has_pending_key = false,
@@ -136,12 +169,16 @@ inline auto parser::start_attribute(std::int64_t len)
   if (len == 0) {
     return std::monostate{};
   }
+  if (!detail::is_representable_length(kind::attribute, len)) {
+    return unexpected(protocol_errc::invalid_length);
+  }
+  const auto expected_len = static_cast<std::uint32_t>(len);
 
   stack_.push_back(frame{
     .state = frame_kind::attribute,
     .container_type = kind::attribute,
-    .expected = len,  // pairs
-    .produced = 0,    // pairs produced
+    .expected = expected_len,  // pairs
+    .produced = 0,             // pairs produced
     .node_index = 0,
     .pending_key = 0,
     .has_pending_key = false,
@@ -270,7 +307,12 @@ inline auto parser::parse_value() -> expected<std::optional<step_index>, redisco
       return std::optional<step_index>{step_index{.state = step::produced, .index = idx}};
     }
 
-    const auto need = static_cast<std::size_t>(header_bytes) + static_cast<std::size_t>(len) + 2;
+    const auto need_u64 =
+      static_cast<std::uint64_t>(header_bytes) + static_cast<std::uint64_t>(len) + 2ULL;
+    if (need_u64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+      return unexpected(protocol_errc::invalid_length);
+    }
+    const auto need = static_cast<std::size_t>(need_u64);
     if (data.size() < need) {
       return std::optional<step_index>{};
     }
@@ -278,6 +320,9 @@ inline auto parser::parse_value() -> expected<std::optional<step_index>, redisco
     auto payload = data.substr(header_bytes, static_cast<std::size_t>(len));
     if (data.substr(header_bytes + static_cast<std::size_t>(len), 2) != "\r\n") {
       return unexpected(protocol_errc::invalid_bulk_trailer);
+    }
+    if (*maybe_t == kind::verbatim_string && !detail::is_valid_verbatim_payload(payload)) {
+      return unexpected(protocol_errc::invalid_verbatim);
     }
 
     buf_.consume(need);
@@ -351,7 +396,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       parent.produced += 1;
       node.child_count = parent.produced;
 
-      if (parent.produced == static_cast<std::uint32_t>(parent.expected)) {
+      if (parent.produced == parent.expected) {
         child_idx = parent.node_index;
         stack_.pop_back();
         continue;
@@ -387,7 +432,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       node.child_count = parent.produced * 2;
       parent.state = frame_kind::map_key;
 
-      if (parent.produced == static_cast<std::uint32_t>(parent.expected)) {
+      if (parent.produced == parent.expected) {
         child_idx = parent.node_index;
         stack_.pop_back();
         continue;
@@ -412,7 +457,7 @@ inline auto parser::attach_to_parent(std::uint32_t child_idx)
       parent.has_pending_key = false;
       parent.produced += 1;
 
-      if (parent.produced == static_cast<std::uint32_t>(parent.expected)) {
+      if (parent.produced == parent.expected) {
         stack_.pop_back();  // pop attribute frame
         return step_index{.state = step::continue_parsing};
       }

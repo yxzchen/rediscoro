@@ -13,18 +13,18 @@ namespace rediscoro::resp3 {
 
 namespace detail {
 
+[[nodiscard]] inline auto is_typed_null_kind(kind t) -> bool {
+  return t == kind::bulk_string || t == kind::bulk_error || t == kind::verbatim_string ||
+         t == kind::array || t == kind::map || t == kind::set || t == kind::push;
+}
+
 [[nodiscard]] inline auto decode_verbatim(std::string_view payload) -> verbatim_string {
-  // RESP3: encoding is 3 bytes, payload is "xxx:<data>".
-  // Policy: if input doesn't match this shape, fall back to encoding="txt" and keep full text as data.
-  verbatim_string v{};
-  if (payload.size() >= 4 && payload[3] == ':') {
-    v.encoding = payload.substr(0, 3);
-    v.data = payload.substr(4);
-  } else {
-    v.encoding = "txt";
-    v.data = payload;
-  }
-  return v;
+  // RESP3: encoding is 3 bytes, payload is exactly "xxx:<data>".
+  REDISCORO_ASSERT(payload.size() >= 4 && payload[3] == ':', "invalid verbatim payload shape");
+  return verbatim_string{
+    .encoding = payload.substr(0, 3),
+    .data = payload.substr(4),
+  };
 }
 
 enum class parent_slot_kind : std::uint8_t {
@@ -70,9 +70,11 @@ enum class parent_slot_kind : std::uint8_t {
         REDISCORO_UNREACHABLE();
       }
 
-      // Null-like: preserve type in raw tree, but current message model materializes to null.
-      if (n.type == kind::null || n.i64 == -1) {
+      if (n.type == kind::null) {
         f.result = message{null{}};
+      } else if (n.i64 == -1 && detail::is_typed_null_kind(n.type)) {
+        // Typed nulls keep source kind: $-1/!-1/=-1/*-1/%-1/~-1/>-1
+        f.result = message{null{.source = n.type}};
       } else {
         switch (n.type) {
           case kind::simple_string:

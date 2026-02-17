@@ -63,6 +63,8 @@ class protocol_category_impl : public std::error_category {
         return "resp3 invalid boolean";
       case protocol_errc::invalid_bulk_trailer:
         return "resp3 invalid bulk trailer";
+      case protocol_errc::invalid_verbatim:
+        return "resp3 invalid verbatim";
       case protocol_errc::invalid_double:
         return "resp3 invalid double";
       case protocol_errc::invalid_integer:

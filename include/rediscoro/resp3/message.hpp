@@ -155,6 +155,27 @@ struct message {
     return is<null>();
   }
 
+  /// Check if this is a typed-null value (e.g. "$-1", "*-1", "%-1").
+  [[nodiscard]] bool is_typed_null() const {
+    const auto* n = try_as<null>();
+    return n != nullptr && n->is_typed();
+  }
+
+  /// Check if this is a specific typed-null kind.
+  [[nodiscard]] bool is_typed_null(kind t) const {
+    const auto* n = try_as<null>();
+    return n != nullptr && n->is_typed(t);
+  }
+
+  /// Typed-null source kind (nullopt for generic null or non-null values).
+  [[nodiscard]] auto typed_null_source() const -> std::optional<kind> {
+    const auto* n = try_as<null>();
+    if (n == nullptr || !n->is_typed()) {
+      return std::nullopt;
+    }
+    return n->source;
+  }
+
   /// Check if this is an aggregate type (array, map, set, push)
   [[nodiscard]] bool is_aggregate() const {
     return is<array>() || is<map>() || is<set>() || is<push>();

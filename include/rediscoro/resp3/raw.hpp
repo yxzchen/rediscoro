@@ -20,6 +20,7 @@ struct raw_node {
   // Convention:
   // - kind::integer: i64 is the integer value
   // - bulk/container: i64 is the declared length
+  // - typed null bulk/container: i64 == -1
   // - otherwise: i64 is unspecified
   std::int64_t i64 = 0;
   // Convention:

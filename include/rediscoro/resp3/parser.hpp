@@ -86,7 +86,7 @@ class parser {
     kind container_type{kind::null};
 
     // For map/attribute: expected & produced count PAIRS (key/value), not nodes.
-    std::int64_t expected = 0;      // container len (pairs for map/attr)
+    std::uint32_t expected = 0;     // container len (pairs for map/attr)
     std::uint32_t produced = 0;     // produced children (or pairs)
     std::uint32_t node_index = 0;   // container node (for array/map/set/push)
     std::uint32_t pending_key = 0;  // for map/attr

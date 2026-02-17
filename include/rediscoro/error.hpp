@@ -94,6 +94,9 @@ enum class protocol_errc {
 
   /// Parser is in failed state (prior protocol error occurred).
   parser_failed,
+
+  /// RESP3 verbatim payload must be "xxx:<data>" (3-byte encoding + ':').
+  invalid_verbatim,
 };
 
 enum class server_errc {
