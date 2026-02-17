@@ -18,6 +18,7 @@ namespace rediscoro::detail {
 inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_info>> {
   auto tok = co_await iocoro::this_coro::stop_token;
   if (tok.stop_requested()) {
+    REDISCORO_LOG_WARNING("connect_aborted_before_start");
     co_return unexpected(client_errc::operation_aborted);
   }
 
@@ -37,6 +38,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   }
   auto res = co_await std::move(resolve_res);
   if (!res) {
+    REDISCORO_LOG_WARNING("resolve_failed err_code={}", res.error().value());
     if (res.error() == iocoro::error::timed_out) {
       co_return unexpected(client_errc::resolve_timeout);
     } else if (res.error() == iocoro::error::operation_aborted) {
@@ -46,6 +48,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     }
   }
   if (res->empty()) {
+    REDISCORO_LOG_WARNING("resolve_failed empty_endpoint_list");
     co_return unexpected(client_errc::resolve_failed);
   }
 
@@ -75,6 +78,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   }
 
   if (connect_ec) {
+    REDISCORO_LOG_WARNING("tcp_connect_failed err_code={}", connect_ec.value());
     // Map timeout/cancel vs generic connect failure.
     if (connect_ec == iocoro::error::timed_out) {
       co_return unexpected(client_errc::connect_timeout);
@@ -112,6 +116,8 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   auto slot = std::make_shared<pending_dynamic_response<ignore_t>>(req.reply_count());
 
   if (!pipeline_.push(std::move(req), slot)) {
+    REDISCORO_LOG_WARNING("handshake_enqueue_failed err_code={}",
+                          make_error_code(client_errc::queue_full).value());
     co_return unexpected(client_errc::queue_full);
   }
 
@@ -130,9 +136,11 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
       try {
         hooks.on_start(hooks.user_data, evt);
       } catch (...) {
+        REDISCORO_LOG_WARNING("trace on_start callback threw: request_id={}, kind={}", info.id,
+                              static_cast<unsigned>(info.kind));
       }
     }
-    slot->set_trace_context(hooks, info, start);
+    slot->set_trace_context(hooks, info, start, cfg_.trace_redact_error_detail);
   }
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).
@@ -213,6 +221,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   }
 
   if (!handshake_res) {
+    REDISCORO_LOG_WARNING("handshake_io_failed err_code={}", handshake_res.error().value());
     auto fail_handshake = [&](error_info e) -> expected<void, error_info> {
       pipeline_.clear_all(e);
       return unexpected(std::move(e));
@@ -240,6 +249,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   // Defensive: handshake_res == ok() implies slot should be complete (loop condition). Keep this
   // check to avoid future hangs if the handshake loop logic changes.
   if (!slot->is_complete()) {
+    REDISCORO_LOG_WARNING("handshake_failed slot_incomplete");
     error_info e{client_errc::handshake_failed, "handshake slot incomplete"};
     pipeline_.clear_all(e);
     co_return unexpected(e);
@@ -251,21 +261,32 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
 
       // If server error (AUTH/SELECT failed), preserve the detailed error.
       if (err.code.category() == server_category()) {
+        REDISCORO_LOG_WARNING("handshake_reply_error err_code={}", err.code.value());
         co_return unexpected(err);
       }
 
       // For other errors, use handshake_failed but include the original error detail.
       error_info out{client_errc::handshake_failed, err.to_string()};
+      REDISCORO_LOG_WARNING("handshake_reply_error err_code={}", out.code.value());
       pipeline_.clear_all(out);
       co_return unexpected(out);
     }
   }
 
   // Handshake succeeded.
+  auto const from = state_;
+  REDISCORO_LOG_INFO("state_transition from={} to={}", static_cast<int>(from),
+                     static_cast<int>(connection_state::OPEN));
   set_state(connection_state::OPEN);
   reconnect_count_ = 0;
   generation_ += 1;
-  emit_connection_event(connection_event{.kind = connection_event_kind::connected});
+  emit_connection_event(connection_event{
+    .kind = connection_event_kind::connected,
+    .stage = connection_event_stage::handshake,
+    .source = connection_event_source::connect,
+    .from_state = static_cast<std::int32_t>(from),
+    .to_state = static_cast<std::int32_t>(connection_state::OPEN),
+  });
 
   // Defensive: ensure parser buffer/state is clean when handing over to runtime loops.
   parser_.reset();

@@ -2,6 +2,7 @@
 
 #include <rediscoro/assert.hpp>
 #include <rediscoro/error_info.hpp>
+#include <rediscoro/logger.hpp>
 #include <rediscoro/resp3/message.hpp>
 #include <rediscoro/tracing.hpp>
 
@@ -75,10 +76,12 @@ class response_sink {
   [[nodiscard]] virtual bool is_complete() const noexcept = 0;
 
   auto set_trace_context(request_trace_hooks hooks, request_trace_info info,
-                         std::chrono::steady_clock::time_point start) noexcept -> void {
+                         std::chrono::steady_clock::time_point start,
+                         bool redact_error_detail = true) noexcept -> void {
     trace_hooks_ = hooks;
     trace_info_ = info;
     trace_start_ = start;
+    trace_redact_error_detail_ = redact_error_detail;
     trace_enabled_ = hooks.enabled();
     trace_finished_ = false;
   }
@@ -137,13 +140,16 @@ class response_sink {
       .ok_count = summary.ok_count,
       .error_count = summary.error_count,
       .primary_error = summary.primary_error,
-      .primary_error_detail = summary.primary_error_detail,
+      .primary_error_detail =
+        trace_redact_error_detail_ ? std::string_view{} : summary.primary_error_detail,
     };
 
     // Callbacks are user-provided: do not allow exceptions to escape.
     try {
       hooks.on_finish(hooks.user_data, evt);
     } catch (...) {
+      REDISCORO_LOG_WARNING("trace on_finish callback threw: request_id={}, kind={}",
+                            trace_info().id, static_cast<unsigned>(trace_info().kind));
     }
   }
 
@@ -151,6 +157,7 @@ class response_sink {
   request_trace_hooks trace_hooks_{};
   request_trace_info trace_info_{};
   std::chrono::steady_clock::time_point trace_start_{};
+  bool trace_redact_error_detail_{true};
   bool trace_enabled_{false};
   bool trace_finished_{false};
 };

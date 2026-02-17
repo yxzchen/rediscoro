@@ -60,6 +60,8 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     //   FAILED -> RECONNECTING -> (OPEN | FAILED)
     REDISCORO_ASSERT(state_ == connection_state::FAILED);
     const auto delay = calculate_reconnect_delay();
+    REDISCORO_LOG_INFO("reconnect_attempt index={} delay_ms={} generation={}", reconnect_count_ + 1,
+                       delay.count(), generation_);
 
     if (delay.count() > 0) {
       // NOTE: control_wakeup_ is a counting event. It may already have pending notifications
@@ -91,10 +93,16 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     }
 
     // Attempt reconnect.
+    REDISCORO_LOG_INFO("state_transition from={} to={}", static_cast<int>(connection_state::FAILED),
+                       static_cast<int>(connection_state::RECONNECTING));
     set_state(connection_state::RECONNECTING);
     auto reconnect_res = co_await do_connect();
     if (!reconnect_res) {
       // Failed attempt: transition back to FAILED and schedule next delay.
+      REDISCORO_LOG_WARNING("reconnect_failed err_code={}", reconnect_res.error().code.value());
+      REDISCORO_LOG_INFO("state_transition from={} to={}",
+                         static_cast<int>(connection_state::RECONNECTING),
+                         static_cast<int>(connection_state::FAILED));
       set_state(connection_state::FAILED);
       reconnect_count_ += 1;
       continue;
@@ -104,6 +112,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     REDISCORO_ASSERT(state_ == connection_state::OPEN);
 
     reconnect_count_ = 0;
+    REDISCORO_LOG_INFO("reconnect_succeeded generation={}", generation_);
     read_wakeup_.notify();
     write_wakeup_.notify();
     control_wakeup_.notify();

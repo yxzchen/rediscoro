@@ -97,6 +97,8 @@ struct config {
 
   // Tracing hooks (request-level instrumentation).
   request_trace_hooks trace_hooks{};
+  // Redact request trace error detail by default (detail = "").
+  bool trace_redact_error_detail{true};
 
   // Connection lifecycle hooks (connected/disconnected/closed instrumentation).
   connection_event_hooks connection_hooks{};

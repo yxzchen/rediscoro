@@ -9,6 +9,7 @@
 #include <rediscoro/error.hpp>
 #include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
+#include <rediscoro/logger.hpp>
 #include <rediscoro/request.hpp>
 #include <rediscoro/resp3/parser.hpp>
 

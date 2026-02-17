@@ -161,7 +161,7 @@ TEST(client_trace_test, user_request_trace_start_finish_success) {
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
+TEST(client_trace_test, user_request_trace_finish_redacts_primary_error_detail_by_default) {
   iocoro::io_context ctx;
   auto guard = iocoro::make_work_guard(ctx);
 
@@ -212,8 +212,72 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error) {
       diag = "primary_error mismatch";
       co_return;
     }
+    if (!finishes[0].primary_error_detail.empty()) {
+      diag = "primary_error_detail should be redacted by default";
+      co_return;
+    }
+
+    ok = true;
+    co_return;
+  };
+
+  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+  ctx.run();
+
+  ASSERT_TRUE(ok) << diag;
+}
+
+TEST(client_trace_test,
+     user_request_trace_finish_keeps_primary_error_detail_when_redaction_disabled) {
+  iocoro::io_context ctx;
+  auto guard = iocoro::make_work_guard(ctx);
+
+  trace_recorder recorder{};
+  bool ok = false;
+  std::string diag{};
+
+  auto task = [&]() -> iocoro::awaitable<void> {
+    struct work_guard_reset {
+      decltype(guard)& g;
+      ~work_guard_reset() { g.reset(); }
+    };
+    work_guard_reset reset{guard};
+
+    auto cfg = make_cfg(&recorder);
+    cfg.trace_handshake = false;
+    cfg.trace_redact_error_detail = false;
+
+    rediscoro::client c{ctx.get_executor(), cfg};
+    auto cr = co_await connect_with_retry(c);
+    if (!cr) {
+      diag = "connect failed: " + cr.error().to_string();
+      co_return;
+    }
+
+    auto resp = co_await c.exec<std::string>("THIS_COMMAND_DOES_NOT_EXIST_REDISCORO");
+    auto& slot = resp.get<0>();
+    if (slot.has_value()) {
+      diag = "expected server error";
+      co_return;
+    }
+    if (slot.error().code != rediscoro::server_errc::redis_error) {
+      diag = "expected redis_error";
+      co_return;
+    }
+
+    co_await c.close();
+
+    auto finishes = recorder.finish_snapshot_copy();
+    if (finishes.size() != 1) {
+      diag = "expected exactly one finish trace";
+      co_return;
+    }
+    if (finishes[0].primary_error != rediscoro::server_errc::redis_error) {
+      diag = "primary_error mismatch";
+      co_return;
+    }
     if (finishes[0].primary_error_detail.empty()) {
-      diag = "primary_error_detail should not be empty";
+      diag = "primary_error_detail should be visible when redaction disabled";
       co_return;
     }
 

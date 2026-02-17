@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <system_error>
 
 namespace rediscoro {
@@ -67,15 +68,42 @@ enum class connection_event_kind : std::uint8_t {
   closed,
 };
 
+enum class connection_event_stage : std::uint8_t {
+  unknown = 0,
+  connect,
+  handshake,
+  runtime_io,
+  reconnect,
+  close,
+  actor,
+};
+
+enum class connection_event_source : std::uint8_t {
+  unknown = 0,
+  connect,
+  handshake,
+  runtime_io,
+  reconnect,
+  close,
+  actor,
+};
+
 /// Connection event payload.
 struct connection_event {
   connection_event_kind kind{connection_event_kind::connected};
+  connection_event_stage stage{connection_event_stage::unknown};
+  connection_event_source source{connection_event_source::unknown};
+  std::chrono::steady_clock::time_point timestamp{};
 
   // Monotonic successful-connect generation counter (increments on each OPEN transition).
   std::uint64_t generation{0};
 
   // Reconnection attempt counter used by backoff policy (0 for regular connected).
   int reconnect_count{0};
+
+  // Optional state transition hint (detail::connection_state numeric value).
+  std::optional<std::int32_t> from_state{};
+  std::optional<std::int32_t> to_state{};
 
   // Error details for failure-related events.
   error_info error{};

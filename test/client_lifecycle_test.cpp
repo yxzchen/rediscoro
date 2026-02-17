@@ -130,6 +130,20 @@ TEST(client_lifecycle_test, connect_close_emits_connected_then_closed) {
         diag = "expected at least connected+closed events";
         break;
       }
+      for (auto const& ev : events) {
+        if (ev.stage == rediscoro::connection_event_stage::unknown ||
+            ev.source == rediscoro::connection_event_source::unknown) {
+          diag = "connection event should include stage/source metadata";
+          break;
+        }
+        if (ev.timestamp == std::chrono::steady_clock::time_point{}) {
+          diag = "connection event should include timestamp metadata";
+          break;
+        }
+      }
+      if (!diag.empty()) {
+        break;
+      }
       if (events.back().kind != rediscoro::connection_event_kind::closed) {
         diag = "last event is not closed";
         break;
