@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -446,9 +447,13 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
   constexpr int kSubmitThreads = 4;
   constexpr int kRequestsPerThread = 100;
   constexpr int kTotal = kSubmitThreads * kRequestsPerThread;
+  constexpr int kStateReadThreads = 4;
+  constexpr int kStateReadsPerThread = 5000;
+  constexpr int kTotalStateReads = kStateReadThreads * kStateReadsPerThread;
 
   std::atomic<int> completed{0};
   std::atomic<int> rejected{0};
+  std::atomic<int> state_reads{0};
 
   std::thread runner([&] { (void)ctx.run(); });
 
@@ -473,7 +478,22 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
     });
   }
 
+  std::vector<std::thread> readers;
+  readers.reserve(kStateReadThreads);
+  for (int t = 0; t < kStateReadThreads; ++t) {
+    (void)t;
+    readers.emplace_back([&] {
+      for (int i = 0; i < kStateReadsPerThread; ++i) {
+        (void)c.is_connected();
+        state_reads.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
   for (auto& th : producers) {
+    th.join();
+  }
+  for (auto& th : readers) {
     th.join();
   }
 
@@ -491,5 +511,50 @@ TEST(client_test, concurrent_exec_submission_and_state_reads_are_thread_safe) {
 
   ASSERT_EQ(completed.load(std::memory_order_relaxed), kTotal);
   ASSERT_EQ(rejected.load(std::memory_order_relaxed), kTotal);
+  ASSERT_EQ(state_reads.load(std::memory_order_relaxed), kTotalStateReads);
   ASSERT_FALSE(c.is_connected());
+}
+
+TEST(client_test, enqueue_exception_fallback_fails_sink_with_internal_error) {
+  iocoro::io_context ctx;
+
+  bool ok = false;
+  std::string diag{};
+
+  auto task = [&]() -> iocoro::awaitable<void> {
+    auto sink = std::make_shared<rediscoro::detail::pending_response<std::string>>();
+
+    try {
+      throw std::runtime_error("synthetic dispatch failure");
+    } catch (...) {
+      rediscoro::detail::fail_sink_with_current_exception(sink, "enqueue dispatch");
+    }
+
+    auto resp = co_await sink->wait();
+    auto& slot = resp.get<0>();
+    if (slot.has_value()) {
+      diag = "expected internal_error fallback, got success";
+      co_return;
+    }
+    if (slot.error().code != rediscoro::client_errc::internal_error) {
+      diag = "expected internal_error, got: " + slot.error().to_string();
+      co_return;
+    }
+    if (slot.error().detail.find("enqueue dispatch") == std::string::npos) {
+      diag = "expected fallback detail to include dispatch context";
+      co_return;
+    }
+    if (slot.error().detail.find("synthetic dispatch failure") == std::string::npos) {
+      diag = "expected fallback detail to include exception message";
+      co_return;
+    }
+
+    ok = true;
+    co_return;
+  };
+
+  iocoro::co_spawn(ctx.get_executor(), task(), iocoro::detached);
+  ctx.run();
+
+  ASSERT_TRUE(ok) << diag;
 }

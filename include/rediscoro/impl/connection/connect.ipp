@@ -262,7 +262,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   }
 
   // Handshake succeeded.
-  state_ = connection_state::OPEN;
+  set_state(connection_state::OPEN);
   reconnect_count_ = 0;
   generation_ += 1;
   emit_connection_event(connection_event{.kind = connection_event_kind::connected});

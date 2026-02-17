@@ -73,11 +73,11 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     }
 
     // Attempt reconnect.
-    state_ = connection_state::RECONNECTING;
+    set_state(connection_state::RECONNECTING);
     auto reconnect_res = co_await do_connect();
     if (!reconnect_res) {
       // Failed attempt: transition back to FAILED and schedule next delay.
-      state_ = connection_state::FAILED;
+      set_state(connection_state::FAILED);
       reconnect_count_ += 1;
       auto const err = reconnect_res.error();
       emit_connection_event(connection_event{

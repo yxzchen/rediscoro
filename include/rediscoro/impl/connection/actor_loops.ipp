@@ -67,7 +67,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
     if (state_ == connection_state::FAILED) {
       if (!cfg_.reconnection.enabled) {
         // Deterministic shutdown: no reconnection.
-        state_ = connection_state::CLOSING;
+        set_state(connection_state::CLOSING);
         stop_.request_stop();
         write_wakeup_.notify();
         read_wakeup_.notify();

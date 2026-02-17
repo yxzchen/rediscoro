@@ -20,12 +20,21 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace rediscoro::detail {
+
+auto make_internal_error(std::exception_ptr ep, std::string_view context) -> error_info;
+
+auto make_internal_error_from_current_exception(std::string_view context) -> error_info;
+
+auto fail_sink_with_current_exception(std::shared_ptr<response_sink> const& sink,
+                                      std::string_view context) noexcept -> void;
 
 /// Core Redis connection actor.
 ///
@@ -103,7 +112,9 @@ class connection : public std::enable_shared_from_this<connection> {
                     std::chrono::steady_clock::time_point start) -> void;
 
   /// Get current connection state (for diagnostics).
-  [[nodiscard]] auto state() const noexcept -> connection_state { return state_; }
+  [[nodiscard]] auto state() const noexcept -> connection_state {
+    return state_snapshot_.load(std::memory_order_acquire);
+  }
 
  private:
   /// Start the background connection actor (internal use only).
@@ -212,6 +223,11 @@ class connection : public std::enable_shared_from_this<connection> {
 
   auto emit_connection_event(connection_event evt) noexcept -> void;
 
+  auto set_state(connection_state next) noexcept -> void {
+    state_ = next;
+    state_snapshot_.store(next, std::memory_order_release);
+  }
+
  private:
   // Configuration
   config cfg_;
@@ -224,6 +240,7 @@ class connection : public std::enable_shared_from_this<connection> {
 
   // State machine
   connection_state state_{connection_state::INIT};
+  std::atomic<connection_state> state_snapshot_{connection_state::INIT};
   std::uint64_t generation_{0};  // Increments on each successful OPEN transition.
 
   // Request/response pipeline

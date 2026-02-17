@@ -135,7 +135,7 @@ inline auto connection::handle_error(error_info ec) -> void {
 
   // OPEN runtime error -> FAILED.
   auto const err = ec;
-  state_ = connection_state::FAILED;
+  set_state(connection_state::FAILED);
   emit_connection_event(connection_event{
     .kind = connection_event_kind::disconnected,
     .error = err,

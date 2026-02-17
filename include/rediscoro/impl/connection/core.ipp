@@ -8,9 +8,49 @@
 #include <iocoro/this_coro.hpp>
 
 #include <exception>
+#include <string>
 #include <utility>
 
 namespace rediscoro::detail {
+
+inline auto make_internal_error(std::exception_ptr ep, std::string_view context) -> error_info {
+  std::string detail;
+  if (!context.empty()) {
+    detail.append(context.data(), context.size());
+    detail.append(": ");
+  }
+
+  if (ep == nullptr) {
+    detail.append("unknown exception");
+    return {client_errc::internal_error, std::move(detail)};
+  }
+
+  try {
+    std::rethrow_exception(ep);
+  } catch (std::exception const& e) {
+    detail.append(e.what());
+  } catch (...) {
+    detail.append("unknown exception");
+  }
+
+  return {client_errc::internal_error, std::move(detail)};
+}
+
+inline auto make_internal_error_from_current_exception(std::string_view context) -> error_info {
+  return make_internal_error(std::current_exception(), context);
+}
+
+inline auto fail_sink_with_current_exception(std::shared_ptr<response_sink> const& sink,
+                                             std::string_view context) noexcept -> void {
+  if (!sink) {
+    return;
+  }
+  auto err = make_internal_error_from_current_exception(context);
+  try {
+    sink->fail_all(std::move(err));
+  } catch (...) {
+  }
+}
 
 inline connection::connection(iocoro::any_io_executor ex, config cfg)
     : cfg_(std::move(cfg)),
@@ -40,7 +80,7 @@ inline connection::~connection() noexcept {
   // Do not force CLOSED here (only transition_to_closed() may write CLOSED).
   // We only ensure resources are released.
   if (state_ != connection_state::CLOSED) {
-    state_ = connection_state::CLOSING;
+    set_state(connection_state::CLOSING);
   }
 
   pipeline_.clear_all(client_errc::connection_closed);
@@ -71,7 +111,28 @@ inline auto connection::run_actor() -> void {
       // Ensure lifecycle mutations are serialized on the connection strand.
       ex.post([self = std::move(self), r = std::move(r)]() mutable {
         self->actor_running_ = false;
-        (void)r;
+
+        if (!r) {
+          auto err = make_internal_error(r.error(), "connection actor");
+          if (self->state_ != connection_state::CLOSING &&
+              self->state_ != connection_state::CLOSED) {
+            self->emit_connection_event(connection_event{
+              .kind = connection_event_kind::disconnected,
+              .error = err,
+            });
+          }
+          self->pipeline_.clear_all(err);
+          if (self->socket_.is_open()) {
+            (void)self->socket_.close();
+          }
+          if (self->state_ != connection_state::CLOSED) {
+            self->set_state(connection_state::CLOSING);
+          }
+          self->write_wakeup_.notify();
+          self->read_wakeup_.notify();
+          self->control_wakeup_.notify();
+        }
+
         if (self->state_ != connection_state::CLOSED) {
           self->transition_to_closed();
         }
@@ -93,7 +154,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
 
   if (state_ == connection_state::CLOSED) {
     // Retry support: reset lifecycle state.
-    state_ = connection_state::INIT;
+    set_state(connection_state::INIT);
     reconnect_count_ = 0;
     stop_.reset();
   }
@@ -106,7 +167,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
     run_actor();
   }
 
-  state_ = connection_state::CONNECTING;
+  set_state(connection_state::CONNECTING);
 
   // Attempt connection. do_connect() returns unexpected(error) on failure.
   auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.get_token(),
@@ -141,7 +202,7 @@ inline auto connection::close() -> iocoro::awaitable<void> {
 
   // Phase-1: determinism-first shutdown.
   stop_.request_stop();
-  state_ = connection_state::CLOSING;
+  set_state(connection_state::CLOSING);
 
   // Fail all pending work deterministically.
   pipeline_.clear_all(client_errc::connection_closed);
@@ -263,7 +324,7 @@ inline auto connection::emit_connection_event(connection_event evt) noexcept -> 
 
 inline auto connection::transition_to_closed() -> void {
   // Deterministic cleanup (idempotent).
-  state_ = connection_state::CLOSED;
+  set_state(connection_state::CLOSED);
 
   pipeline_.clear_all(client_errc::connection_closed);
 

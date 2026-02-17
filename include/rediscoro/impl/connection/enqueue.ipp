@@ -23,7 +23,11 @@ inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response
   // extra scheduling hop; otherwise it behaves like post().
   executor_.strand().executor().dispatch(
     [self = shared_from_this(), req = std::move(req), slot, start]() mutable {
-      self->enqueue_impl(std::move(req), std::move(slot), start);
+      try {
+        self->enqueue_impl(std::move(req), slot, start);
+      } catch (...) {
+        fail_sink_with_current_exception(slot, "enqueue dispatch");
+      }
     });
 
   return slot;
@@ -42,7 +46,11 @@ inline auto connection::enqueue_dynamic(request req)
   // All state_ / pipeline_ mutation must happen on the connection strand.
   executor_.strand().executor().dispatch(
     [self = shared_from_this(), req = std::move(req), slot, start]() mutable {
-      self->enqueue_impl(std::move(req), std::move(slot), start);
+      try {
+        self->enqueue_impl(std::move(req), slot, start);
+      } catch (...) {
+        fail_sink_with_current_exception(slot, "enqueue_dynamic dispatch");
+      }
     });
 
   return slot;
