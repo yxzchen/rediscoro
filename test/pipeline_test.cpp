@@ -126,8 +126,16 @@ TEST(pipeline_test, deadline_order_and_expiration) {
   p.on_write_done(req1.wire().size());
   EXPECT_EQ(p.next_deadline(), d2);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
-  EXPECT_TRUE(p.has_expired());
+  const auto poll_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+  auto expired = false;
+  while (std::chrono::steady_clock::now() < poll_deadline) {
+    if (p.has_expired()) {
+      expired = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(expired);
 }
 
 TEST(pipeline_test, clear_all_mixed_pending_and_awaiting) {

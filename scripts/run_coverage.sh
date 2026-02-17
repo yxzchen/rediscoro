@@ -6,6 +6,8 @@ BUILD_DIR="build-coverage"
 JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 CLEAN=false
 MIN_LINE_COVERAGE=70.0
+MIN_BRANCH_COVERAGE=""
+MIN_FUNCTION_COVERAGE=""
 
 print_help() {
   cat << 'EOF'
@@ -15,6 +17,8 @@ Options:
   --build-dir DIR    Build directory (default: build-coverage)
   --jobs N           Parallel build/test jobs (default: auto-detected)
   --min-line PCT     Minimum line coverage percent, must be exceeded (default: 70.0)
+  --min-branch PCT   Minimum branch coverage percent, must be exceeded (default: disabled)
+  --min-function PCT Minimum function coverage percent, must be exceeded (default: disabled)
   --clean            Remove build directory before configuring
   -h, --help         Show this help
 
@@ -38,6 +42,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --min-line)
       MIN_LINE_COVERAGE="$2"
+      shift 2
+      ;;
+    --min-branch)
+      MIN_BRANCH_COVERAGE="$2"
+      shift 2
+      ;;
+    --min-function)
+      MIN_FUNCTION_COVERAGE="$2"
       shift 2
       ;;
     --clean)
@@ -112,24 +124,40 @@ func = data.get("function_percent", 0.0)
 print(f"[INFO] Coverage summary: line={line:.2f}% branch={branch:.2f}% function={func:.2f}%")
 PY
 
-python3 - "$OUT_DIR/summary.json" "$MIN_LINE_COVERAGE" <<'PY'
+run_gate_check() {
+  local metric_key="$1"
+  local metric_label="$2"
+  local threshold="$3"
+  python3 - "$OUT_DIR/summary.json" "$metric_key" "$metric_label" "$threshold" <<'PY'
 import json
 import pathlib
 import sys
 
 summary_path = pathlib.Path(sys.argv[1])
-min_line = float(sys.argv[2])
+metric_key = sys.argv[2]
+metric_label = sys.argv[3]
+threshold = float(sys.argv[4])
 with summary_path.open("r", encoding="utf-8") as f:
     data = json.load(f)
 
-line = float(data.get("line_percent", 0.0))
-if line <= min_line:
+value = float(data.get(metric_key, 0.0))
+if value <= threshold:
     print(
-        f"[ERROR] Line coverage gate failed: {line:.2f}% is not greater than {min_line:.2f}%",
+        f"[ERROR] {metric_label} coverage gate failed: {value:.2f}% is not greater than {threshold:.2f}%",
         file=sys.stderr,
     )
     sys.exit(1)
-print(f"[INFO] Line coverage gate passed: {line:.2f}% > {min_line:.2f}%")
+print(f"[INFO] {metric_label} coverage gate passed: {value:.2f}% > {threshold:.2f}%")
 PY
+}
 
+run_gate_check "line_percent" "Line" "$MIN_LINE_COVERAGE"
+
+if [[ -n "$MIN_BRANCH_COVERAGE" ]]; then
+  run_gate_check "branch_percent" "Branch" "$MIN_BRANCH_COVERAGE"
+fi
+
+if [[ -n "$MIN_FUNCTION_COVERAGE" ]]; then
+  run_gate_check "function_percent" "Function" "$MIN_FUNCTION_COVERAGE"
+fi
 echo "[INFO] Coverage reports written to: $OUT_DIR"

@@ -109,15 +109,64 @@ jobs:
           CXX: ${{ matrix.toolchain == 'clang' && 'clang++' || 'g++' }}
         run: |
           chmod +x ./scripts/build.sh
+          CTEST_TIMEOUT=180
           if [ "${{ matrix.sanitizer }}" = "asan" ]; then
-            ./scripts/build.sh -c -t --asan
+            ./scripts/build.sh -c -t --asan --ctest-timeout "$CTEST_TIMEOUT"
           elif [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
-            ./scripts/build.sh -c -t --ubsan
+            ./scripts/build.sh -c -t --ubsan --ctest-timeout "$CTEST_TIMEOUT"
           elif [ "${{ matrix.sanitizer }}" = "tsan" ]; then
-            ./scripts/build.sh -c -t --tsan
+            ./scripts/build.sh -c -t --tsan --ctest-timeout "$CTEST_TIMEOUT"
           else
-            ./scripts/build.sh -c -t
+            ./scripts/build.sh -c -t --ctest-timeout "$CTEST_TIMEOUT"
           fi
+
+  client-stress-repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config g++ libgtest-dev redis-server
+
+          if [ -d /usr/src/gtest ]; then
+            cd /usr/src/gtest
+            sudo cmake -S . -B build
+            sudo cmake --build build -j
+            sudo cmake --install build
+          elif [ -d /usr/src/googletest ]; then
+            cd /usr/src/googletest
+            sudo cmake -S . -B build
+            sudo cmake --build build -j
+            sudo cmake --install build
+          fi
+
+      - name: Start local Redis
+        run: |
+          if ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+            sudo redis-server --daemonize yes --bind 127.0.0.1 --port 6379 --save "" --appendonly no
+          fi
+          redis-cli -h 127.0.0.1 -p 6379 ping
+
+      - name: Build tests
+        run: |
+          cmake -S . -B build-client-stress \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DREDISCORO_BUILD_TESTS=ON \
+            -DREDISCORO_BUILD_EXAMPLES=OFF
+          cmake --build build-client-stress -j "$(nproc)"
+
+      - name: Repeat client tests until fail (20 rounds)
+        timeout-minutes: 20
+        run: |
+          ctest --test-dir build-client-stress --output-on-failure \
+            --timeout 180 \
+            -j 1 \
+            -R '^client_.*' \
+            --repeat until-fail:20
 
   install-test:
     runs-on: ubuntu-latest
@@ -224,7 +273,7 @@ jobs:
       - name: Build, test, and collect coverage
         run: |
           chmod +x ./scripts/run_coverage.sh
-          ./scripts/run_coverage.sh --clean --build-dir build-coverage --jobs "$(nproc)" --min-line 60
+          ./scripts/run_coverage.sh --clean --build-dir build-coverage --jobs "$(nproc)" --min-line 60 --min-branch 30 --min-function 75
 
       - name: Coverage summary
         run: |
