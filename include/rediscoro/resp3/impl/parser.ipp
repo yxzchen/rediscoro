@@ -81,16 +81,30 @@ namespace detail {
   return payload.size() >= 4 && payload[3] == ':';
 }
 
+[[nodiscard]] inline auto exceeds_i64_limit(std::int64_t value, std::size_t limit) -> bool {
+  if (value < 0) {
+    return false;
+  }
+  return static_cast<std::uint64_t>(value) > static_cast<std::uint64_t>(limit);
+}
+
 }  // namespace detail
 
 inline auto parser::parse_length_after_type(std::string_view data) const
   -> expected<std::optional<length_header>, rediscoro::protocol_errc> {
-  auto pos = detail::find_crlf(data.substr(1));
+  auto line = data.substr(1);
+  auto pos = detail::find_crlf(line);
   if (pos == std::string_view::npos) {
+    if (line.size() > limits_.max_resp_line_bytes) {
+      return unexpected(protocol_errc::invalid_length);
+    }
     return std::optional<length_header>{};
   }
+  if (pos > limits_.max_resp_line_bytes) {
+    return unexpected(protocol_errc::invalid_length);
+  }
 
-  auto len_str = data.substr(1, pos);
+  auto len_str = line.substr(0, pos);
   std::int64_t len{};
   if (!detail::parse_i64(len_str, len)) {
     return unexpected(protocol_errc::invalid_length);
@@ -105,6 +119,9 @@ inline auto parser::parse_length_after_type(std::string_view data) const
 inline auto parser::start_container(frame& current, kind t, std::int64_t len)
   -> expected<step_index, rediscoro::protocol_errc> {
   if (len < -1) {
+    return unexpected(protocol_errc::invalid_length);
+  }
+  if (len > static_cast<std::int64_t>(limits_.max_resp_container_len)) {
     return unexpected(protocol_errc::invalid_length);
   }
 
@@ -164,6 +181,9 @@ inline auto parser::start_container(frame& current, kind t, std::int64_t len)
 inline auto parser::start_attribute(std::int64_t len)
   -> expected<std::monostate, rediscoro::protocol_errc> {
   if (len < 0) {
+    return unexpected(protocol_errc::invalid_length);
+  }
+  if (len > static_cast<std::int64_t>(limits_.max_resp_container_len)) {
     return unexpected(protocol_errc::invalid_length);
   }
   if (len == 0) {
@@ -286,19 +306,23 @@ inline auto parser::parse_value() -> expected<std::optional<step_index>, redisco
   // Bulk-like: $ ! =
   if (*maybe_t == kind::bulk_string || *maybe_t == kind::bulk_error ||
       *maybe_t == kind::verbatim_string) {
-    auto pos = detail::find_crlf(data.substr(1));
-    if (pos == std::string_view::npos) {
+    auto hdr = parse_length_after_type(data);
+    if (!hdr) {
+      return unexpected(hdr.error());
+    }
+    if (!hdr->has_value()) {
       return std::optional<step_index>{};
     }
-    std::int64_t len{};
-    if (!detail::parse_i64(data.substr(1, pos), len)) {
-      return unexpected(protocol_errc::invalid_length);
-    }
+    auto const& lh = **hdr;
+    auto const len = lh.length;
     if (len < -1) {
       return unexpected(protocol_errc::invalid_length);
     }
+    if (detail::exceeds_i64_limit(len, limits_.max_resp_bulk_bytes)) {
+      return unexpected(protocol_errc::invalid_length);
+    }
 
-    auto header_bytes = 1 + pos + 2;
+    auto const header_bytes = lh.header_bytes;
     if (len == -1) {
       buf_.consume(header_bytes);
       auto idx = static_cast<std::uint32_t>(tree_.nodes.size());
@@ -333,11 +357,18 @@ inline auto parser::parse_value() -> expected<std::optional<step_index>, redisco
   }
 
   // Line-like: + - : , (
-  auto pos = detail::find_crlf(data.substr(1));
+  auto line_data = data.substr(1);
+  auto pos = detail::find_crlf(line_data);
   if (pos == std::string_view::npos) {
+    if (line_data.size() > limits_.max_resp_line_bytes) {
+      return unexpected(protocol_errc::invalid_length);
+    }
     return std::optional<step_index>{};
   }
-  auto line = data.substr(1, pos);
+  if (pos > limits_.max_resp_line_bytes) {
+    return unexpected(protocol_errc::invalid_length);
+  }
+  auto line = line_data.substr(0, pos);
   auto consume_bytes = 1 + pos + 2;
 
   if (*maybe_t == kind::simple_string || *maybe_t == kind::simple_error ||

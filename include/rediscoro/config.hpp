@@ -3,6 +3,8 @@
 #include <rediscoro/tracing.hpp>
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -68,6 +70,12 @@ struct config {
   /// Request timeout (per-request deadline).
   /// If nullopt, no timeout is applied (indefinite wait).
   std::optional<std::chrono::milliseconds> request_timeout{5000};
+
+  // RESP3 input hardening limits (enabled by default).
+  // Exceeding these limits is treated as protocol_errc::invalid_length.
+  std::size_t max_resp_bulk_bytes = 512ULL * 1024ULL * 1024ULL;  // 512 MiB
+  std::uint32_t max_resp_container_len = 1'000'000U;
+  std::size_t max_resp_line_bytes = 64ULL * 1024ULL;  // 64 KiB
 
   // Authentication & setup
   std::string username{};

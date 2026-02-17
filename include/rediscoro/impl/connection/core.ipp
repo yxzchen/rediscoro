@@ -13,7 +13,15 @@
 namespace rediscoro::detail {
 
 inline connection::connection(iocoro::any_io_executor ex, config cfg)
-    : cfg_(std::move(cfg)), executor_(ex), socket_(executor_.get_io_executor()) {}
+    : cfg_(std::move(cfg)),
+      executor_(ex),
+      socket_(executor_.get_io_executor()),
+      pipeline_(),
+      parser_(resp3::parser::limits{
+        .max_resp_bulk_bytes = cfg_.max_resp_bulk_bytes,
+        .max_resp_container_len = cfg_.max_resp_container_len,
+        .max_resp_line_bytes = cfg_.max_resp_line_bytes,
+      }) {}
 
 inline connection::~connection() noexcept {
   // Best-effort synchronous cleanup.

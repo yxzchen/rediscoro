@@ -32,7 +32,14 @@ namespace rediscoro::resp3 {
 /// - after consuming `tree()+root`, call reclaim() before parsing the next message
 class parser {
  public:
+  struct limits {
+    std::size_t max_resp_bulk_bytes = 512ULL * 1024ULL * 1024ULL;  // 512 MiB
+    std::uint32_t max_resp_container_len = 1'000'000U;
+    std::size_t max_resp_line_bytes = 64ULL * 1024ULL;  // 64 KiB
+  };
+
   parser() = default;
+  explicit parser(limits lims) : limits_(lims) {}
 
   /// Zero-copy input API (caller writes into parser-owned buffer).
   auto prepare(std::size_t min_size = 4096) -> std::span<std::byte> {
@@ -145,6 +152,7 @@ class parser {
   bool tree_ready_{false};
 
   pending_attributes pending_attrs_{};
+  limits limits_{};
 
   [[nodiscard]] auto parse_length_after_type(std::string_view data) const
     -> expected<std::optional<length_header>, rediscoro::protocol_errc>;

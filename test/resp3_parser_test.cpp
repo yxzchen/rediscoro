@@ -309,6 +309,46 @@ TEST(resp3_parser_test, protocol_error_on_malformed_verbatim_payload) {
   EXPECT_TRUE(p.failed());
 }
 
+TEST(resp3_parser_test, protocol_error_on_bulk_length_exceeds_config_limit) {
+  parser p{parser::limits{.max_resp_bulk_bytes = 4}};
+  append(p, "$5\r\nhello\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
+  EXPECT_TRUE(p.failed());
+}
+
+TEST(resp3_parser_test, protocol_error_on_container_length_exceeds_config_limit) {
+  parser p{parser::limits{.max_resp_container_len = 2}};
+  append(p, "*3\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
+  EXPECT_TRUE(p.failed());
+}
+
+TEST(resp3_parser_test, protocol_error_on_line_without_crlf_exceeds_config_limit) {
+  parser p{parser::limits{.max_resp_line_bytes = 3}};
+  append(p, "+ABCD");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
+  EXPECT_TRUE(p.failed());
+}
+
+TEST(resp3_parser_test, protocol_error_on_line_payload_exceeds_config_limit) {
+  parser p{parser::limits{.max_resp_line_bytes = 3}};
+  append(p, "+ABCD\r\n");
+
+  auto r = p.parse_one();
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
+  EXPECT_TRUE(p.failed());
+}
+
 TEST(resp3_parser_test, roundtrip_encoder_parser_for_complex_message) {
   message original;
   attribute attr;
