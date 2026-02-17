@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rediscoro/detail/internal_header_access.hpp>
+
 #include <iocoro/any_io_executor.hpp>
 #include <iocoro/strand.hpp>
 

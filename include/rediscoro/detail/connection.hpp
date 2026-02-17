@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rediscoro/detail/internal_header_access.hpp>
+
 #include <rediscoro/config.hpp>
 #include <rediscoro/detail/connection_executor.hpp>
 #include <rediscoro/detail/connection_state.hpp>

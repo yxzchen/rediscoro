@@ -12,6 +12,17 @@ parser.
 - **OS**: Linux (inherited from `iocoro` backends).
 - **Protocol**: RESP3 handshake (`HELLO 3`) is used.
 
+## API boundary
+
+- **Public headers**: `include/rediscoro/*.hpp` (for example `<rediscoro/rediscoro.hpp>` and
+  `<rediscoro/client.hpp>`). These are the supported user-facing entry points.
+- **Internal headers**: `include/rediscoro/detail/*.hpp`. These are implementation details and are
+  not a stable API contract.
+- `rediscoro` is header-only, so internal headers are installed with the package for build
+  completeness, but they may change without compatibility guarantees.
+- Direct include of internal headers is blocked by default. If you need white-box/internal tests,
+  define `REDISCORO_ALLOW_INTERNAL_HEADERS` explicitly in your build.
+
 ## Key capabilities
 
 - **Coroutine-friendly API**: `connect()`, `exec<T>()`, `close()`.

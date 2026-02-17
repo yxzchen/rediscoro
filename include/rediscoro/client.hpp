@@ -1,7 +1,17 @@
 #pragma once
 
 #include <rediscoro/config.hpp>
+
+#if !defined(REDISCORO_DETAIL_INTERNAL_INCLUDE)
+#define REDISCORO_DETAIL_INTERNAL_INCLUDE 1
+#define REDISCORO_DETAIL_INTERNAL_INCLUDE_DEFINED_BY_CLIENT_HPP 1
+#endif
 #include <rediscoro/detail/connection.hpp>
+#if defined(REDISCORO_DETAIL_INTERNAL_INCLUDE_DEFINED_BY_CLIENT_HPP)
+#undef REDISCORO_DETAIL_INTERNAL_INCLUDE_DEFINED_BY_CLIENT_HPP
+#undef REDISCORO_DETAIL_INTERNAL_INCLUDE
+#endif
+
 #include <rediscoro/error_info.hpp>
 #include <rediscoro/expected.hpp>
 #include <rediscoro/request.hpp>
