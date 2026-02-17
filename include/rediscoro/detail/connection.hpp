@@ -209,13 +209,13 @@ class connection : public std::enable_shared_from_this<connection> {
   /// Called by `control_loop()` when `state_ == FAILED` and reconnection is enabled:
   /// - Applies immediate attempts + exponential backoff (capped).
   /// - Attempts `do_connect()` under `RECONNECTING`.
-  /// - On failure: transitions back to `FAILED`, emits disconnected, increments attempt count.
+  /// - On failure: transitions back to `FAILED`, increments attempt count.
   /// - On success: `do_connect()` sets `OPEN`; attempt counter is reset and connected emitted.
   /// - If close/cancel is requested, returns promptly and lets shutdown proceed.
   auto do_reconnect() -> iocoro::awaitable<void>;
 
   /// Calculate reconnection delay based on attempt count.
-  /// Returns 0 for immediate attempts, exponential backoff otherwise.
+  /// Returns 0 for immediate attempts, jittered/capped backoff otherwise.
   [[nodiscard]] auto calculate_reconnect_delay() const -> std::chrono::milliseconds;
 
   /// Transition to CLOSED state and cleanup.

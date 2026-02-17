@@ -18,14 +18,32 @@ inline auto connection::calculate_reconnect_delay() const -> std::chrono::millis
   }
 
   const auto backoff_index = reconnect_count_ - cfg_.reconnection.immediate_attempts;
-  const auto base_ms = static_cast<double>(cfg_.reconnection.initial_delay.count());
+  const auto min_delay_ms = static_cast<double>(cfg_.reconnection.initial_delay.count());
+  const auto max_delay_ms = static_cast<double>(cfg_.reconnection.max_delay.count());
+  const auto base_ms = min_delay_ms;
   const auto factor =
     std::pow(cfg_.reconnection.backoff_factor, static_cast<double>(backoff_index));
   const auto delay_ms = base_ms * factor;
+  auto bounded_ms = std::clamp(delay_ms, min_delay_ms, max_delay_ms);
 
-  const auto capped =
-    std::min<double>(delay_ms, static_cast<double>(cfg_.reconnection.max_delay.count()));
-  const auto out = static_cast<std::int64_t>(capped);
+  if (bounded_ms > 0.0 && cfg_.reconnection.jitter_ratio > 0.0) {
+    // Simple xorshift64* for jitter sampling (no allocation/exception path).
+    static thread_local std::uint64_t jitter_state = 0x4d595df4d0f33173ULL;
+    jitter_state ^= (static_cast<std::uint64_t>(reconnect_count_) << 1);
+    jitter_state ^= (generation_ << 17);
+    jitter_state ^= (jitter_state >> 12);
+    jitter_state ^= (jitter_state << 25);
+    jitter_state ^= (jitter_state >> 27);
+
+    const double unit = static_cast<double>((jitter_state * 2685821657736338717ULL) >> 11) *
+                        (1.0 / 9007199254740992.0);
+    const double scale =
+      (1.0 - cfg_.reconnection.jitter_ratio) + (2.0 * cfg_.reconnection.jitter_ratio * unit);
+    bounded_ms *= scale;
+    bounded_ms = std::clamp(bounded_ms, min_delay_ms, max_delay_ms);
+  }
+
+  const auto out = static_cast<std::int64_t>(std::llround(bounded_ms));
   if (out <= 0) {
     return std::chrono::milliseconds{0};
   }
@@ -79,11 +97,6 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
       // Failed attempt: transition back to FAILED and schedule next delay.
       set_state(connection_state::FAILED);
       reconnect_count_ += 1;
-      auto const err = reconnect_res.error();
-      emit_connection_event(connection_event{
-        .kind = connection_event_kind::disconnected,
-        .error = err,
-      });
       continue;
     }
 

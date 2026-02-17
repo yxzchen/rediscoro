@@ -15,7 +15,7 @@ namespace rediscoro {
 /// Strategy:
 /// 1. Immediate reconnection (no delay):
 ///    - First `immediate_attempts` reconnections happen instantly
-///    - No state window where requests would be rejected
+///    - A reject window may still appear during FAILED/RECONNECTING transitions
 ///
 /// 2. Backoff reconnection (with exponential delay):
 ///    - After immediate attempts exhausted, start exponential backoff
@@ -33,7 +33,7 @@ struct reconnection_policy {
   bool enabled = true;
 
   /// Number of immediate reconnection attempts (no delay).
-  /// During this phase, there's no window where requests are rejected.
+  /// During this phase, a reject window may still appear during state transitions.
   /// Recommended: 5-10 attempts.
   int immediate_attempts = 5;
 
@@ -47,6 +47,10 @@ struct reconnection_policy {
   /// Exponential backoff factor.
   /// delay = initial_delay * (backoff_factor ^ attempt_number)
   double backoff_factor = 2.0;
+
+  /// Relative random jitter applied to delayed retries (0.2 => +/-20%).
+  /// Jitter is ignored for immediate (zero-delay) retries.
+  double jitter_ratio = 0.2;
 };
 
 /// Client configuration.

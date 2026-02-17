@@ -7,11 +7,42 @@
 #include <iocoro/co_spawn.hpp>
 #include <iocoro/this_coro.hpp>
 
+#include <cmath>
 #include <exception>
 #include <string>
 #include <utility>
 
 namespace rediscoro::detail {
+
+inline auto sanitize_reconnection_policy(reconnection_policy policy) -> reconnection_policy {
+  if (policy.immediate_attempts < 0) {
+    policy.immediate_attempts = 0;
+  }
+
+  if (policy.initial_delay.count() < 0) {
+    policy.initial_delay = std::chrono::milliseconds{0};
+  }
+
+  if (policy.max_delay.count() < 0) {
+    policy.max_delay = std::chrono::milliseconds{0};
+  }
+
+  if (policy.max_delay < policy.initial_delay) {
+    policy.max_delay = policy.initial_delay;
+  }
+
+  if (!std::isfinite(policy.backoff_factor) || policy.backoff_factor <= 1.0) {
+    policy.backoff_factor = 2.0;
+  }
+
+  if (!std::isfinite(policy.jitter_ratio) || policy.jitter_ratio < 0.0) {
+    policy.jitter_ratio = 0.0;
+  } else if (policy.jitter_ratio > 1.0) {
+    policy.jitter_ratio = 1.0;
+  }
+
+  return policy;
+}
 
 inline auto make_internal_error(std::exception_ptr ep, std::string_view context) -> error_info {
   std::string detail;
@@ -64,7 +95,9 @@ inline connection::connection(iocoro::any_io_executor ex, config cfg)
         .max_resp_bulk_bytes = cfg_.max_resp_bulk_bytes,
         .max_resp_container_len = cfg_.max_resp_container_len,
         .max_resp_line_bytes = cfg_.max_resp_line_bytes,
-      }) {}
+      }) {
+  cfg_.reconnection = sanitize_reconnection_policy(cfg_.reconnection);
+}
 
 inline connection::~connection() noexcept {
   // Best-effort synchronous cleanup.
