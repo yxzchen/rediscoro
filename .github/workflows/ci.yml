@@ -293,3 +293,39 @@ jobs:
               f.write(f"- Function: **{func:.2f}%**\n")
           PY
           cat "$HOME/coverage_summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+  perf-benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config g++ libssl-dev redis-server python3-jsonschema
+
+      - name: Start local Redis
+        run: |
+          if ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+            sudo redis-server --daemonize yes --bind 127.0.0.1 --port 6379 --save "" --appendonly no
+          fi
+          redis-cli -h 127.0.0.1 -p 6379 ping
+
+      - name: Build benchmarks
+        run: |
+          cmake -S . -B build-perf -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DREDISCORO_BUILD_BENCHMARKS=ON \
+            -DREDISCORO_BUILD_TESTS=OFF \
+            -DREDISCORO_BUILD_EXAMPLES=OFF
+          cmake --build build-perf -j "$(nproc)"
+
+      - name: Run perf benchmarks
+        run: |
+          ./benchmark/scripts/run_perf_benchmarks.sh \
+            --build-dir build-perf \
+            --iterations 3 \
+            --warmup 1 \
+            --timeout-sec 180

@@ -10,6 +10,7 @@ option(REDISCORO_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(REDISCORO_ENABLE_COVERAGE "Enable gcov-compatible coverage instrumentation" OFF)
 option(REDISCORO_ENABLE_CLANG_TIDY "Enable clang-tidy during compilation" OFF)
 option(REDISCORO_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
+option(REDISCORO_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 
 add_library(rediscoro INTERFACE)
 add_library(rediscoro::rediscoro ALIAS rediscoro)
@@ -95,6 +96,10 @@ endif()
 
 if(REDISCORO_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(REDISCORO_BUILD_BENCHMARKS)
+    add_subdirectory(benchmark)
 endif()
 
 install(TARGETS rediscoro EXPORT rediscoroTargets)
