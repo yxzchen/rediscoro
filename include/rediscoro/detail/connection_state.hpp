@@ -58,4 +58,25 @@ enum class connection_state {
   CLOSED
 };
 
+[[nodiscard]] constexpr auto to_string(connection_state state) noexcept -> char const* {
+  switch (state) {
+    case connection_state::INIT:
+      return "INIT";
+    case connection_state::CONNECTING:
+      return "CONNECTING";
+    case connection_state::OPEN:
+      return "OPEN";
+    case connection_state::FAILED:
+      return "FAILED";
+    case connection_state::RECONNECTING:
+      return "RECONNECTING";
+    case connection_state::CLOSING:
+      return "CLOSING";
+    case connection_state::CLOSED:
+      return "CLOSED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 }  // namespace rediscoro::detail

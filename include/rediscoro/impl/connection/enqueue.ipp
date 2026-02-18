@@ -11,6 +11,9 @@ template <typename... Ts>
 inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response<Ts...>> {
   REDISCORO_ASSERT(req.reply_count() == sizeof...(Ts));
   auto slot = std::make_shared<pending_response<Ts...>>();
+  REDISCORO_LOG_DEBUG(
+    "connection.enqueue.api.fixed command_count={} wire_bytes={} expected_replies={}",
+    req.command_count(), req.wire().size(), sizeof...(Ts));
 
   const bool need_trace = cfg_.trace_hooks.enabled();
   const auto start =
@@ -26,6 +29,7 @@ inline auto connection::enqueue(request req) -> std::shared_ptr<pending_response
       try {
         self->enqueue_impl(std::move(req), slot, start);
       } catch (...) {
+        REDISCORO_LOG_ERROR("connection.enqueue.api.fixed.dispatch_exception");
         fail_sink_with_current_exception(slot, "enqueue dispatch");
       }
     });
@@ -37,6 +41,9 @@ template <typename T>
 inline auto connection::enqueue_dynamic(request req)
   -> std::shared_ptr<pending_dynamic_response<T>> {
   auto slot = std::make_shared<pending_dynamic_response<T>>(req.reply_count());
+  REDISCORO_LOG_DEBUG(
+    "connection.enqueue.api.dynamic command_count={} wire_bytes={} expected_replies={}",
+    req.command_count(), req.wire().size(), req.reply_count());
 
   const bool need_trace = cfg_.trace_hooks.enabled();
   const auto start =
@@ -49,6 +56,7 @@ inline auto connection::enqueue_dynamic(request req)
       try {
         self->enqueue_impl(std::move(req), slot, start);
       } catch (...) {
+        REDISCORO_LOG_ERROR("connection.enqueue.api.dynamic.dispatch_exception");
         fail_sink_with_current_exception(slot, "enqueue_dynamic dispatch");
       }
     });

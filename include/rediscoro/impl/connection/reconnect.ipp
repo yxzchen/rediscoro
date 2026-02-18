@@ -54,14 +54,15 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
   // Precondition: called on strand.
   // State intent: FAILED -> (sleep) -> RECONNECTING -> OPEN, or exit early on close/cancel.
   auto tok = co_await iocoro::this_coro::stop_token;
+  REDISCORO_LOG_DEBUG("connection.reconnect.loop_start state={}", to_string(state_));
   while (!tok.stop_requested() && state_ != connection_state::CLOSED) {
     // Precondition: caller enters do_reconnect() from FAILED.
     // This coroutine does not write FAILED redundantly; it only transitions:
     //   FAILED -> RECONNECTING -> (OPEN | FAILED)
     REDISCORO_ASSERT(state_ == connection_state::FAILED);
     const auto delay = calculate_reconnect_delay();
-    REDISCORO_LOG_INFO("reconnect_attempt index={} delay_ms={} generation={}", reconnect_count_ + 1,
-                       delay.count(), generation_);
+    REDISCORO_LOG_INFO("connection.reconnect.attempt index={} delay_ms={} generation={}",
+                       reconnect_count_ + 1, delay.count(), generation_);
 
     if (delay.count() > 0) {
       // NOTE: control_wakeup_ is a counting event. It may already have pending notifications
@@ -85,24 +86,29 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
         auto timer_wait = timer.async_wait(iocoro::use_awaitable);
         auto wake_wait = control_wakeup_.async_wait();
         (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
+        REDISCORO_LOG_DEBUG("connection.reconnect.backoff_wakeup");
       }
     }
 
     if (tok.stop_requested() || state_ == connection_state::CLOSING) {
+      REDISCORO_LOG_INFO("connection.reconnect.cancelled state={}", to_string(state_));
       co_return;
     }
 
     // Attempt reconnect.
-    REDISCORO_LOG_INFO("state_transition from={} to={}", static_cast<int>(connection_state::FAILED),
-                       static_cast<int>(connection_state::RECONNECTING));
+    REDISCORO_LOG_INFO("connection.state_transition reason=reconnect_attempt from={} to={}",
+                       to_string(connection_state::FAILED),
+                       to_string(connection_state::RECONNECTING));
     set_state(connection_state::RECONNECTING);
     auto reconnect_res = co_await do_connect();
     if (!reconnect_res) {
       // Failed attempt: transition back to FAILED and schedule next delay.
-      REDISCORO_LOG_WARNING("reconnect_failed err_code={}", reconnect_res.error().code.value());
-      REDISCORO_LOG_INFO("state_transition from={} to={}",
-                         static_cast<int>(connection_state::RECONNECTING),
-                         static_cast<int>(connection_state::FAILED));
+      REDISCORO_LOG_WARNING("connection.reconnect.failed err_code={} err_msg={} detail={}",
+                            reconnect_res.error().code.value(),
+                            reconnect_res.error().code.message(), reconnect_res.error().detail);
+      REDISCORO_LOG_INFO("connection.state_transition reason=reconnect_failed from={} to={}",
+                         to_string(connection_state::RECONNECTING),
+                         to_string(connection_state::FAILED));
       set_state(connection_state::FAILED);
       reconnect_count_ += 1;
       continue;
@@ -112,7 +118,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
     REDISCORO_ASSERT(state_ == connection_state::OPEN);
 
     reconnect_count_ = 0;
-    REDISCORO_LOG_INFO("reconnect_succeeded generation={}", generation_);
+    REDISCORO_LOG_INFO("connection.reconnect.succeeded generation={}", generation_);
     read_wakeup_.notify();
     write_wakeup_.notify();
     control_wakeup_.notify();

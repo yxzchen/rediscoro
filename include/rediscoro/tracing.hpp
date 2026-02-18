@@ -16,6 +16,17 @@ enum class request_kind : std::uint8_t {
   handshake = 1,
 };
 
+[[nodiscard]] constexpr auto to_string(request_kind kind) noexcept -> char const* {
+  switch (kind) {
+    case request_kind::user:
+      return "user";
+    case request_kind::handshake:
+      return "handshake";
+    default:
+      return "unknown";
+  }
+}
+
 /// Minimal request metadata for tracing callbacks.
 struct request_trace_info {
   std::uint64_t id{};
@@ -68,6 +79,19 @@ enum class connection_event_kind : std::uint8_t {
   closed,
 };
 
+[[nodiscard]] constexpr auto to_string(connection_event_kind kind) noexcept -> char const* {
+  switch (kind) {
+    case connection_event_kind::connected:
+      return "connected";
+    case connection_event_kind::disconnected:
+      return "disconnected";
+    case connection_event_kind::closed:
+      return "closed";
+    default:
+      return "unknown";
+  }
+}
+
 enum class connection_event_stage : std::uint8_t {
   unknown = 0,
   connect,
@@ -77,6 +101,27 @@ enum class connection_event_stage : std::uint8_t {
   close,
   actor,
 };
+
+[[nodiscard]] constexpr auto to_string(connection_event_stage stage) noexcept -> char const* {
+  switch (stage) {
+    case connection_event_stage::unknown:
+      return "unknown";
+    case connection_event_stage::connect:
+      return "connect";
+    case connection_event_stage::handshake:
+      return "handshake";
+    case connection_event_stage::runtime_io:
+      return "runtime_io";
+    case connection_event_stage::reconnect:
+      return "reconnect";
+    case connection_event_stage::close:
+      return "close";
+    case connection_event_stage::actor:
+      return "actor";
+    default:
+      return "unknown";
+  }
+}
 
 /// Connection event payload.
 struct connection_event {
