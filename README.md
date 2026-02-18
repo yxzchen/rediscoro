@@ -1,42 +1,14 @@
 # rediscoro
 
-`rediscoro` is a **0.x preview** coroutine-based Redis client for C++20, built on top of
-[`iocoro`](https://github.com/yxzchen/iocoro).
+`rediscoro` is a C++20 coroutine Redis client (RESP3) built on top of [`iocoro`](https://github.com/yxzchen/iocoro).
 
-It focuses on a clear async API, a strand-serialized connection actor, and an incremental RESP3
-parser.
+## Status
 
-## Status & stability
+- `0.x` preview (API may change)
+- Linux-focused (inherits `iocoro` backend support)
+- Header-only library
 
-- **Preview/testing release (0.x)**: APIs and behavior may change.
-- **OS**: Linux (inherited from `iocoro` backends).
-- **Protocol**: RESP3 handshake (`HELLO 3`) is used.
-
-## API boundary
-
-- **Public headers**: `include/rediscoro/*.hpp` (for example `<rediscoro/rediscoro.hpp>` and
-  `<rediscoro/client.hpp>`). These are the supported user-facing entry points.
-- **Internal headers**: `include/rediscoro/detail/*.hpp`. These are implementation details and are
-  not a stable API contract.
-- `rediscoro` is header-only, so internal headers are installed with the package for build
-  completeness, but they may change without compatibility guarantees.
-
-## Key capabilities
-
-- **Coroutine-friendly API**: `connect()`, `exec<T>()`, `close()`.
-- **Pipelining**: one `request` can contain multiple commands; replies are delivered in-order.
-- **Typed responses**: `response<Ts...>` / `dynamic_response<T>` with `expected<T, error_info>` slots.
-- **Timeouts**: resolve/connect/request timeout policies (see `rediscoro::config`).
-- **Auto reconnect**: configurable backoff policy (see `reconnection_policy`).
-- **Tracing hooks**: lightweight request start/finish callbacks (see `request_trace_hooks`).
-
-## Requirements
-
-- CMake >= 3.15
-- A C++20 compiler (GCC / Clang with coroutine support)
-- `iocoro` (via `find_package(iocoro)` or fetched automatically when building `rediscoro`)
-
-## Minimal example
+## Minimal Example
 
 ```cpp
 #include <rediscoro/rediscoro.hpp>
@@ -55,9 +27,9 @@ auto ping_task() -> iocoro::awaitable<void> {
 
   rediscoro::client c{ex, cfg};
 
-  auto r = co_await c.connect();
-  if (!r) {
-    std::cerr << "connect failed: " << r.error().to_string() << "\n";
+  auto cr = co_await c.connect();
+  if (!cr) {
+    std::cerr << "connect failed: " << cr.error().to_string() << "\n";
     co_return;
   }
 
@@ -79,39 +51,24 @@ int main() {
 }
 ```
 
-See [`examples/`](examples/) for a buildable example.
+## Build
 
-## Build & test
-
-```bash
-./scripts/build.sh -t
-```
-
-Sanitizers (Debug):
+Build tests:
 
 ```bash
-./scripts/build.sh -t --asan
-./scripts/build.sh -t --ubsan
-./scripts/build.sh -t --tsan
+cmake -S . -B build-test -DREDISCORO_BUILD_TESTS=ON -DREDISCORO_BUILD_EXAMPLES=OFF
+cmake --build build-test -j
+ctest --test-dir build-test --output-on-failure
 ```
 
-## Install and use with CMake (`find_package`)
-
-Install to a prefix:
+Build example:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local"
-cmake --build build -j
-cmake --install build
-```
-
-Consume:
-
-```cmake
-find_package(rediscoro REQUIRED)
-target_link_libraries(your_target PRIVATE rediscoro::rediscoro)
+cmake -S . -B build-example -DREDISCORO_BUILD_TESTS=OFF -DREDISCORO_BUILD_EXAMPLES=ON
+cmake --build build-example -j
+./build-example/examples/ping
 ```
 
 ## License
 
-MIT License. See [`LICENSE`](LICENSE).
+MIT, see [`LICENSE`](LICENSE).
