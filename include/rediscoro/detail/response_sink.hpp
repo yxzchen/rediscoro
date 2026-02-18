@@ -1,7 +1,5 @@
 #pragma once
 
-#include <rediscoro/detail/internal_header_access.hpp>
-
 #include <rediscoro/assert.hpp>
 #include <rediscoro/error_info.hpp>
 #include <rediscoro/logger.hpp>

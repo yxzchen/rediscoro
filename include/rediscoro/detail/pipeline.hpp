@@ -1,7 +1,5 @@
 #pragma once
 
-#include <rediscoro/detail/internal_header_access.hpp>
-
 #include <rediscoro/detail/response_sink.hpp>
 #include <rediscoro/detail/ring_queue.hpp>
 #include <rediscoro/error_info.hpp>
