@@ -140,7 +140,7 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
                               static_cast<unsigned>(info.kind));
       }
     }
-    slot->set_trace_context(hooks, info, start, cfg_.trace_redact_error_detail);
+    slot->set_trace_context(hooks, info, start);
   }
 
   // Drive handshake IO directly (read/write loops are gated on OPEN so they will not interfere).

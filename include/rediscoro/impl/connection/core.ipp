@@ -315,7 +315,7 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
         .ok_count = 0,
         .error_count = sink->expected_replies(),
         .primary_error = err.code,
-        .primary_error_detail = cfg_.trace_redact_error_detail ? std::string_view{} : err.detail,
+        .primary_error_detail = err.detail,
       };
       try {
         hooks.on_finish(hooks.user_data, evt);
@@ -358,7 +358,7 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
     return;
   }
   if (tracing) {
-    sink->set_trace_context(hooks, trace_info, start, cfg_.trace_redact_error_detail);
+    sink->set_trace_context(hooks, trace_info, start);
   }
   write_wakeup_.notify();
   // request_timeout scheduling / wake control_loop when first request arrives
