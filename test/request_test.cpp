@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -58,10 +57,12 @@ TEST(request, encode_binary_argument_with_nul) {
   EXPECT_EQ(r.command_count(), 1u);
 }
 
-TEST(request, null_cstring_argument_throws) {
+TEST(request, null_cstring_argument_is_encoded_as_empty_string) {
   request r;
   const char* null_arg = nullptr;
-  EXPECT_THROW(r.push("SET", "k", null_arg), std::invalid_argument);
+  r.push("SET", "k", null_arg);
+  EXPECT_EQ(r.wire(), "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$0\r\n\r\n");
+  EXPECT_EQ(r.command_count(), 1u);
 }
 
 }  // namespace rediscoro

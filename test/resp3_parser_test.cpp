@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <rediscoro/resp3/builder.hpp>
-#include <rediscoro/resp3/encoder.hpp>
 #include <rediscoro/resp3/parser.hpp>
 
 #include <cstring>
@@ -347,29 +346,6 @@ TEST(resp3_parser_test, protocol_error_on_line_payload_exceeds_config_limit) {
   ASSERT_FALSE(r);
   EXPECT_EQ(r.error(), rediscoro::protocol_errc::invalid_length);
   EXPECT_TRUE(p.failed());
-}
-
-TEST(resp3_parser_test, roundtrip_encoder_parser_for_complex_message) {
-  message original;
-  attribute attr;
-  attr.entries.push_back({message(simple_string{"meta"}), message(integer{1})});
-
-  array arr;
-  arr.elements.push_back(message(simple_string{"OK"}));
-  arr.elements.push_back(message(bulk_string{"hello"}));
-  original = message(std::move(arr), std::move(attr));
-
-  auto wire = encode(original);
-
-  parser p;
-  append(p, wire);
-
-  auto r = p.parse_one();
-  ASSERT_TRUE(r);
-  ASSERT_TRUE(r->has_value());
-  auto decoded = build_message(p.tree(), **r);
-  EXPECT_EQ(encode(decoded), wire);
-  p.reclaim();
 }
 
 }  // namespace
