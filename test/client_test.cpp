@@ -180,8 +180,8 @@ TEST(client_test, connect_fails_with_queue_full_when_handshake_push_rejected) {
     cfg.resolve_timeout = 500ms;
     cfg.connect_timeout = 500ms;
     cfg.reconnection.enabled = false;
-    cfg.max_pipeline_requests = 0;
-    cfg.max_pipeline_pending_write_bytes = 0;
+    cfg.limits.pipeline.max_requests = 0;
+    cfg.limits.pipeline.max_pending_write_bytes = 0;
 
     rediscoro::client c{ctx.get_executor(), cfg};
     auto r = co_await c.connect();
@@ -338,8 +338,8 @@ TEST(client_test, oversized_request_is_rejected_with_queue_full) {
     cfg.resolve_timeout = 500ms;
     cfg.connect_timeout = 500ms;
     cfg.reconnection.enabled = false;
-    cfg.max_pipeline_requests = 32;
-    cfg.max_pipeline_pending_write_bytes = 256;
+    cfg.limits.pipeline.max_requests = 32;
+    cfg.limits.pipeline.max_pending_write_bytes = 256;
 
     rediscoro::client c{ctx.get_executor(), cfg};
     auto conn = co_await c.connect();

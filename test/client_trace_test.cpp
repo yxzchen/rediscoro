@@ -116,7 +116,6 @@ TEST(client_trace_test, user_request_trace_start_finish_success) {
     work_guard_reset reset{guard};
 
     auto cfg = make_cfg(&recorder);
-    cfg.trace_handshake = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};
     auto cr = co_await connect_with_retry(c);
@@ -177,7 +176,6 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error_detail)
     work_guard_reset reset{guard};
 
     auto cfg = make_cfg(&recorder);
-    cfg.trace_handshake = false;
 
     rediscoro::client c{ctx.get_executor(), cfg};
     auto cr = co_await connect_with_retry(c);
@@ -227,12 +225,11 @@ TEST(client_trace_test, user_request_trace_finish_contains_primary_error_detail)
   ASSERT_TRUE(ok) << diag;
 }
 
-TEST(client_trace_test, handshake_trace_emitted_only_when_enabled) {
+TEST(client_trace_test, connect_close_without_user_request_emits_no_request_trace) {
   iocoro::io_context ctx;
   auto guard = iocoro::make_work_guard(ctx);
 
-  trace_recorder rec_no_handshake{};
-  trace_recorder rec_with_handshake{};
+  trace_recorder recorder{};
   bool ok = false;
   std::string diag{};
 
@@ -243,49 +240,20 @@ TEST(client_trace_test, handshake_trace_emitted_only_when_enabled) {
     };
     work_guard_reset reset{guard};
 
-    {
-      auto cfg = make_cfg(&rec_no_handshake);
-      cfg.trace_handshake = false;
-      rediscoro::client c{ctx.get_executor(), cfg};
-      auto cr = co_await connect_with_retry(c);
-      if (!cr) {
-        diag = "connect (trace_handshake=false) failed: " + cr.error().to_string();
-        co_return;
-      }
-      co_await c.close();
-    }
-
-    {
-      auto cfg = make_cfg(&rec_with_handshake);
-      cfg.trace_handshake = true;
-      rediscoro::client c{ctx.get_executor(), cfg};
-      auto cr = co_await connect_with_retry(c);
-      if (!cr) {
-        diag = "connect (trace_handshake=true) failed: " + cr.error().to_string();
-        co_return;
-      }
-      co_await c.close();
-    }
-
-    auto starts_a = rec_no_handshake.start_snapshot();
-    auto finishes_a = rec_no_handshake.finish_snapshot_copy();
-    if (!starts_a.empty() || !finishes_a.empty()) {
-      diag = "trace_handshake=false should not emit handshake traces when no user request";
+    auto cfg = make_cfg(&recorder);
+    rediscoro::client c{ctx.get_executor(), cfg};
+    auto cr = co_await connect_with_retry(c);
+    if (!cr) {
+      diag = "connect failed: " + cr.error().to_string();
       co_return;
     }
+    co_await c.close();
 
-    auto starts_b = rec_with_handshake.start_snapshot();
-    auto finishes_b = rec_with_handshake.finish_snapshot_copy();
-    if (starts_b.empty() || finishes_b.empty() || starts_b.size() != finishes_b.size()) {
-      diag = "trace_handshake=true should emit handshake trace pairs";
+    auto starts = recorder.start_snapshot();
+    auto finishes = recorder.finish_snapshot_copy();
+    if (!starts.empty() || !finishes.empty()) {
+      diag = "connect/close without user request should not emit request traces";
       co_return;
-    }
-    for (std::size_t i = 0; i < starts_b.size(); ++i) {
-      if (starts_b[i].info.kind != rediscoro::request_kind::handshake ||
-          finishes_b[i].info.kind != rediscoro::request_kind::handshake) {
-        diag = "expected handshake trace kind";
-        co_return;
-      }
     }
 
     ok = true;
@@ -337,7 +305,6 @@ TEST(client_trace_test, trace_callback_throw_is_swallowed) {
     cfg.connect_timeout = 300ms;
     cfg.request_timeout = 300ms;
     cfg.reconnection.enabled = false;
-    cfg.trace_handshake = false;
     cfg.trace_hooks = {
       .user_data = &throw_state,
       .on_start = on_start,

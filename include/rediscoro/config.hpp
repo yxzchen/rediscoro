@@ -53,13 +53,37 @@ struct reconnection_policy {
   double jitter_ratio = 0.2;
 };
 
+struct resp_input_limits {
+  // Exceeding these limits is treated as protocol_errc::invalid_length.
+  std::size_t max_bulk_bytes = 512ULL * 1024ULL * 1024ULL;  // 512 MiB
+  std::uint32_t max_container_len = 1'000'000U;
+  std::size_t max_line_bytes = 64ULL * 1024ULL;  // 64 KiB
+};
+
+struct pipeline_backpressure_limits {
+  // Exceeding either limit causes fast-fail with client_errc::queue_full.
+  std::size_t max_requests = 16'384U;
+  std::size_t max_pending_write_bytes = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
+};
+
+struct client_limits {
+  resp_input_limits resp{};
+  pipeline_backpressure_limits pipeline{};
+};
+
 /// Client configuration.
 struct config {
-  // Connection parameters
+  // Endpoint
   std::string host = "localhost";
   int port = 6379;
 
-  // Timeouts (optional - nullopt means no timeout)
+  // Authentication & setup
+  std::string username{};
+  std::string password{};
+  int database = 0;
+  std::string client_name{};
+
+  // Timeouts (optional; nullopt means no timeout)
   /// DNS/host resolution timeout (getaddrinfo on a background thread).
   ///
   /// Notes:
@@ -75,35 +99,18 @@ struct config {
   /// If nullopt, no timeout is applied (indefinite wait).
   std::optional<std::chrono::milliseconds> request_timeout{5000};
 
-  // RESP3 input hardening limits (enabled by default).
-  // Exceeding these limits is treated as protocol_errc::invalid_length.
-  std::size_t max_resp_bulk_bytes = 512ULL * 1024ULL * 1024ULL;  // 512 MiB
-  std::uint32_t max_resp_container_len = 1'000'000U;
-  std::size_t max_resp_line_bytes = 64ULL * 1024ULL;  // 64 KiB
+  // Resource / protocol limits.
+  client_limits limits{};
 
-  // Pipeline backpressure limits (enabled by default).
-  // Exceeding either limit causes fast-fail with client_errc::queue_full.
-  std::size_t max_pipeline_requests = 16'384U;
-  std::size_t max_pipeline_pending_write_bytes = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
-
-  // Authentication & setup
-  std::string username{};
-  std::string password{};
-  int database = 0;
-  std::string client_name{};
-
-  // Reconnection behavior
+  // Reconnection
   reconnection_policy reconnection{};
 
-  // Tracing hooks (request-level instrumentation).
+  // Observability
+  // Request-level tracing hooks.
   request_trace_hooks trace_hooks{};
 
   // Connection lifecycle hooks (connected/disconnected/closed instrumentation).
   connection_event_hooks connection_hooks{};
-
-  // Whether to emit tracing events for the initial handshake (HELLO/AUTH/SELECT/SETNAME).
-  // Default off to avoid noise.
-  bool trace_handshake{false};
 };
 
 }  // namespace rediscoro

@@ -89,13 +89,13 @@ inline connection::connection(iocoro::any_io_executor ex, config cfg)
       executor_(ex),
       socket_(executor_.get_io_executor()),
       pipeline_(pipeline::limits{
-        .max_requests = cfg_.max_pipeline_requests,
-        .max_pending_write_bytes = cfg_.max_pipeline_pending_write_bytes,
+        .max_requests = cfg_.limits.pipeline.max_requests,
+        .max_pending_write_bytes = cfg_.limits.pipeline.max_pending_write_bytes,
       }),
       parser_(resp3::parser::limits{
-        .max_resp_bulk_bytes = cfg_.max_resp_bulk_bytes,
-        .max_resp_container_len = cfg_.max_resp_container_len,
-        .max_resp_line_bytes = cfg_.max_resp_line_bytes,
+        .max_resp_bulk_bytes = cfg_.limits.resp.max_bulk_bytes,
+        .max_resp_container_len = cfg_.limits.resp.max_container_len,
+        .max_resp_line_bytes = cfg_.limits.resp.max_line_bytes,
       }) {
   cfg_.reconnection = sanitize_reconnection_policy(cfg_.reconnection);
 }
