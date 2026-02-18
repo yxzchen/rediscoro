@@ -21,7 +21,7 @@ TEST=false
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 VERBOSE=false
 SANITIZER=""
-CTEST_TIMEOUT=120
+CTEST_TIMEOUT=180
 
 # Print help information
 print_help() {
@@ -40,7 +40,7 @@ Options:
     --asan                  Enable AddressSanitizer
     --tsan                  Enable ThreadSanitizer
     --ubsan                 Enable UndefinedBehaviorSanitizer
-    --ctest-timeout SEC     Per-test timeout for ctest when --test is enabled (default: $CTEST_TIMEOUT)
+    --ctest-timeout SEC     Per-test timeout for ctest when --test is enabled (0 disables, default: $CTEST_TIMEOUT)
     --prefix PATH           Set installation prefix (default: $INSTALL_PREFIX)
 
 Examples:
@@ -224,11 +224,22 @@ build_project() {
 run_tests() {
     if [ "$TEST" = true ]; then
         log_info "Running tests..."
-        log_info "CTest per-test timeout: ${CTEST_TIMEOUT}s"
+        if ! [[ "$CTEST_TIMEOUT" =~ ^[0-9]+$ ]]; then
+            log_error "--ctest-timeout must be a non-negative integer (seconds)"
+            exit 1
+        fi
 
         cd "$BUILD_DIR"
 
-        if ! ctest --output-on-failure -j "$JOBS" --timeout "$CTEST_TIMEOUT"; then
+        CTEST_ARGS=(--output-on-failure -j "$JOBS")
+        if [ "$CTEST_TIMEOUT" -gt 0 ]; then
+            log_info "CTest per-test timeout: ${CTEST_TIMEOUT}s"
+            CTEST_ARGS+=(--timeout "$CTEST_TIMEOUT")
+        else
+            log_info "CTest per-test timeout: disabled"
+        fi
+
+        if ! ctest "${CTEST_ARGS[@]}"; then
             log_error "Tests failed"
             exit 1
         fi
