@@ -30,6 +30,11 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   auto writable = parser_.prepare();
   auto r = co_await socket_.async_read_some(writable);
   if (!r) {
+    if (r.error() == iocoro::error::operation_aborted &&
+        (state_ == connection_state::CLOSING || state_ == connection_state::CLOSED)) {
+      REDISCORO_LOG_DEBUG("runtime read cancelled during shutdown");
+      co_return;
+    }
     // Socket IO error - treat as connection lost
     REDISCORO_LOG_WARNING("runtime read failed: err_code={} err_msg={}", r.error().value(),
                           r.error().message());
@@ -109,6 +114,11 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
 
     auto r = co_await socket_.async_write_some(buf);
     if (!r) {
+      if (r.error() == iocoro::error::operation_aborted &&
+          (state_ == connection_state::CLOSING || state_ == connection_state::CLOSED)) {
+        REDISCORO_LOG_DEBUG("runtime write cancelled during shutdown");
+        co_return;
+      }
       REDISCORO_LOG_WARNING("runtime write failed: err_code={} err_msg={}", r.error().value(),
                             r.error().message());
       handle_error(client_errc::write_error);

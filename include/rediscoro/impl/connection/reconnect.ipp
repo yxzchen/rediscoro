@@ -86,7 +86,7 @@ inline auto connection::do_reconnect() -> iocoro::awaitable<void> {
         auto timer_wait = timer.async_wait(iocoro::use_awaitable);
         auto wake_wait = control_wakeup_.async_wait();
         (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
-        REDISCORO_LOG_DEBUG("reconnect backoff wakeup");
+        REDISCORO_LOG_DEBUG("reconnect backoff wait woke up (timer or control signal)");
       }
     }
 

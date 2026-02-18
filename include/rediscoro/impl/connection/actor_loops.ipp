@@ -91,7 +91,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
 
     if (state_ == connection_state::OPEN && cfg_.request_timeout.has_value()) {
       if (pipeline_.has_expired()) {
-        REDISCORO_LOG_DEBUG("request timeout expired");
+        REDISCORO_LOG_DEBUG("request timeout deadline reached");
         handle_error(client_errc::request_timeout);
         continue;
       }
@@ -104,7 +104,7 @@ inline auto connection::control_loop() -> iocoro::awaitable<void> {
         auto timer_wait = timer.async_wait(iocoro::use_awaitable);
         auto wake_wait = control_wakeup_.async_wait();
         (void)co_await iocoro::when_any(std::move(timer_wait), std::move(wake_wait));
-        REDISCORO_LOG_DEBUG("request timeout timer wakeup");
+        REDISCORO_LOG_DEBUG("request timeout wait woke up (timer or control signal)");
         continue;
       }
     }
