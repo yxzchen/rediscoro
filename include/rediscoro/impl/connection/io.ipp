@@ -31,7 +31,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
   auto r = co_await socket_.async_read_some(writable);
   if (!r) {
     // Socket IO error - treat as connection lost
-    REDISCORO_LOG_WARNING("connection.io.read_failed err_code={} err_msg={}", r.error().value(),
+    REDISCORO_LOG_WARNING("runtime read failed: err_code={} err_msg={}", r.error().value(),
                           r.error().message());
     handle_error(client_errc::connection_lost);
     co_return;
@@ -39,12 +39,12 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
 
   if (*r == 0) {
     // Peer closed (EOF).
-    REDISCORO_LOG_WARNING("connection.io.read_eof");
+    REDISCORO_LOG_WARNING("runtime read eof");
     handle_error(client_errc::connection_reset);
     co_return;
   }
 
-  REDISCORO_LOG_DEBUG("connection.io.read_some bytes={}", *r);
+  REDISCORO_LOG_DEBUG("runtime read: bytes={}", *r);
   parser_.commit(*r);
 
   for (;;) {
@@ -55,7 +55,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
       if (pipeline_.has_pending_read()) {
         pipeline_.on_error(parsed.error());
       }
-      REDISCORO_LOG_WARNING("connection.io.parse_failed err_code={} err_msg={}", ec.value(),
+      REDISCORO_LOG_WARNING("runtime parse failed: err_code={} err_msg={}", ec.value(),
                             ec.message());
       handle_error(parsed.error());
       co_return;
@@ -67,7 +67,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
     if (!pipeline_.has_pending_read()) {
       // Unsolicited message (e.g. PUSH) is not supported yet.
       // Temporary policy: treat as "unsupported feature" rather than protocol violation.
-      REDISCORO_LOG_WARNING("connection.io.unsolicited_message");
+      REDISCORO_LOG_WARNING("runtime received unsolicited message");
       handle_error(client_errc::unsolicited_message);
       co_return;
     }
@@ -75,7 +75,7 @@ inline auto connection::do_read() -> iocoro::awaitable<void> {
     auto const root = **parsed;
     auto msg = resp3::build_message(parser_.tree(), root);
     pipeline_.on_message(std::move(msg));
-    REDISCORO_LOG_DEBUG("connection.io.message_delivered");
+    REDISCORO_LOG_DEBUG("runtime message delivered to pipeline");
 
     // Critical for zero-copy parser: reclaim before parsing the next message.
     parser_.reclaim();
@@ -105,17 +105,17 @@ inline auto connection::do_write() -> iocoro::awaitable<void> {
          pipeline_.has_pending_write()) {
     auto view = pipeline_.next_write_buffer();
     auto buf = std::as_bytes(std::span{view.data(), view.size()});
-    REDISCORO_LOG_DEBUG("connection.io.write_some.requested_bytes={}", view.size());
+    REDISCORO_LOG_DEBUG("runtime write requested: bytes={}", view.size());
 
     auto r = co_await socket_.async_write_some(buf);
     if (!r) {
-      REDISCORO_LOG_WARNING("connection.io.write_failed err_code={} err_msg={}", r.error().value(),
+      REDISCORO_LOG_WARNING("runtime write failed: err_code={} err_msg={}", r.error().value(),
                             r.error().message());
       handle_error(client_errc::write_error);
       co_return;
     }
 
-    REDISCORO_LOG_DEBUG("connection.io.write_some.completed_bytes={}", *r);
+    REDISCORO_LOG_DEBUG("runtime write completed: bytes={}", *r);
     pipeline_.on_write_done(*r);
     if (pipeline_.has_pending_read()) {
       read_wakeup_.notify();
@@ -132,13 +132,13 @@ inline auto connection::handle_error(error_info ec) -> void {
   // - Must NOT write CLOSED (only transition_to_closed()).
 
   if (state_ == connection_state::CLOSED || state_ == connection_state::CLOSING) {
-    REDISCORO_LOG_DEBUG("connection.handle_error.ignored state={} err_code={}", to_string(state_),
+    REDISCORO_LOG_DEBUG("handle_error ignored: state={} err_code={}", to_string(state_),
                         ec.code.value());
     return;
   }
 
   if (state_ == connection_state::FAILED || state_ == connection_state::RECONNECTING) {
-    REDISCORO_LOG_DEBUG("connection.handle_error.ignored state={} err_code={}", to_string(state_),
+    REDISCORO_LOG_DEBUG("handle_error ignored: state={} err_code={}", to_string(state_),
                         ec.code.value());
     return;
   }
@@ -146,8 +146,8 @@ inline auto connection::handle_error(error_info ec) -> void {
   REDISCORO_ASSERT(state_ == connection_state::OPEN,
                    "handle_error must not be used for CONNECTING/INIT errors");
   if (state_ != connection_state::OPEN) {
-    REDISCORO_LOG_DEBUG("connection.handle_error.unexpected_state state={} err_code={}",
-                        to_string(state_), ec.code.value());
+    REDISCORO_LOG_DEBUG("handle_error unexpected state: state={} err_code={}", to_string(state_),
+                        ec.code.value());
     control_wakeup_.notify();
     return;
   }
@@ -155,8 +155,7 @@ inline auto connection::handle_error(error_info ec) -> void {
   // OPEN runtime error -> FAILED.
   auto const err = ec;
   REDISCORO_LOG_WARNING(
-    "connection.state_transition reason=runtime_error from={} to={} err_code={} err_msg={} "
-    "detail={}",
+    "state transition: reason=runtime_error from={} to={} err_code={} err_msg={} detail={}",
     to_string(connection_state::OPEN), to_string(connection_state::FAILED), err.code.value(),
     err.code.message(), err.detail);
   set_state(connection_state::FAILED);

@@ -80,7 +80,7 @@ inline auto fail_sink_with_current_exception(std::shared_ptr<response_sink> cons
   try {
     sink->fail_all(std::move(err));
   } catch (...) {
-    REDISCORO_LOG_WARNING("connection.sink_fail_all.threw context={}", context);
+    REDISCORO_LOG_WARNING("sink fail_all threw while handling exception: context={}", context);
   }
 }
 
@@ -99,9 +99,9 @@ inline connection::connection(iocoro::any_io_executor ex, config cfg)
       }) {
   cfg_.reconnection = sanitize_reconnection_policy(cfg_.reconnection);
   REDISCORO_LOG_DEBUG(
-    "connection.created host={} port={} request_timeout_ms={} reconnect_enabled={} "
+    "connection created: host={} port={} request_timeout_ms={} reconnect_enabled={} "
     "reconnect_immediate_attempts={} reconnect_initial_delay_ms={} reconnect_max_delay_ms={} "
-    "limits.max_requests={} limits.max_pending_write_bytes={}",
+    "limits_max_requests={} limits_max_pending_write_bytes={}",
     cfg_.host, cfg_.port, cfg_.request_timeout.has_value() ? cfg_.request_timeout->count() : -1LL,
     cfg_.reconnection.enabled, cfg_.reconnection.immediate_attempts,
     cfg_.reconnection.initial_delay.count(), cfg_.reconnection.max_delay.count(),
@@ -139,7 +139,7 @@ inline connection::~connection() noexcept {
 inline auto connection::run_actor() -> void {
   REDISCORO_ASSERT(!actor_running_ && "run_actor() called while actor is running");
   actor_running_ = true;
-  REDISCORO_LOG_INFO("connection.actor.start state={}", to_string(state_));
+  REDISCORO_LOG_INFO("actor start: state={}", to_string(state_));
 
   auto ex = executor_.strand().executor();
   auto self = shared_from_this();
@@ -159,8 +159,7 @@ inline auto connection::run_actor() -> void {
           auto err = make_internal_error(r.error(), "connection actor");
           auto const from = self->state_;
           REDISCORO_LOG_ERROR(
-            "connection.actor.exception state={} err_code={} err_msg={} detail={} "
-            "reconnect_count={} "
+            "actor exception: state={} err_code={} err_msg={} detail={} reconnect_count={} "
             "generation={}",
             to_string(from), err.code.value(), err.code.message(), err.detail,
             self->reconnect_count_, self->generation_);
@@ -196,21 +195,21 @@ inline auto connection::run_actor() -> void {
 
 inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info>> {
   co_await iocoro::this_coro::switch_to(executor_.strand().executor());
-  REDISCORO_LOG_DEBUG("connection.connect.requested state={}", to_string(state_));
+  REDISCORO_LOG_DEBUG("connect requested: state={}", to_string(state_));
 
   if (state_ == connection_state::OPEN) {
-    REDISCORO_LOG_DEBUG("connection.connect.noop_already_open");
+    REDISCORO_LOG_DEBUG("connect ignored: already open");
     co_return expected<void, error_info>{};
   }
 
   if (state_ == connection_state::CONNECTING) {
-    REDISCORO_LOG_DEBUG("connection.connect.rejected_already_in_progress");
+    REDISCORO_LOG_DEBUG("connect rejected: already in progress");
     co_return unexpected(client_errc::already_in_progress);
   }
 
   if (state_ == connection_state::CLOSED) {
     // Retry support: reset lifecycle state.
-    REDISCORO_LOG_INFO("connection.state_transition reason=retry_reset from={} to={}",
+    REDISCORO_LOG_INFO("state transition: reason=retry_reset from={} to={}",
                        to_string(connection_state::CLOSED), to_string(connection_state::INIT));
     set_state(connection_state::INIT);
     reconnect_count_ = 0;
@@ -218,7 +217,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
   }
 
   if (stop_.get_token().stop_requested()) {
-    REDISCORO_LOG_INFO("connection.connect.aborted_stop_requested");
+    REDISCORO_LOG_INFO("connect aborted: stop requested");
     co_return unexpected(client_errc::operation_aborted);
   }
 
@@ -226,15 +225,15 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
     run_actor();
   }
 
-  REDISCORO_LOG_INFO("connection.state_transition reason=connect_requested from={} to={}",
-                     to_string(state_), to_string(connection_state::CONNECTING));
+  REDISCORO_LOG_INFO("state transition: reason=connect_requested from={} to={}", to_string(state_),
+                     to_string(connection_state::CONNECTING));
   set_state(connection_state::CONNECTING);
 
   // Attempt connection. do_connect() returns unexpected(error) on failure.
   auto connect_res = co_await iocoro::co_spawn(executor_.strand().executor(), stop_.get_token(),
                                                do_connect(), iocoro::use_awaitable);
   if (!connect_res) {
-    REDISCORO_LOG_WARNING("connection.connect.initial_failed err_code={} err_msg={} detail={}",
+    REDISCORO_LOG_WARNING("initial connect failed: err_code={} err_msg={} detail={}",
                           connect_res.error().code.value(), connect_res.error().code.message(),
                           connect_res.error().detail);
     emit_connection_event(connection_event{
@@ -252,7 +251,7 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
 
   // Successful do_connect() implies OPEN.
   REDISCORO_ASSERT(state_ == connection_state::OPEN);
-  REDISCORO_LOG_INFO("connection.connect.succeeded generation={}", generation_);
+  REDISCORO_LOG_INFO("connect succeeded: generation={}", generation_);
 
   // Wake IO loops that might be waiting for the OPEN transition.
   read_wakeup_.notify();
@@ -263,17 +262,17 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
 
 inline auto connection::close() -> iocoro::awaitable<void> {
   co_await iocoro::this_coro::switch_to(executor_.strand().executor());
-  REDISCORO_LOG_DEBUG("connection.close.requested state={}", to_string(state_));
+  REDISCORO_LOG_DEBUG("close requested: state={}", to_string(state_));
 
   if (state_ == connection_state::CLOSED) {
-    REDISCORO_LOG_DEBUG("connection.close.noop_already_closed");
+    REDISCORO_LOG_DEBUG("close ignored: already closed");
     co_return;
   }
 
   // Phase-1: determinism-first shutdown.
   stop_.request_stop();
-  REDISCORO_LOG_INFO("connection.state_transition reason=close_requested from={} to={}",
-                     to_string(state_), to_string(connection_state::CLOSING));
+  REDISCORO_LOG_INFO("state transition: reason=close_requested from={} to={}", to_string(state_),
+                     to_string(connection_state::CLOSING));
   set_state(connection_state::CLOSING);
 
   // Fail all pending work deterministically.
@@ -290,19 +289,19 @@ inline auto connection::close() -> iocoro::awaitable<void> {
   control_wakeup_.notify();
 
   if (actor_running_) {
-    REDISCORO_LOG_DEBUG("connection.close.wait_actor_done");
+    REDISCORO_LOG_DEBUG("close waiting for actor to finish");
     (void)co_await actor_done_.async_wait();
   }
 
   REDISCORO_ASSERT(state_ == connection_state::CLOSED);
-  REDISCORO_LOG_INFO("connection.close.completed");
+  REDISCORO_LOG_INFO("close completed");
   co_return;
 }
 
 inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink> sink,
                                      std::chrono::steady_clock::time_point start) -> void {
   REDISCORO_ASSERT(sink != nullptr);
-  REDISCORO_LOG_DEBUG("connection.enqueue.received state={} command_count={} wire_bytes={}",
+  REDISCORO_LOG_DEBUG("enqueue received: state={} command_count={} wire_bytes={}",
                       to_string(state_), req.command_count(), req.wire().size());
 
   auto const hooks = cfg_.trace_hooks;  // copy: stable for the sink and callbacks
@@ -322,21 +321,21 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
       try {
         hooks.on_start(hooks.user_data, evt);
       } catch (...) {
-        REDISCORO_LOG_WARNING("connection.trace.on_start_threw request_id={} kind={}",
-                              trace_info.id, to_string(trace_info.kind));
+        REDISCORO_LOG_WARNING("trace on_start callback threw: request_id={} kind={}", trace_info.id,
+                              to_string(trace_info.kind));
       }
     }
   }
 
   auto reject = [&](error_info err, std::string_view reason, log_level level) -> void {
     if (level == log_level::warning) {
-      REDISCORO_LOG_WARNING(
-        "connection.enqueue.rejected reason={} state={} err_code={} err_msg={} detail={}", reason,
-        to_string(state_), err.code.value(), err.code.message(), err.detail);
+      REDISCORO_LOG_WARNING("enqueue rejected: reason={} state={} err_code={} err_msg={} detail={}",
+                            reason, to_string(state_), err.code.value(), err.code.message(),
+                            err.detail);
     } else {
-      REDISCORO_LOG_DEBUG(
-        "connection.enqueue.rejected reason={} state={} err_code={} err_msg={} detail={}", reason,
-        to_string(state_), err.code.value(), err.code.message(), err.detail);
+      REDISCORO_LOG_DEBUG("enqueue rejected: reason={} state={} err_code={} err_msg={} detail={}",
+                          reason, to_string(state_), err.code.value(), err.code.message(),
+                          err.detail);
     }
     if (tracing && hooks.on_finish != nullptr) {
       request_trace_finish evt{
@@ -351,7 +350,7 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
       try {
         hooks.on_finish(hooks.user_data, evt);
       } catch (...) {
-        REDISCORO_LOG_WARNING("connection.trace.on_finish_threw request_id={} kind={}",
+        REDISCORO_LOG_WARNING("trace on_finish callback threw: request_id={} kind={}",
                               trace_info.id, to_string(trace_info.kind));
       }
     }
@@ -388,7 +387,7 @@ inline auto connection::enqueue_impl(request req, std::shared_ptr<response_sink>
     reject(client_errc::queue_full, "queue_full", log_level::warning);
     return;
   }
-  REDISCORO_LOG_DEBUG("connection.enqueue.accepted expected_replies={}", sink->expected_replies());
+  REDISCORO_LOG_DEBUG("enqueue accepted: expected_replies={}", sink->expected_replies());
   if (tracing) {
     sink->set_trace_context(hooks, trace_info, start);
   }
@@ -412,16 +411,16 @@ inline auto connection::emit_connection_event(connection_event evt) noexcept -> 
   try {
     hooks.on_event(hooks.user_data, evt);
   } catch (...) {
-    REDISCORO_LOG_WARNING("connection.event.on_event_threw kind={} stage={}", to_string(evt.kind),
-                          to_string(evt.stage));
+    REDISCORO_LOG_WARNING("connection on_event callback threw: kind={} stage={}",
+                          to_string(evt.kind), to_string(evt.stage));
   }
 }
 
 inline auto connection::transition_to_closed() -> void {
   // Deterministic cleanup (idempotent).
   auto const from = state_;
-  REDISCORO_LOG_INFO("connection.state_transition reason=actor_shutdown from={} to={}",
-                     to_string(from), to_string(connection_state::CLOSED));
+  REDISCORO_LOG_INFO("state transition: reason=actor_shutdown from={} to={}", to_string(from),
+                     to_string(connection_state::CLOSED));
   set_state(connection_state::CLOSED);
 
   pipeline_.clear_all(client_errc::connection_closed);

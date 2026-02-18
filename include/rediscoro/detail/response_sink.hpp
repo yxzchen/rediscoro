@@ -145,7 +145,7 @@ class response_sink {
     try {
       hooks.on_finish(hooks.user_data, evt);
     } catch (...) {
-      REDISCORO_LOG_WARNING("connection.trace.on_finish_threw request_id={} kind={}",
+      REDISCORO_LOG_WARNING("trace on_finish callback threw: request_id={} kind={}",
                             trace_info().id, to_string(trace_info().kind));
     }
   }
