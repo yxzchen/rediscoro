@@ -147,7 +147,6 @@ inline auto connection::handle_error(error_info ec) -> void {
   emit_connection_event(connection_event{
     .kind = connection_event_kind::disconnected,
     .stage = connection_event_stage::runtime_io,
-    .source = connection_event_source::runtime_io,
     .from_state = static_cast<std::int32_t>(connection_state::OPEN),
     .to_state = static_cast<std::int32_t>(connection_state::FAILED),
     .error = err,

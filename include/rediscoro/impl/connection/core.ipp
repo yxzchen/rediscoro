@@ -158,7 +158,6 @@ inline auto connection::run_actor() -> void {
             self->emit_connection_event(connection_event{
               .kind = connection_event_kind::disconnected,
               .stage = connection_event_stage::actor,
-              .source = connection_event_source::actor,
               .from_state = static_cast<std::int32_t>(from),
               .to_state = static_cast<std::int32_t>(connection_state::CLOSING),
               .error = err,
@@ -224,7 +223,6 @@ inline auto connection::connect() -> iocoro::awaitable<expected<void, error_info
     emit_connection_event(connection_event{
       .kind = connection_event_kind::disconnected,
       .stage = connection_event_stage::connect,
-      .source = connection_event_source::connect,
       .from_state = static_cast<std::int32_t>(connection_state::CONNECTING),
       .to_state = static_cast<std::int32_t>(connection_state::CLOSING),
       .error = connect_res.error(),
@@ -380,9 +378,8 @@ inline auto connection::emit_connection_event(connection_event evt) noexcept -> 
   try {
     hooks.on_event(hooks.user_data, evt);
   } catch (...) {
-    REDISCORO_LOG_WARNING("connection on_event callback threw: kind={}, stage={}, source={}",
-                          static_cast<unsigned>(evt.kind), static_cast<unsigned>(evt.stage),
-                          static_cast<unsigned>(evt.source));
+    REDISCORO_LOG_WARNING("connection on_event callback threw: kind={}, stage={}",
+                          static_cast<unsigned>(evt.kind), static_cast<unsigned>(evt.stage));
   }
 }
 
@@ -402,7 +399,6 @@ inline auto connection::transition_to_closed() -> void {
   emit_connection_event(connection_event{
     .kind = connection_event_kind::closed,
     .stage = connection_event_stage::close,
-    .source = connection_event_source::close,
     .from_state = static_cast<std::int32_t>(from),
     .to_state = static_cast<std::int32_t>(connection_state::CLOSED),
   });

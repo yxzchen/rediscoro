@@ -131,9 +131,8 @@ TEST(client_lifecycle_test, connect_close_emits_connected_then_closed) {
         break;
       }
       for (auto const& ev : events) {
-        if (ev.stage == rediscoro::connection_event_stage::unknown ||
-            ev.source == rediscoro::connection_event_source::unknown) {
-          diag = "connection event should include stage/source metadata";
+        if (ev.stage == rediscoro::connection_event_stage::unknown) {
+          diag = "connection event should include stage metadata";
           break;
         }
         if (ev.timestamp == std::chrono::steady_clock::time_point{}) {

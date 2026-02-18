@@ -283,7 +283,6 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
   emit_connection_event(connection_event{
     .kind = connection_event_kind::connected,
     .stage = connection_event_stage::handshake,
-    .source = connection_event_source::connect,
     .from_state = static_cast<std::int32_t>(from),
     .to_state = static_cast<std::int32_t>(connection_state::OPEN),
   });

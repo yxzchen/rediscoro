@@ -78,21 +78,10 @@ enum class connection_event_stage : std::uint8_t {
   actor,
 };
 
-enum class connection_event_source : std::uint8_t {
-  unknown = 0,
-  connect,
-  handshake,
-  runtime_io,
-  reconnect,
-  close,
-  actor,
-};
-
 /// Connection event payload.
 struct connection_event {
   connection_event_kind kind{connection_event_kind::connected};
   connection_event_stage stage{connection_event_stage::unknown};
-  connection_event_source source{connection_event_source::unknown};
   std::chrono::steady_clock::time_point timestamp{};
 
   // Monotonic successful-connect generation counter (increments on each OPEN transition).
