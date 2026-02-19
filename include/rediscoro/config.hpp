@@ -71,6 +71,14 @@ struct client_limits {
   pipeline_backpressure_limits pipeline{};
 };
 
+struct socket_options {
+  /// Disable Nagle's algorithm to reduce small-command latency.
+  bool no_delay = true;
+
+  /// Enable TCP keepalive probes for long-lived idle connections.
+  bool keep_alive = true;
+};
+
 /// Client configuration.
 struct config {
   // Endpoint
@@ -98,6 +106,9 @@ struct config {
   /// Request timeout (per-request deadline).
   /// If nullopt, no timeout is applied (indefinite wait).
   std::optional<std::chrono::milliseconds> request_timeout{5000};
+
+  // Socket behavior.
+  socket_options socket{};
 
   // Resource / protocol limits.
   client_limits limits{};

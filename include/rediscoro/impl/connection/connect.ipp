@@ -5,6 +5,7 @@
 #include <rediscoro/resp3/builder.hpp>
 
 #include <iocoro/ip/resolver.hpp>
+#include <iocoro/socket_option.hpp>
 #include <iocoro/this_coro.hpp>
 #include <iocoro/with_timeout.hpp>
 
@@ -79,6 +80,28 @@ inline auto connection::do_connect() -> iocoro::awaitable<expected<void, error_i
     }
     auto connect_res = co_await std::move(connect_op);
     if (connect_res) {
+      auto no_delay_res =
+        socket_.set_option(iocoro::socket_option::tcp::no_delay{cfg_.socket.no_delay});
+      if (!no_delay_res) {
+        REDISCORO_LOG_DEBUG("tcp set_option(TCP_NODELAY) failed: index={} err_code={} err_msg={}",
+                            endpoint_index, no_delay_res.error().value(),
+                            no_delay_res.error().message());
+        connect_ec = no_delay_res.error();
+        (void)socket_.close();
+        continue;
+      }
+
+      auto keep_alive_res =
+        socket_.set_option(iocoro::socket_option::keep_alive{cfg_.socket.keep_alive});
+      if (!keep_alive_res) {
+        REDISCORO_LOG_DEBUG("tcp set_option(SO_KEEPALIVE) failed: index={} err_code={} err_msg={}",
+                            endpoint_index, keep_alive_res.error().value(),
+                            keep_alive_res.error().message());
+        connect_ec = keep_alive_res.error();
+        (void)socket_.close();
+        continue;
+      }
+
       REDISCORO_LOG_DEBUG("tcp connect attempt succeeded: index={}", endpoint_index);
       connect_ec = {};
       break;
