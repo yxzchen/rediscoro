@@ -69,6 +69,7 @@ cmake --build build-example -j
 ./build-example/examples/ping
 ```
 
-## License
+## More Docs
 
-MIT, see [`LICENSE`](LICENSE).
+- Architecture overview: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Benchmark usage and reports: [benchmark/README.md](benchmark/README.md)
